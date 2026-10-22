@@ -5,6 +5,108 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export interface OccupancyModality {
+  id: string;
+  name: string;
+  version: number;
+}
+
+export interface OccupancyModalityInput {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  name: string;
+}
+
+export interface OccupancyModalityUpdate {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  name: string;
+  /** @minimum 1 */
+  version: number;
+}
+
+export type OccupancyRecordKind = typeof OccupancyRecordKind[keyof typeof OccupancyRecordKind];
+
+
+export const OccupancyRecordKind = {
+  daily: 'daily',
+  monthly: 'monthly',
+} as const;
+
+export interface OccupancyRecord {
+  id: string;
+  kind: OccupancyRecordKind;
+  period: string;
+  month: string;
+  modalityId: string;
+  modalityName: string;
+  /**
+     * @minimum 0
+     * @maximum 100
+     */
+  percentage: number;
+  /** @nullable */
+  className: string | null;
+  /** @nullable */
+  notes: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type OccupancyRecordInputKind = typeof OccupancyRecordInputKind[keyof typeof OccupancyRecordInputKind];
+
+
+export const OccupancyRecordInputKind = {
+  daily: 'daily',
+  monthly: 'monthly',
+} as const;
+
+export interface OccupancyRecordInput {
+  kind: OccupancyRecordInputKind;
+  /**
+     * AAAA-MM-DD para diário ou AAAA-MM para mensal
+     * @minLength 7
+     * @maxLength 10
+     */
+  period: string;
+  modalityId?: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  modalityName: string;
+  /**
+     * @minimum 0
+     * @maximum 100
+     */
+  percentage: number;
+  /**
+     * @maxLength 120
+     * @nullable
+     */
+  className?: string | null;
+  /**
+     * @maxLength 1000
+     * @nullable
+     */
+  notes?: string | null;
+}
+
+export type OccupancyRecordUpdate = OccupancyRecordInput & {
+  /** @minimum 1 */
+  version: number;
+};
+
+export interface OccupancyRemovalInput {
+  /** @minimum 1 */
+  version: number;
+}
+
 export interface HealthStatus {
   status: string;
 }
@@ -644,6 +746,41 @@ export interface ApiError {
 export interface AccessStatus {
   authorized: boolean;
 }
+
+/**
+ * Erro de validação (400), acesso (401/403), ausência (404) ou conflito de duplicidade/versão (409)
+ */
+export type OccupancyFailureResponse = ApiError;
+
+export type GetOccupancyRecordsParams = {
+/**
+ * Data inicial inclusiva AAAA-MM-DD
+ */
+fromDate?: string;
+/**
+ * Data final inclusiva AAAA-MM-DD
+ */
+toDate?: string;
+/**
+ * Meses AAAA-MM separados por vírgula; exclusivo com intervalo
+ */
+months?: string;
+modalityId?: string;
+/**
+ * @maxLength 120
+ */
+className?: string;
+kind?: GetOccupancyRecordsKind;
+};
+
+export type GetOccupancyRecordsKind = typeof GetOccupancyRecordsKind[keyof typeof GetOccupancyRecordsKind];
+
+
+export const GetOccupancyRecordsKind = {
+  all: 'all',
+  daily: 'daily',
+  monthly: 'monthly',
+} as const;
 
 export type GetSalesImportOriginsParams = {
 /**

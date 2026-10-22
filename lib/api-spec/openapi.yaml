@@ -15,6 +15,112 @@ tags:
   - name: products
     description: Product names derived from sales
 paths:
+  /occupancy/modalities:
+    get:
+      operationId: getOccupancyModalities
+      tags: [occupancy]
+      responses:
+        "200":
+          description: Modalidades cadastradas
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/OccupancyModality" } }
+        default: { $ref: "#/components/responses/OccupancyFailure" }
+    post:
+      operationId: createOccupancyModality
+      tags: [occupancy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OccupancyModalityInput" }
+      responses:
+        "201":
+          description: Modalidade criada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OccupancyModality" }
+        default: { $ref: "#/components/responses/OccupancyFailure" }
+  /occupancy/modalities/{id}:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+    patch:
+      operationId: updateOccupancyModality
+      tags: [occupancy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OccupancyModalityUpdate" }
+      responses:
+        "200":
+          description: Modalidade renomeada com vínculos preservados
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OccupancyModality" }
+        default: { $ref: "#/components/responses/OccupancyFailure" }
+  /occupancy:
+    get:
+      operationId: getOccupancyRecords
+      tags: [occupancy]
+      parameters:
+        - { in: query, name: fromDate, schema: { type: string }, description: Data inicial inclusiva AAAA-MM-DD }
+        - { in: query, name: toDate, schema: { type: string }, description: Data final inclusiva AAAA-MM-DD }
+        - { in: query, name: months, schema: { type: string }, description: Meses AAAA-MM separados por vírgula; exclusivo com intervalo }
+        - { in: query, name: modalityId, schema: { type: string, format: uuid } }
+        - { in: query, name: className, schema: { type: string, maxLength: 120 } }
+        - { in: query, name: kind, schema: { type: string, enum: [all, daily, monthly] } }
+      responses:
+        "200":
+          description: Histórico persistido; consolidados em intervalos somente para meses completos
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/OccupancyRecord" } }
+        default: { $ref: "#/components/responses/OccupancyFailure" }
+    post:
+      operationId: createOccupancyRecord
+      tags: [occupancy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OccupancyRecordInput" }
+      responses:
+        "201":
+          description: Ocupação registrada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OccupancyRecord" }
+        default: { $ref: "#/components/responses/OccupancyFailure" }
+  /occupancy/{id}:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+    patch:
+      operationId: updateOccupancyRecord
+      tags: [occupancy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OccupancyRecordUpdate" }
+      responses:
+        "200":
+          description: Ocupação atualizada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OccupancyRecord" }
+        default: { $ref: "#/components/responses/OccupancyFailure" }
+    delete:
+      operationId: deleteOccupancyRecord
+      tags: [occupancy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OccupancyRemovalInput" }
+      responses:
+        "204": { description: Registro excluído do histórico ativo; auditoria preservada }
+        default: { $ref: "#/components/responses/OccupancyFailure" }
   /healthz:
     get:
       operationId: healthCheck
@@ -934,7 +1040,70 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 components:
+  responses:
+    OccupancyFailure:
+      description: Erro de validação (400), acesso (401/403), ausência (404) ou conflito de duplicidade/versão (409)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
   schemas:
+    OccupancyModality:
+      type: object
+      required: [id, name, version]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        version: { type: integer }
+    OccupancyModalityInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+    OccupancyModalityUpdate:
+      type: object
+      required: [name, version]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        version: { type: integer, minimum: 1 }
+    OccupancyRecord:
+      type: object
+      required: [id, kind, period, month, modalityId, modalityName, percentage, className, notes, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [daily, monthly] }
+        period: { type: string }
+        month: { type: string }
+        modalityId: { type: string, format: uuid }
+        modalityName: { type: string }
+        percentage: { type: number, minimum: 0, maximum: 100 }
+        className: { type: [string, "null"] }
+        notes: { type: [string, "null"] }
+        version: { type: integer }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+    OccupancyRecordInput:
+      type: object
+      required: [kind, period, modalityName, percentage]
+      properties:
+        kind: { type: string, enum: [daily, monthly] }
+        period: { type: string, minLength: 7, maxLength: 10, description: AAAA-MM-DD para diário ou AAAA-MM para mensal }
+        modalityId: { type: string, format: uuid }
+        modalityName: { type: string, minLength: 1, maxLength: 120 }
+        percentage: { type: number, minimum: 0, maximum: 100 }
+        className: { type: [string, "null"], maxLength: 120 }
+        notes: { type: [string, "null"], maxLength: 1000 }
+    OccupancyRecordUpdate:
+      allOf:
+        - { $ref: "#/components/schemas/OccupancyRecordInput" }
+        - type: object
+          required: [version]
+          properties:
+            version: { type: integer, minimum: 1 }
+    OccupancyRemovalInput:
+      type: object
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1 }
     HealthStatus:
       type: object
       properties:

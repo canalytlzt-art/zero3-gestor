@@ -8,6 +8,196 @@
 import * as zod from 'zod';
 
 
+export const GetOccupancyModalitiesResponseItem = zod.object({
+  "id": zod.string().uuid(),
+  "name": zod.string(),
+  "version": zod.number().int()
+})
+export const GetOccupancyModalitiesResponse = zod.array(GetOccupancyModalitiesResponseItem)
+
+
+export const createOccupancyModalityBodyNameMax = 120;
+
+
+
+export const CreateOccupancyModalityBody = zod.object({
+  "name": zod.string().min(1).max(createOccupancyModalityBodyNameMax)
+})
+
+export const CreateOccupancyModalityResponse = zod.object({
+  "id": zod.string().uuid(),
+  "name": zod.string(),
+  "version": zod.number().int()
+})
+
+
+export const UpdateOccupancyModalityParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+export const updateOccupancyModalityBodyNameMax = 120;
+
+
+
+
+export const UpdateOccupancyModalityBody = zod.object({
+  "name": zod.string().min(1).max(updateOccupancyModalityBodyNameMax),
+  "version": zod.number().int().min(1)
+})
+
+export const UpdateOccupancyModalityResponse = zod.object({
+  "id": zod.string().uuid(),
+  "name": zod.string(),
+  "version": zod.number().int()
+})
+
+
+export const getOccupancyRecordsQueryClassNameMax = 120;
+
+
+
+export const GetOccupancyRecordsQueryParams = zod.object({
+  "fromDate": zod.coerce.string().optional().describe('Data inicial inclusiva AAAA-MM-DD'),
+  "toDate": zod.coerce.string().optional().describe('Data final inclusiva AAAA-MM-DD'),
+  "months": zod.coerce.string().optional().describe('Meses AAAA-MM separados por vírgula; exclusivo com intervalo'),
+  "modalityId": zod.coerce.string().uuid().optional(),
+  "className": zod.coerce.string().max(getOccupancyRecordsQueryClassNameMax).optional(),
+  "kind": zod.enum(['all', 'daily', 'monthly']).optional()
+})
+
+export const getOccupancyRecordsResponsePercentageMin = 0;
+export const getOccupancyRecordsResponsePercentageMax = 100;
+
+
+
+export const GetOccupancyRecordsResponseItem = zod.object({
+  "id": zod.string().uuid(),
+  "kind": zod.enum(['daily', 'monthly']),
+  "period": zod.string(),
+  "month": zod.string(),
+  "modalityId": zod.string().uuid(),
+  "modalityName": zod.string(),
+  "percentage": zod.number().min(getOccupancyRecordsResponsePercentageMin).max(getOccupancyRecordsResponsePercentageMax),
+  "className": zod.string().nullable(),
+  "notes": zod.string().nullable(),
+  "version": zod.number().int(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+export const GetOccupancyRecordsResponse = zod.array(GetOccupancyRecordsResponseItem)
+
+
+export const createOccupancyRecordBodyPeriodMin = 7;
+export const createOccupancyRecordBodyPeriodMax = 10;
+
+export const createOccupancyRecordBodyModalityNameMax = 120;
+
+export const createOccupancyRecordBodyPercentageMin = 0;
+export const createOccupancyRecordBodyPercentageMax = 100;
+
+export const createOccupancyRecordBodyClassNameMax = 120;
+
+export const createOccupancyRecordBodyNotesMax = 1000;
+
+
+
+export const CreateOccupancyRecordBody = zod.object({
+  "kind": zod.enum(['daily', 'monthly']),
+  "period": zod.string().min(createOccupancyRecordBodyPeriodMin).max(createOccupancyRecordBodyPeriodMax).describe('AAAA-MM-DD para diário ou AAAA-MM para mensal'),
+  "modalityId": zod.string().uuid().optional(),
+  "modalityName": zod.string().min(1).max(createOccupancyRecordBodyModalityNameMax),
+  "percentage": zod.number().min(createOccupancyRecordBodyPercentageMin).max(createOccupancyRecordBodyPercentageMax),
+  "className": zod.string().max(createOccupancyRecordBodyClassNameMax).nullish(),
+  "notes": zod.string().max(createOccupancyRecordBodyNotesMax).nullish()
+})
+
+export const createOccupancyRecordResponsePercentageMin = 0;
+export const createOccupancyRecordResponsePercentageMax = 100;
+
+
+
+export const CreateOccupancyRecordResponse = zod.object({
+  "id": zod.string().uuid(),
+  "kind": zod.enum(['daily', 'monthly']),
+  "period": zod.string(),
+  "month": zod.string(),
+  "modalityId": zod.string().uuid(),
+  "modalityName": zod.string(),
+  "percentage": zod.number().min(createOccupancyRecordResponsePercentageMin).max(createOccupancyRecordResponsePercentageMax),
+  "className": zod.string().nullable(),
+  "notes": zod.string().nullable(),
+  "version": zod.number().int(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+
+
+export const UpdateOccupancyRecordParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+export const updateOccupancyRecordBodyOnePeriodMin = 7;
+export const updateOccupancyRecordBodyOnePeriodMax = 10;
+
+export const updateOccupancyRecordBodyOneModalityNameMax = 120;
+
+export const updateOccupancyRecordBodyOnePercentageMin = 0;
+export const updateOccupancyRecordBodyOnePercentageMax = 100;
+
+export const updateOccupancyRecordBodyOneClassNameMax = 120;
+
+export const updateOccupancyRecordBodyOneNotesMax = 1000;
+
+
+
+
+export const UpdateOccupancyRecordBody = zod.object({
+  "kind": zod.enum(['daily', 'monthly']),
+  "period": zod.string().min(updateOccupancyRecordBodyOnePeriodMin).max(updateOccupancyRecordBodyOnePeriodMax).describe('AAAA-MM-DD para diário ou AAAA-MM para mensal'),
+  "modalityId": zod.string().uuid().optional(),
+  "modalityName": zod.string().min(1).max(updateOccupancyRecordBodyOneModalityNameMax),
+  "percentage": zod.number().min(updateOccupancyRecordBodyOnePercentageMin).max(updateOccupancyRecordBodyOnePercentageMax),
+  "className": zod.string().max(updateOccupancyRecordBodyOneClassNameMax).nullish(),
+  "notes": zod.string().max(updateOccupancyRecordBodyOneNotesMax).nullish()
+}).and(zod.object({
+  "version": zod.number().int().min(1)
+}))
+
+export const updateOccupancyRecordResponsePercentageMin = 0;
+export const updateOccupancyRecordResponsePercentageMax = 100;
+
+
+
+export const UpdateOccupancyRecordResponse = zod.object({
+  "id": zod.string().uuid(),
+  "kind": zod.enum(['daily', 'monthly']),
+  "period": zod.string(),
+  "month": zod.string(),
+  "modalityId": zod.string().uuid(),
+  "modalityName": zod.string(),
+  "percentage": zod.number().min(updateOccupancyRecordResponsePercentageMin).max(updateOccupancyRecordResponsePercentageMax),
+  "className": zod.string().nullable(),
+  "notes": zod.string().nullable(),
+  "version": zod.number().int(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+
+
+export const DeleteOccupancyRecordParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+
+
+
+export const DeleteOccupancyRecordBody = zod.object({
+  "version": zod.number().int().min(1)
+})
+
+export const DeleteOccupancyRecordResponse = zod.void()
+
+
 /**
  * Returns server health status
  * @summary Health check

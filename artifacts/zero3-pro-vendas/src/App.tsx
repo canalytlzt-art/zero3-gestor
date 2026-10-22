@@ -23,6 +23,7 @@ import NotFound from '@/pages/not-found';
 import { Link, Redirect, Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
 import SalesManagement from '@/components/sales-management';
 import ScoreboardGoals from '@/components/scoreboard-goals';
+import OccupancyManagement from '@/components/occupancy-management';
 import { formatCents, formatMonthKey, getSaoPauloMonthKey, isCompleteCalendarMonthRange, monthKeysBetween, productNameKey } from '@/lib/sales-utils';
 
 const queryClient = new QueryClient();
@@ -513,12 +514,17 @@ function ScoreboardContent() {
 
 function Workspace() {
   const [location, setLocation] = useLocation();
-  const isScoreboard = location.endsWith('/scoreboard');
+  const tab: 'sales' | 'scoreboard' | 'occupancy' = location.endsWith('/scoreboard') ? 'scoreboard' : location.endsWith('/ocupacao') ? 'occupancy' : 'sales';
   const { user } = useUser();
   const { signOut } = useClerk();
   const name = user?.firstName || 'Equipe';
   const initial = name.slice(0, 1).toLocaleUpperCase('pt-BR');
-  const changeTab = (tab: 'sales' | 'scoreboard') => setLocation(tab === 'sales' ? '/' : '/scoreboard');
+  const tabs = [
+    { id: 'sales', label: 'Lançamentos', path: '/', testId: 'tab-lancamentos', eyebrow: 'rotina comercial' },
+    { id: 'scoreboard', label: 'Scoreboard', path: '/scoreboard', testId: 'tab-scoreboard', eyebrow: 'visão do time' },
+    { id: 'occupancy', label: 'Ocupação', path: '/ocupacao', testId: 'tab-ocupacao', eyebrow: 'aulas e modalidades' },
+  ] as const;
+  const activeTab = tabs.find((item) => item.id === tab) ?? tabs[0];
 
   return (
     <div className="app-shell">
@@ -527,8 +533,7 @@ function Workspace() {
           <div className="flex items-center gap-8">
             <Brand />
             <nav className="hidden items-center gap-1 sm:flex" aria-label="Navegação principal">
-              <button onClick={() => changeTab('sales')} className={`rounded-full px-4 py-2 text-[13px] font-semibold transition ${!isScoreboard ? 'bg-[#ece6f4] text-[#65479c]' : 'text-[#77717f] hover:bg-white'}`} aria-current={!isScoreboard ? 'page' : undefined} data-testid="tab-lancamentos">Lançamentos</button>
-              <button onClick={() => changeTab('scoreboard')} className={`rounded-full px-4 py-2 text-[13px] font-semibold transition ${isScoreboard ? 'bg-[#ece6f4] text-[#65479c]' : 'text-[#77717f] hover:bg-white'}`} aria-current={isScoreboard ? 'page' : undefined} data-testid="tab-scoreboard">Scoreboard</button>
+              {tabs.map((item) => <button key={item.id} onClick={() => setLocation(item.path)} className={`rounded-full px-4 py-2 text-[13px] font-semibold transition ${tab === item.id ? 'bg-[#ece6f4] text-[#65479c]' : 'text-[#77717f] hover:bg-white'}`} aria-current={tab === item.id ? 'page' : undefined} data-testid={item.testId}>{item.label}</button>)}
             </nav>
           </div>
           <div className="flex items-center gap-3">
@@ -537,21 +542,20 @@ function Workspace() {
             <button onClick={() => void signOut({ redirectUrl: basePath || '/' })} aria-label="Sair da conta" title="Sair da conta" className="grid h-9 w-9 place-items-center rounded-full text-[#807a88] transition hover:bg-white hover:text-[#5e4a7c]" data-testid="button-sign-out"><LogOut size={16} /></button>
           </div>
         </div>
-        <nav className="flex border-t border-[#ece8ed] px-3 py-2 sm:hidden" aria-label="Navegação principal">
-          <button onClick={() => changeTab('sales')} className={`flex-1 rounded-xl py-2.5 text-xs font-bold ${!isScoreboard ? 'bg-[#ece6f4] text-[#65479c]' : 'text-[#77717f]'}`} data-testid="tab-lancamentos-mobile">Lançamentos</button>
-          <button onClick={() => changeTab('scoreboard')} className={`flex-1 rounded-xl py-2.5 text-xs font-bold ${isScoreboard ? 'bg-[#ece6f4] text-[#65479c]' : 'text-[#77717f]'}`} data-testid="tab-scoreboard-mobile">Scoreboard</button>
+        <nav className="flex gap-1 border-t border-[#ece8ed] px-3 py-2 sm:hidden" aria-label="Navegação principal">
+          {tabs.map((item) => <button key={item.id} onClick={() => setLocation(item.path)} className={`flex-1 rounded-xl py-2.5 text-xs font-bold ${tab === item.id ? 'bg-[#ece6f4] text-[#65479c]' : 'text-[#77717f]'}`} aria-current={tab === item.id ? 'page' : undefined} data-testid={`${item.testId}-mobile`}>{item.label}</button>)}
         </nav>
       </header>
       <main className="mx-auto max-w-[1440px] px-4 pb-12 pt-8 sm:px-7 md:pt-10 lg:px-10">
         <div className="page-enter">
           <div className="mb-7 flex flex-col justify-between gap-4 md:mb-8 md:flex-row md:items-end">
             <div>
-              <p className="eyebrow text-[9px] font-bold text-[#8a8491]">zero3 pro <span className="mx-1 text-[#b2abb8]">/</span> {isScoreboard ? 'visão do time' : 'rotina comercial'}</p>
-              <h1 className="mt-2 font-[family-name:var(--app-font-serif)] text-[clamp(2.3rem,4vw,3.4rem)] font-extrabold leading-none tracking-[-.075em] text-[#2f2a3d]">{isScoreboard ? 'Scoreboard' : 'Lançamentos'}<span className="ml-2 text-[#a9d75a]">.</span></h1>
+              <p className="eyebrow text-[9px] font-bold text-[#8a8491]">zero3 pro <span className="mx-1 text-[#b2abb8]">/</span> {activeTab.eyebrow}</p>
+              <h1 className="mt-2 font-[family-name:var(--app-font-serif)] text-[clamp(2.3rem,4vw,3.4rem)] font-extrabold leading-none tracking-[-.075em] text-[#2f2a3d]">{activeTab.label}<span className="ml-2 text-[#a9d75a]">.</span></h1>
             </div>
             <div className="flex items-center gap-2 text-xs font-medium text-[#7f7987]"><CalendarDays size={15} className="text-[#8c73b4]" /> Acompanhe o ritmo do time</div>
           </div>
-          {isScoreboard ? <ScoreboardContent /> : <SalesManagement />}
+          {tab === 'scoreboard' ? <ScoreboardContent /> : tab === 'occupancy' ? <OccupancyManagement /> : <SalesManagement />}
         </div>
       </main>
     </div>
@@ -637,6 +641,7 @@ function Router() {
   return <Switch>
     <Route path="/" component={HomeRedirect} />
     <Route path="/scoreboard"><ProtectedWorkspace /></Route>
+    <Route path="/ocupacao"><ProtectedWorkspace /></Route>
     <Route path="/sign-in/*?" component={SignInPage} />
     <Route path="/sign-up/*?" component={SignUpPage} />
     <Route component={NotFound} />

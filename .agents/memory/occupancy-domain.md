@@ -20,3 +20,21 @@ A ocupação independe de vendas. O vínculo de produto/plano com modalidade dev
 **Why:** O usuário separou a classificação comercial da medição de ocupação e exigiu a preservação dos totais financeiros.
 
 **How to apply:** Reutilizar as regras da Scoreboard para gráficos financeiros, sem excluir vendas não vinculadas ou somar metas gerais e metas por produto.
+
+Dados de teste não entram na base real.
+
+**Why:** O usuário exigiu validação em ambiente isolado, preservando os registros existentes.
+
+**How to apply:** Exercitar criação, edição e exclusão em armazenamento isolado, inclusive nos testes de navegador; apagar registros de teste da lista compartilhada depois não substitui isolamento.
+
+O isolamento do navegador precisa cobrir também as rotas por ID e todos os verbos usados, não apenas a consulta de coleção.
+
+**Why:** Uma interceptação de consulta funcionou, mas um PATCH por ID escapou para a API compartilhada e retornou 404. Não houve alteração real porque o ID só existia no esquema privado.
+
+**How to apply:** Comprovar o destino das mutações antes do CRUD, falhar sem encaminhar à base compartilhada quando a ponte de teste falhar e verificar ausência dos IDs de teste na base real.
+
+Não confiar somente na limpeza assíncrona por sinal de encerramento de um servidor de teste.
+
+**Why:** Parar o processo em segundo plano encerrou o servidor sem concluir a remoção de seu esquema privado.
+
+**How to apply:** Após parar, conferir a remoção e limpar explicitamente apenas o esquema identificado e validado como exclusivo de teste.

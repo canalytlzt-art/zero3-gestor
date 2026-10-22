@@ -24,3 +24,6 @@ export * from "./sales-refunds";
 export * from "./sales-history";
 export * from "./idempotency-keys";
 export * from "./sales-import-batches";
+export * from "./occupancy-modalities";
+export * from "./occupancy-records";
+export * from "./occupancy-history";

@@ -27,11 +27,20 @@ import type {
   CreateSaleInput,
   CreateSalesRefundInput,
   GetMonthlySalesBackupParams,
+  GetOccupancyRecordsParams,
   GetSalesImportOriginsParams,
   GetSalesScoreboardParams,
   HealthStatus,
   MonthlySalesBackupInput,
   MonthlySalesBackupV2,
+  OccupancyFailureResponse,
+  OccupancyModality,
+  OccupancyModalityInput,
+  OccupancyModalityUpdate,
+  OccupancyRecord,
+  OccupancyRecordInput,
+  OccupancyRecordUpdate,
+  OccupancyRemovalInput,
   Product,
   Sale,
   SalesGoal,
@@ -78,6 +87,568 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getGetOccupancyModalitiesUrl = () => {
+
+
+
+
+  return `/api/occupancy/modalities`
+}
+
+export const getOccupancyModalities = async ( options?: Parameters<typeof customFetch>[1]): Promise<OccupancyModality[]> => {
+
+  return customFetch<OccupancyModality[]>(getGetOccupancyModalitiesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOccupancyModalitiesQueryKey = () => {
+    return [
+    `/api/occupancy/modalities`
+    ] as const;
+    }
+
+
+export const getGetOccupancyModalitiesQueryOptions = <TData = Awaited<ReturnType<typeof getOccupancyModalities>>, TError = ErrorType<OccupancyFailureResponse>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOccupancyModalities>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOccupancyModalitiesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOccupancyModalities>>> = ({ signal }) => getOccupancyModalities({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOccupancyModalities>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetOccupancyModalitiesQueryResult = NonNullable<Awaited<ReturnType<typeof getOccupancyModalities>>>
+export type GetOccupancyModalitiesQueryError = ErrorType<OccupancyFailureResponse>
+
+
+
+export function useGetOccupancyModalities<TData = Awaited<ReturnType<typeof getOccupancyModalities>>, TError = ErrorType<OccupancyFailureResponse>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOccupancyModalities>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetOccupancyModalitiesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateOccupancyModalityUrl = () => {
+
+
+
+
+  return `/api/occupancy/modalities`
+}
+
+export const createOccupancyModality = async (occupancyModalityInput: OccupancyModalityInput, options?: Parameters<typeof customFetch>[1]): Promise<OccupancyModality> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<OccupancyModality>(getCreateOccupancyModalityUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(occupancyModalityInput)
+  }
+);}
+
+
+
+
+
+export const getCreateOccupancyModalityMutationKey = () => ['createOccupancyModality'] as const;
+
+export const getCreateOccupancyModalityMutationOptions = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOccupancyModality>>, TError,CreateOccupancyModalityMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOccupancyModality>>, TError,CreateOccupancyModalityMutationVariables, TContext> => {
+
+const mutationKey = getCreateOccupancyModalityMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOccupancyModality>>, CreateOccupancyModalityMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createOccupancyModality(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOccupancyModalityMutationResult = NonNullable<Awaited<ReturnType<typeof createOccupancyModality>>>
+    export type CreateOccupancyModalityMutationBody = BodyType<OccupancyModalityInput>
+    export type CreateOccupancyModalityMutationError = ErrorType<OccupancyFailureResponse>
+    export type CreateOccupancyModalityMutationVariables = {data: BodyType<OccupancyModalityInput>}
+
+    export const useCreateOccupancyModality = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOccupancyModality>>, TError,CreateOccupancyModalityMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createOccupancyModality>>,
+        TError,
+        CreateOccupancyModalityMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOccupancyModalityMutationOptions(options));
+    }
+
+export const getUpdateOccupancyModalityUrl = (id: string,) => {
+
+
+
+
+  return `/api/occupancy/modalities/${id}`
+}
+
+export const updateOccupancyModality = async (id: string,
+    occupancyModalityUpdate: OccupancyModalityUpdate, options?: Parameters<typeof customFetch>[1]): Promise<OccupancyModality> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<OccupancyModality>(getUpdateOccupancyModalityUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(occupancyModalityUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateOccupancyModalityMutationKey = () => ['updateOccupancyModality'] as const;
+
+export const getUpdateOccupancyModalityMutationOptions = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOccupancyModality>>, TError,UpdateOccupancyModalityMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateOccupancyModality>>, TError,UpdateOccupancyModalityMutationVariables, TContext> => {
+
+const mutationKey = getUpdateOccupancyModalityMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateOccupancyModality>>, UpdateOccupancyModalityMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateOccupancyModality(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateOccupancyModalityMutationResult = NonNullable<Awaited<ReturnType<typeof updateOccupancyModality>>>
+    export type UpdateOccupancyModalityMutationBody = BodyType<OccupancyModalityUpdate>
+    export type UpdateOccupancyModalityMutationError = ErrorType<OccupancyFailureResponse>
+    export type UpdateOccupancyModalityMutationVariables = {id: string;data: BodyType<OccupancyModalityUpdate>}
+
+    export const useUpdateOccupancyModality = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOccupancyModality>>, TError,UpdateOccupancyModalityMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateOccupancyModality>>,
+        TError,
+        UpdateOccupancyModalityMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateOccupancyModalityMutationOptions(options));
+    }
+
+export const getGetOccupancyRecordsUrl = (params?: GetOccupancyRecordsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/occupancy?${stringifiedParams}` : `/api/occupancy`
+}
+
+export const getOccupancyRecords = async (params?: GetOccupancyRecordsParams, options?: Parameters<typeof customFetch>[1]): Promise<OccupancyRecord[]> => {
+
+  return customFetch<OccupancyRecord[]>(getGetOccupancyRecordsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOccupancyRecordsQueryKey = (params?: GetOccupancyRecordsParams,) => {
+    return [
+    `/api/occupancy`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetOccupancyRecordsQueryOptions = <TData = Awaited<ReturnType<typeof getOccupancyRecords>>, TError = ErrorType<OccupancyFailureResponse>>(params?: GetOccupancyRecordsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOccupancyRecords>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOccupancyRecordsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOccupancyRecords>>> = ({ signal }) => getOccupancyRecords(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOccupancyRecords>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetOccupancyRecordsQueryResult = NonNullable<Awaited<ReturnType<typeof getOccupancyRecords>>>
+export type GetOccupancyRecordsQueryError = ErrorType<OccupancyFailureResponse>
+
+
+
+export function useGetOccupancyRecords<TData = Awaited<ReturnType<typeof getOccupancyRecords>>, TError = ErrorType<OccupancyFailureResponse>>(
+ params?: GetOccupancyRecordsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOccupancyRecords>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetOccupancyRecordsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateOccupancyRecordUrl = () => {
+
+
+
+
+  return `/api/occupancy`
+}
+
+export const createOccupancyRecord = async (occupancyRecordInput: OccupancyRecordInput, options?: Parameters<typeof customFetch>[1]): Promise<OccupancyRecord> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<OccupancyRecord>(getCreateOccupancyRecordUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(occupancyRecordInput)
+  }
+);}
+
+
+
+
+
+export const getCreateOccupancyRecordMutationKey = () => ['createOccupancyRecord'] as const;
+
+export const getCreateOccupancyRecordMutationOptions = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOccupancyRecord>>, TError,CreateOccupancyRecordMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOccupancyRecord>>, TError,CreateOccupancyRecordMutationVariables, TContext> => {
+
+const mutationKey = getCreateOccupancyRecordMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOccupancyRecord>>, CreateOccupancyRecordMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createOccupancyRecord(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOccupancyRecordMutationResult = NonNullable<Awaited<ReturnType<typeof createOccupancyRecord>>>
+    export type CreateOccupancyRecordMutationBody = BodyType<OccupancyRecordInput>
+    export type CreateOccupancyRecordMutationError = ErrorType<OccupancyFailureResponse>
+    export type CreateOccupancyRecordMutationVariables = {data: BodyType<OccupancyRecordInput>}
+
+    export const useCreateOccupancyRecord = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOccupancyRecord>>, TError,CreateOccupancyRecordMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createOccupancyRecord>>,
+        TError,
+        CreateOccupancyRecordMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOccupancyRecordMutationOptions(options));
+    }
+
+export const getUpdateOccupancyRecordUrl = (id: string,) => {
+
+
+
+
+  return `/api/occupancy/${id}`
+}
+
+export const updateOccupancyRecord = async (id: string,
+    occupancyRecordUpdate: OccupancyRecordUpdate, options?: Parameters<typeof customFetch>[1]): Promise<OccupancyRecord> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<OccupancyRecord>(getUpdateOccupancyRecordUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(occupancyRecordUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateOccupancyRecordMutationKey = () => ['updateOccupancyRecord'] as const;
+
+export const getUpdateOccupancyRecordMutationOptions = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOccupancyRecord>>, TError,UpdateOccupancyRecordMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateOccupancyRecord>>, TError,UpdateOccupancyRecordMutationVariables, TContext> => {
+
+const mutationKey = getUpdateOccupancyRecordMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateOccupancyRecord>>, UpdateOccupancyRecordMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateOccupancyRecord(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateOccupancyRecordMutationResult = NonNullable<Awaited<ReturnType<typeof updateOccupancyRecord>>>
+    export type UpdateOccupancyRecordMutationBody = BodyType<OccupancyRecordUpdate>
+    export type UpdateOccupancyRecordMutationError = ErrorType<OccupancyFailureResponse>
+    export type UpdateOccupancyRecordMutationVariables = {id: string;data: BodyType<OccupancyRecordUpdate>}
+
+    export const useUpdateOccupancyRecord = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOccupancyRecord>>, TError,UpdateOccupancyRecordMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateOccupancyRecord>>,
+        TError,
+        UpdateOccupancyRecordMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateOccupancyRecordMutationOptions(options));
+    }
+
+export const getDeleteOccupancyRecordUrl = (id: string,) => {
+
+
+
+
+  return `/api/occupancy/${id}`
+}
+
+export const deleteOccupancyRecord = async (id: string,
+    occupancyRemovalInput: OccupancyRemovalInput, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<void>(getDeleteOccupancyRecordUrl(id),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(occupancyRemovalInput)
+  }
+);}
+
+
+
+
+
+export const getDeleteOccupancyRecordMutationKey = () => ['deleteOccupancyRecord'] as const;
+
+export const getDeleteOccupancyRecordMutationOptions = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteOccupancyRecord>>, TError,DeleteOccupancyRecordMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteOccupancyRecord>>, TError,DeleteOccupancyRecordMutationVariables, TContext> => {
+
+const mutationKey = getDeleteOccupancyRecordMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteOccupancyRecord>>, DeleteOccupancyRecordMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  deleteOccupancyRecord(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteOccupancyRecordMutationResult = NonNullable<Awaited<ReturnType<typeof deleteOccupancyRecord>>>
+    export type DeleteOccupancyRecordMutationBody = BodyType<OccupancyRemovalInput>
+    export type DeleteOccupancyRecordMutationError = ErrorType<OccupancyFailureResponse>
+    export type DeleteOccupancyRecordMutationVariables = {id: string;data: BodyType<OccupancyRemovalInput>}
+
+    export const useDeleteOccupancyRecord = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteOccupancyRecord>>, TError,DeleteOccupancyRecordMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteOccupancyRecord>>,
+        TError,
+        DeleteOccupancyRecordMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteOccupancyRecordMutationOptions(options));
+    }
 
 export const getHealthCheckUrl = () => {
 

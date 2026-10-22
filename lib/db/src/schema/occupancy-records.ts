@@ -1,0 +1,32 @@
+import { randomUUID } from "node:crypto";
+import { sql } from "drizzle-orm";
+import { createInsertSchema } from "drizzle-zod";
+import { check, date, index, integer, numeric, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { occupancyModalitiesTable } from "./occupancy-modalities";
+
+export const occupancyRecordsTable = pgTable("occupancy_records", {
+  id: uuid("id").primaryKey().$defaultFn(() => randomUUID()),
+  modalityId: uuid("modality_id").notNull().references(() => occupancyModalitiesTable.id, { onDelete: "restrict" }),
+  kind: text("kind").$type<"daily" | "monthly">().notNull(),
+  date: date("date", { mode: "string" }),
+  month: text("month").notNull(),
+  percentage: numeric("percentage").notNull(),
+  className: text("class_name"),
+  scopeKey: text("scope_key").notNull().default(""),
+  notes: text("notes"),
+  version: integer("version").notNull().default(1),
+  createdBy: text("created_by").notNull(),
+  updatedBy: text("updated_by").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+}, (t) => [
+  uniqueIndex("occupancy_records_scope_unique").on(t.modalityId, t.kind, t.month, sql`coalesce(${t.date}, '0001-01-01'::date)`, t.scopeKey).where(sql`${t.deletedAt} is null`),
+  index("occupancy_records_month_idx").on(t.month, t.modalityId),
+  check("occupancy_percentage_valid", sql`${t.percentage} >= 0 and ${t.percentage} <= 100 and ${t.percentage} <> 'NaN'::numeric`),
+  check("occupancy_period_valid", sql`${t.month} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$' and left(${t.month}, 4) <> '0000' and ((${t.kind} = 'daily' and ${t.date} is not null and ${t.month} = to_char(${t.date}, 'YYYY-MM')) or (${t.kind} = 'monthly' and ${t.date} is null))`),
+  check("occupancy_record_version_valid", sql`${t.version} > 0`),
+  check("occupancy_record_text_valid", sql`coalesce(length(${t.className}), 0) <= 120 and coalesce(length(${t.notes}), 0) <= 1000`),
+]);
+export const insertOccupancyRecordSchema = createInsertSchema(occupancyRecordsTable).omit({ id: true, createdAt: true, updatedAt: true });
+export type OccupancyRecordRow = typeof occupancyRecordsTable.$inferSelect;
