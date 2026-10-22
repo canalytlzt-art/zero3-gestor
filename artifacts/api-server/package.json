@@ -7,6 +7,7 @@
     "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
+    "test:integration": "tsx --test src/routes/sales.integration.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "verify-sales-backup": "tsx scripts/verify-sales-backup.ts"
   },
