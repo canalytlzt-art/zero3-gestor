@@ -19,4 +19,5 @@ export interface SalesGoalInput {
      * @maximum 9007199254740991
      */
   targetCents: number;
+  idempotencyKey: string;
 }

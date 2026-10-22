@@ -12,6 +12,8 @@ tags:
     description: Health operations
   - name: sales
     description: Private sales data
+  - name: products
+    description: Product names derived from sales
 paths:
   /healthz:
     get:
@@ -44,12 +46,110 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+  /products:
+    get:
+      operationId: getProducts
+      tags: [products]
+      summary: List products derived from persisted sales
+      responses:
+        "200":
+          description: Product catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Product"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Authenticated user is not on the authorized email list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    post:
+      operationId: createProduct
+      tags: [products]
+      summary: Create a product in the sales catalog
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProductInput"
+      responses:
+        "201":
+          description: Product created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "400":
+          description: Invalid product data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Product name already exists or idempotency conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /products/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      operationId: updateProduct
+      tags: [products]
+      summary: Update a product without changing historical sale snapshots
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProductInput"
+      responses:
+        "200":
+          description: Product updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "400":
+          description: Invalid product data or identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Product not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Product was updated by another user or name conflicts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /sales:
     get:
       operationId: getSales
       tags: [sales]
       summary: List sales for the current workspace
-      description: Returns the persisted sales records visible to the signed-in user.
+      description: Returns active persisted sales records visible to the signed-in user.
       responses:
         "200":
           description: Sales records
@@ -80,7 +180,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/SaleInput"
+                $ref: "#/components/schemas/CreateSaleInput"
       responses:
         "201":
           description: Sale created
@@ -102,6 +202,348 @@ paths:
                 $ref: "#/components/schemas/ApiError"
         "403":
           description: Authenticated user is not on the authorized email list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Idempotency key reused with different data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /sales/import:
+    post:
+      operationId: importSales
+      tags: [sales]
+      summary: Import validated sales rows as one idempotent batch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SalesImportInput"
+      responses:
+        "200":
+          description: Import batch already applied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesImportResult"
+        "201":
+          description: Import batch applied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesImportResult"
+        "400":
+          description: Invalid import payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Authenticated user is not on the authorized email list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: File content conflicts with a previously applied import
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /sales/history:
+    get:
+      operationId: getSalesHistory
+      tags: [sales]
+      summary: List active and cancelled sales for the launch history
+      responses:
+        "200":
+          description: Complete sales history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Sale"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Authenticated user is not on the authorized email list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /sales/refund-candidates:
+    get:
+      operationId: getSalesRefundCandidates
+      tags: [sales]
+      summary: List active sales with their available refund balances
+      responses:
+        "200":
+          description: Sales that can receive refunds and their current balances
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SalesRefundCandidate"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Authenticated user is not on the authorized email list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /sales/refunds:
+    get:
+      operationId: getSalesRefunds
+      tags: [sales]
+      summary: List active and voided refunds with their original sale details
+      responses:
+        "200":
+          description: Refund movement history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SalesRefundRecord"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Authenticated user is not on the authorized email list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /sales/{id}/refunds:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: createSalesRefund
+      tags: [sales]
+      summary: Create an idempotent refund within the original sale balance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSalesRefundInput"
+      responses:
+        "200":
+          description: Previously created refund returned for an idempotent retry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesRefund"
+        "201":
+          description: Refund created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesRefund"
+        "400":
+          description: Invalid refund data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Authenticated user is not on the authorized email list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Sale not found or not active
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Sale balance or idempotency key conflicts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /sales/refunds/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      operationId: updateSalesRefund
+      tags: [sales]
+      summary: Correct an active refund with version and balance validation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSalesRefundInput"
+      responses:
+        "200":
+          description: Refund corrected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesRefund"
+        "400":
+          description: Invalid refund data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Authenticated user is not on the authorized email list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Refund not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Refund changed or corrected data exceeds the sale balance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /sales/refunds/{id}/void:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: voidSalesRefund
+      tags: [sales]
+      summary: Void a refund with a reason while preserving its history
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VoidSalesRefundInput"
+      responses:
+        "200":
+          description: Refund voided
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesRefund"
+        "400":
+          description: Invalid void reason or identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Authenticated user is not on the authorized email list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Refund not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Refund changed or is no longer active
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /sales/refunds/{id}/history:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getSalesRefundHistory
+      tags: [sales]
+      summary: Read the audit history of a refund
+      responses:
+        "200":
+          description: Refund audit history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SalesHistoryEntry"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Authenticated user is not on the authorized email list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Refund not found
           content:
             application/json:
               schema:
@@ -167,6 +609,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Idempotency key reused with different data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /sales/restore:
     post:
       operationId: restoreMonthlySalesBackup
@@ -220,7 +668,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/SaleInput"
+              $ref: "#/components/schemas/UpdateSaleInput"
       responses:
         "200":
           description: Sale updated
@@ -252,31 +700,76 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
-    delete:
-      operationId: deleteSale
+        "409":
+          description: Sale changed since it was loaded or idempotency key conflicts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /sales/{id}/cancel:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: cancelSale
       tags: [sales]
-      summary: Delete a sale
+      summary: Cancel a sale with a required reason
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelSaleInput"
       responses:
-        "204":
-          description: Sale deleted
+        "200":
+          description: Sale cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Sale"
         "400":
-          description: Invalid sale identifier
+          description: Invalid cancellation data or identifier
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
-        "401":
-          description: Authentication required
+        "404":
+          description: Sale not found
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
-        "403":
-          description: Authenticated user is not on the authorized email list
+        "409":
+          description: Sale changed or has active refunds
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+  /sales/{id}/history:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getSaleHistory
+      tags: [sales]
+      summary: Read the audit history of a sale
+      responses:
+        "200":
+          description: Audit history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SalesHistoryEntry"
         "404":
           description: Sale not found
           content:
@@ -297,6 +790,10 @@ components:
       properties:
         id:
           type: string
+          format: uuid
+        productId:
+          type: string
+          format: uuid
         saleDate:
           type: string
         productName:
@@ -309,18 +806,34 @@ components:
           type: integer
         notes:
           type: ["string", "null"]
+        status:
+          type: string
+          enum: [active, cancelled]
+        cancellationReason:
+          type: ["string", "null"]
+        version:
+          type: integer
+          minimum: 1
         createdAt:
+          type: string
+          format: date-time
+        updatedAt:
           type: string
           format: date-time
       required:
         - id
+        - productId
         - saleDate
         - productName
         - quantity
         - unitAmountCents
         - totalCents
         - notes
+        - status
+        - cancellationReason
+        - version
         - createdAt
+        - updatedAt
     SaleInput:
       type: object
       properties:
@@ -348,6 +861,30 @@ components:
         - quantity
         - unitAmountCents
         - notes
+    CreateSaleInput:
+      allOf:
+        - $ref: "#/components/schemas/SaleInput"
+        - type: object
+          properties:
+            idempotencyKey:
+              type: string
+              format: uuid
+          required:
+            - idempotencyKey
+    UpdateSaleInput:
+      allOf:
+        - $ref: "#/components/schemas/SaleInput"
+        - type: object
+          properties:
+            idempotencyKey:
+              type: string
+              format: uuid
+            expectedVersion:
+              type: integer
+              minimum: 1
+          required:
+            - idempotencyKey
+            - expectedVersion
     SalesGoal:
       type: object
       properties:
@@ -359,6 +896,9 @@ components:
           pattern: '^\d{4}-(0[1-9]|1[0-2])$'
         productName:
           type: ["string", "null"]
+        productId:
+          type: ["string", "null"]
+          format: uuid
         targetCents:
           type: integer
           minimum: 1
@@ -366,12 +906,17 @@ components:
         updatedAt:
           type: string
           format: date-time
+        version:
+          type: integer
+          minimum: 1
       required:
         - id
         - month
         - productName
+        - productId
         - targetCents
         - updatedAt
+        - version
     SalesGoalInput:
       type: object
       properties:
@@ -385,10 +930,339 @@ components:
           type: integer
           minimum: 1
           maximum: 9007199254740991
+        idempotencyKey:
+          type: string
+          format: uuid
       required:
         - month
         - productName
         - targetCents
+        - idempotencyKey
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        normalizedName:
+          type: string
+        suggestedPriceCents:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        isActive:
+          type: boolean
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - normalizedName
+        - suggestedPriceCents
+        - isActive
+        - version
+        - createdAt
+        - updatedAt
+    ProductInput:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        suggestedPriceCents:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        isActive:
+          type: boolean
+      required: [name, suggestedPriceCents, isActive]
+    CreateProductInput:
+      allOf:
+        - $ref: "#/components/schemas/ProductInput"
+        - type: object
+          properties:
+            idempotencyKey:
+              type: string
+              format: uuid
+          required: [idempotencyKey]
+    UpdateProductInput:
+      allOf:
+        - $ref: "#/components/schemas/ProductInput"
+        - type: object
+          properties:
+            idempotencyKey:
+              type: string
+              format: uuid
+            expectedVersion:
+              type: integer
+              minimum: 1
+          required: [idempotencyKey, expectedVersion]
+    CancelSaleInput:
+      type: object
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+        expectedVersion:
+          type: integer
+          minimum: 1
+        idempotencyKey:
+          type: string
+          format: uuid
+      required: [reason, expectedVersion, idempotencyKey]
+    SalesHistoryEntry:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        entityType:
+          type: string
+        entityId:
+          type: string
+          format: uuid
+        operation:
+          type: string
+        actorId:
+          type: string
+        beforeData:
+          type: ["object", "null"]
+          additionalProperties: true
+        afterData:
+          type: ["object", "null"]
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, entityType, entityId, operation, actorId, beforeData, afterData, createdAt]
+    SalesImportRow:
+      type: object
+      properties:
+        saleDate:
+          type: string
+          format: date
+        productName:
+          type: string
+          minLength: 1
+          maxLength: 120
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+        unitAmountCents:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        notes:
+          type: ["string", "null"]
+          maxLength: 1000
+        sourceRow:
+          type: integer
+          minimum: 1
+      required: [saleDate, productName, quantity, unitAmountCents, notes, sourceRow]
+    SalesImportInput:
+      type: object
+      properties:
+        fileHash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        filename:
+          type: string
+          minLength: 1
+          maxLength: 255
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/SalesImportRow"
+      required: [fileHash, filename, rows]
+    SalesImportResult:
+      type: object
+      properties:
+        batchId:
+          type: string
+          format: uuid
+        fileName:
+          type: string
+        replayed:
+          type: boolean
+        importedCount:
+          type: integer
+          minimum: 0
+        sales:
+          type: array
+          items:
+            $ref: "#/components/schemas/Sale"
+      required: [batchId, fileName, replayed, importedCount, sales]
+    SalesRefund:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        saleId:
+          type: string
+          format: uuid
+        refundDate:
+          type: string
+          format: date
+        amountCents:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        reason:
+          type: string
+        status:
+          type: string
+          enum: [active, voided]
+        voidReason:
+          type: ["string", "null"]
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - saleId
+        - refundDate
+        - amountCents
+        - reason
+        - status
+        - voidReason
+        - version
+        - createdAt
+        - updatedAt
+    SalesRefundCandidate:
+      type: object
+      properties:
+        saleId:
+          type: string
+          format: uuid
+        saleDate:
+          type: string
+          format: date
+        productId:
+          type: string
+          format: uuid
+        productName:
+          type: string
+        quantity:
+          type: integer
+          minimum: 1
+        totalCents:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        refundedCents:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        remainingCents:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        version:
+          type: integer
+          minimum: 1
+      required: [saleId, saleDate, productId, productName, quantity, totalCents, refundedCents, remainingCents, version]
+    SalesRefundRecord:
+      allOf:
+        - $ref: "#/components/schemas/SalesRefund"
+        - type: object
+          properties:
+            saleDate:
+              type: string
+              format: date
+            productId:
+              type: string
+              format: uuid
+            productName:
+              type: string
+            quantity:
+              type: integer
+              minimum: 1
+            unitAmountCents:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            totalCents:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            saleStatus:
+              type: string
+              enum: [active, cancelled]
+          required: [saleDate, productId, productName, quantity, unitAmountCents, totalCents, saleStatus]
+    CreateSalesRefundInput:
+      type: object
+      properties:
+        refundDate:
+          type: string
+          format: date
+        amountCents:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+        idempotencyKey:
+          type: string
+          format: uuid
+      required: [refundDate, amountCents, reason, idempotencyKey]
+    UpdateSalesRefundInput:
+      type: object
+      properties:
+        refundDate:
+          type: string
+          format: date
+        amountCents:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+        expectedVersion:
+          type: integer
+          minimum: 1
+        idempotencyKey:
+          type: string
+          format: uuid
+      required: [refundDate, amountCents, reason, expectedVersion, idempotencyKey]
+    VoidSalesRefundInput:
+      type: object
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+        expectedVersion:
+          type: integer
+          minimum: 1
+        idempotencyKey:
+          type: string
+          format: uuid
+      required: [reason, expectedVersion, idempotencyKey]
     SalesBackupRecord:
       type: object
       properties:

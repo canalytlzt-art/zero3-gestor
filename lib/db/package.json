@@ -9,7 +9,9 @@
   },
   "scripts": {
     "push": "drizzle-kit push --config ./drizzle.config.ts",
-    "push-force": "drizzle-kit push --force --config ./drizzle.config.ts"
+    "push-force": "drizzle-kit push --force --config ./drizzle.config.ts",
+    "backfill-products": "node ./scripts/backfill-legacy-products.mjs",
+    "verify-sales-schema": "node ./scripts/verify-sales-schema.mjs"
   },
   "dependencies": {
     "drizzle-orm": "catalog:",

@@ -12,10 +12,14 @@ export interface SalesGoal {
   month: string;
   /** @nullable */
   productName: string | null;
+  /** @nullable */
+  productId: string | null;
   /**
      * @minimum 1
      * @maximum 9007199254740991
      */
   targetCents: number;
   updatedAt: Date;
+  /** @minimum 1 */
+  version: number;
 }

@@ -26,18 +26,126 @@ export const GetAccessStatusResponse = zod.object({
 
 
 /**
- * Returns the persisted sales records visible to the signed-in user.
+ * @summary List products derived from persisted sales
+ */
+export const getProductsResponseSuggestedPriceCentsMin = 0;
+export const getProductsResponseSuggestedPriceCentsMax = 9007199254740991;
+
+
+
+
+export const GetProductsResponseItem = zod.object({
+  "id": zod.string().uuid(),
+  "name": zod.string(),
+  "normalizedName": zod.string(),
+  "suggestedPriceCents": zod.number().int().min(getProductsResponseSuggestedPriceCentsMin).max(getProductsResponseSuggestedPriceCentsMax),
+  "isActive": zod.boolean(),
+  "version": zod.number().int().min(1),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+export const GetProductsResponse = zod.array(GetProductsResponseItem)
+
+
+/**
+ * @summary Create a product in the sales catalog
+ */
+export const createProductBodyOneNameMax = 120;
+
+export const createProductBodyOneSuggestedPriceCentsMin = 0;
+export const createProductBodyOneSuggestedPriceCentsMax = 9007199254740991;
+
+
+
+export const CreateProductBody = zod.object({
+  "name": zod.string().min(1).max(createProductBodyOneNameMax),
+  "suggestedPriceCents": zod.number().int().min(createProductBodyOneSuggestedPriceCentsMin).max(createProductBodyOneSuggestedPriceCentsMax),
+  "isActive": zod.boolean()
+}).and(zod.object({
+  "idempotencyKey": zod.string().uuid()
+}))
+
+export const createProductResponseSuggestedPriceCentsMin = 0;
+export const createProductResponseSuggestedPriceCentsMax = 9007199254740991;
+
+
+
+
+export const CreateProductResponse = zod.object({
+  "id": zod.string().uuid(),
+  "name": zod.string(),
+  "normalizedName": zod.string(),
+  "suggestedPriceCents": zod.number().int().min(createProductResponseSuggestedPriceCentsMin).max(createProductResponseSuggestedPriceCentsMax),
+  "isActive": zod.boolean(),
+  "version": zod.number().int().min(1),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Update a product without changing historical sale snapshots
+ */
+export const UpdateProductParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+export const updateProductBodyOneNameMax = 120;
+
+export const updateProductBodyOneSuggestedPriceCentsMin = 0;
+export const updateProductBodyOneSuggestedPriceCentsMax = 9007199254740991;
+
+
+
+
+export const UpdateProductBody = zod.object({
+  "name": zod.string().min(1).max(updateProductBodyOneNameMax),
+  "suggestedPriceCents": zod.number().int().min(updateProductBodyOneSuggestedPriceCentsMin).max(updateProductBodyOneSuggestedPriceCentsMax),
+  "isActive": zod.boolean()
+}).and(zod.object({
+  "idempotencyKey": zod.string().uuid(),
+  "expectedVersion": zod.number().int().min(1)
+}))
+
+export const updateProductResponseSuggestedPriceCentsMin = 0;
+export const updateProductResponseSuggestedPriceCentsMax = 9007199254740991;
+
+
+
+
+export const UpdateProductResponse = zod.object({
+  "id": zod.string().uuid(),
+  "name": zod.string(),
+  "normalizedName": zod.string(),
+  "suggestedPriceCents": zod.number().int().min(updateProductResponseSuggestedPriceCentsMin).max(updateProductResponseSuggestedPriceCentsMax),
+  "isActive": zod.boolean(),
+  "version": zod.number().int().min(1),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * Returns active persisted sales records visible to the signed-in user.
  * @summary List sales for the current workspace
  */
+
+
+
 export const GetSalesResponseItem = zod.object({
-  "id": zod.string(),
+  "id": zod.string().uuid(),
+  "productId": zod.string().uuid(),
   "saleDate": zod.string(),
   "productName": zod.string(),
   "quantity": zod.number().int(),
   "unitAmountCents": zod.number().int(),
   "totalCents": zod.number().int(),
   "notes": zod.string().nullable(),
-  "createdAt": zod.coerce.date()
+  "status": zod.enum(['active', 'cancelled']),
+  "cancellationReason": zod.string().nullable(),
+  "version": zod.number().int().min(1),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
 })
 export const GetSalesResponse = zod.array(GetSalesResponseItem)
 
@@ -45,35 +153,335 @@ export const GetSalesResponse = zod.array(GetSalesResponseItem)
 /**
  * @summary Record a sale
  */
-export const createSaleBodyProductNameMax = 120;
+export const createSaleBodyOneProductNameMax = 120;
 
-export const createSaleBodyQuantityMax = 2147483647;
+export const createSaleBodyOneQuantityMax = 2147483647;
 
-export const createSaleBodyUnitAmountCentsMin = 0;
-export const createSaleBodyUnitAmountCentsMax = 9007199254740991;
+export const createSaleBodyOneUnitAmountCentsMin = 0;
+export const createSaleBodyOneUnitAmountCentsMax = 9007199254740991;
 
-export const createSaleBodyNotesMax = 1000;
+export const createSaleBodyOneNotesMax = 1000;
 
 
 
 export const CreateSaleBody = zod.object({
   "saleDate": zod.coerce.date(),
-  "productName": zod.string().min(1).max(createSaleBodyProductNameMax),
-  "quantity": zod.number().int().min(1).max(createSaleBodyQuantityMax),
-  "unitAmountCents": zod.number().int().min(createSaleBodyUnitAmountCentsMin).max(createSaleBodyUnitAmountCentsMax),
-  "notes": zod.string().max(createSaleBodyNotesMax).nullable()
-})
+  "productName": zod.string().min(1).max(createSaleBodyOneProductNameMax),
+  "quantity": zod.number().int().min(1).max(createSaleBodyOneQuantityMax),
+  "unitAmountCents": zod.number().int().min(createSaleBodyOneUnitAmountCentsMin).max(createSaleBodyOneUnitAmountCentsMax),
+  "notes": zod.string().max(createSaleBodyOneNotesMax).nullable()
+}).and(zod.object({
+  "idempotencyKey": zod.string().uuid()
+}))
+
+
+
 
 export const CreateSaleResponse = zod.object({
-  "id": zod.string(),
+  "id": zod.string().uuid(),
+  "productId": zod.string().uuid(),
   "saleDate": zod.string(),
   "productName": zod.string(),
   "quantity": zod.number().int(),
   "unitAmountCents": zod.number().int(),
   "totalCents": zod.number().int(),
   "notes": zod.string().nullable(),
+  "status": zod.enum(['active', 'cancelled']),
+  "cancellationReason": zod.string().nullable(),
+  "version": zod.number().int().min(1),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Import validated sales rows as one idempotent batch
+ */
+export const importSalesBodyFileHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const importSalesBodyFilenameMax = 255;
+
+export const importSalesBodyRowsItemProductNameMax = 120;
+
+export const importSalesBodyRowsItemQuantityMax = 2147483647;
+
+export const importSalesBodyRowsItemUnitAmountCentsMin = 0;
+export const importSalesBodyRowsItemUnitAmountCentsMax = 9007199254740991;
+
+export const importSalesBodyRowsItemNotesMax = 1000;
+
+
+export const importSalesBodyRowsMax = 500;
+
+
+
+export const ImportSalesBody = zod.object({
+  "fileHash": zod.string().regex(importSalesBodyFileHashRegExp),
+  "filename": zod.string().min(1).max(importSalesBodyFilenameMax),
+  "rows": zod.array(zod.object({
+  "saleDate": zod.coerce.date(),
+  "productName": zod.string().min(1).max(importSalesBodyRowsItemProductNameMax),
+  "quantity": zod.number().int().min(1).max(importSalesBodyRowsItemQuantityMax),
+  "unitAmountCents": zod.number().int().min(importSalesBodyRowsItemUnitAmountCentsMin).max(importSalesBodyRowsItemUnitAmountCentsMax),
+  "notes": zod.string().max(importSalesBodyRowsItemNotesMax).nullable(),
+  "sourceRow": zod.number().int().min(1)
+})).min(1).max(importSalesBodyRowsMax)
+})
+
+export const importSalesResponseImportedCountMin = 0;
+
+
+
+
+export const ImportSalesResponse = zod.object({
+  "batchId": zod.string().uuid(),
+  "fileName": zod.string(),
+  "replayed": zod.boolean(),
+  "importedCount": zod.number().int().min(importSalesResponseImportedCountMin),
+  "sales": zod.array(zod.object({
+  "id": zod.string().uuid(),
+  "productId": zod.string().uuid(),
+  "saleDate": zod.string(),
+  "productName": zod.string(),
+  "quantity": zod.number().int(),
+  "unitAmountCents": zod.number().int(),
+  "totalCents": zod.number().int(),
+  "notes": zod.string().nullable(),
+  "status": zod.enum(['active', 'cancelled']),
+  "cancellationReason": zod.string().nullable(),
+  "version": zod.number().int().min(1),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary List active and cancelled sales for the launch history
+ */
+
+
+
+export const GetSalesHistoryResponseItem = zod.object({
+  "id": zod.string().uuid(),
+  "productId": zod.string().uuid(),
+  "saleDate": zod.string(),
+  "productName": zod.string(),
+  "quantity": zod.number().int(),
+  "unitAmountCents": zod.number().int(),
+  "totalCents": zod.number().int(),
+  "notes": zod.string().nullable(),
+  "status": zod.enum(['active', 'cancelled']),
+  "cancellationReason": zod.string().nullable(),
+  "version": zod.number().int().min(1),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+export const GetSalesHistoryResponse = zod.array(GetSalesHistoryResponseItem)
+
+
+/**
+ * @summary List active sales with their available refund balances
+ */
+
+export const getSalesRefundCandidatesResponseTotalCentsMin = 0;
+export const getSalesRefundCandidatesResponseTotalCentsMax = 9007199254740991;
+
+export const getSalesRefundCandidatesResponseRefundedCentsMin = 0;
+export const getSalesRefundCandidatesResponseRefundedCentsMax = 9007199254740991;
+
+export const getSalesRefundCandidatesResponseRemainingCentsMin = 0;
+export const getSalesRefundCandidatesResponseRemainingCentsMax = 9007199254740991;
+
+
+
+
+export const GetSalesRefundCandidatesResponseItem = zod.object({
+  "saleId": zod.string().uuid(),
+  "saleDate": zod.coerce.date(),
+  "productId": zod.string().uuid(),
+  "productName": zod.string(),
+  "quantity": zod.number().int().min(1),
+  "totalCents": zod.number().int().min(getSalesRefundCandidatesResponseTotalCentsMin).max(getSalesRefundCandidatesResponseTotalCentsMax),
+  "refundedCents": zod.number().int().min(getSalesRefundCandidatesResponseRefundedCentsMin).max(getSalesRefundCandidatesResponseRefundedCentsMax),
+  "remainingCents": zod.number().int().min(getSalesRefundCandidatesResponseRemainingCentsMin).max(getSalesRefundCandidatesResponseRemainingCentsMax),
+  "version": zod.number().int().min(1)
+})
+export const GetSalesRefundCandidatesResponse = zod.array(GetSalesRefundCandidatesResponseItem)
+
+
+/**
+ * @summary List active and voided refunds with their original sale details
+ */
+export const getSalesRefundsResponseOneAmountCentsMax = 9007199254740991;
+
+
+
+export const getSalesRefundsResponseTwoUnitAmountCentsMin = 0;
+export const getSalesRefundsResponseTwoUnitAmountCentsMax = 9007199254740991;
+
+export const getSalesRefundsResponseTwoTotalCentsMin = 0;
+export const getSalesRefundsResponseTwoTotalCentsMax = 9007199254740991;
+
+
+
+export const GetSalesRefundsResponseItem = zod.object({
+  "id": zod.string().uuid(),
+  "saleId": zod.string().uuid(),
+  "refundDate": zod.coerce.date(),
+  "amountCents": zod.number().int().min(1).max(getSalesRefundsResponseOneAmountCentsMax),
+  "reason": zod.string(),
+  "status": zod.enum(['active', 'voided']),
+  "voidReason": zod.string().nullable(),
+  "version": zod.number().int().min(1),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}).and(zod.object({
+  "saleDate": zod.coerce.date(),
+  "productId": zod.string().uuid(),
+  "productName": zod.string(),
+  "quantity": zod.number().int().min(1),
+  "unitAmountCents": zod.number().int().min(getSalesRefundsResponseTwoUnitAmountCentsMin).max(getSalesRefundsResponseTwoUnitAmountCentsMax),
+  "totalCents": zod.number().int().min(getSalesRefundsResponseTwoTotalCentsMin).max(getSalesRefundsResponseTwoTotalCentsMax),
+  "saleStatus": zod.enum(['active', 'cancelled'])
+}))
+export const GetSalesRefundsResponse = zod.array(GetSalesRefundsResponseItem)
+
+
+/**
+ * @summary Create an idempotent refund within the original sale balance
+ */
+export const CreateSalesRefundParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+export const createSalesRefundBodyAmountCentsMax = 9007199254740991;
+
+export const createSalesRefundBodyReasonMax = 500;
+
+
+
+export const CreateSalesRefundBody = zod.object({
+  "refundDate": zod.coerce.date(),
+  "amountCents": zod.number().int().min(1).max(createSalesRefundBodyAmountCentsMax),
+  "reason": zod.string().min(1).max(createSalesRefundBodyReasonMax),
+  "idempotencyKey": zod.string().uuid()
+})
+
+export const createSalesRefundResponseAmountCentsMax = 9007199254740991;
+
+
+
+
+export const CreateSalesRefundResponse = zod.object({
+  "id": zod.string().uuid(),
+  "saleId": zod.string().uuid(),
+  "refundDate": zod.coerce.date(),
+  "amountCents": zod.number().int().min(1).max(createSalesRefundResponseAmountCentsMax),
+  "reason": zod.string(),
+  "status": zod.enum(['active', 'voided']),
+  "voidReason": zod.string().nullable(),
+  "version": zod.number().int().min(1),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Correct an active refund with version and balance validation
+ */
+export const UpdateSalesRefundParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+export const updateSalesRefundBodyAmountCentsMax = 9007199254740991;
+
+export const updateSalesRefundBodyReasonMax = 500;
+
+
+
+
+export const UpdateSalesRefundBody = zod.object({
+  "refundDate": zod.coerce.date(),
+  "amountCents": zod.number().int().min(1).max(updateSalesRefundBodyAmountCentsMax),
+  "reason": zod.string().min(1).max(updateSalesRefundBodyReasonMax),
+  "expectedVersion": zod.number().int().min(1),
+  "idempotencyKey": zod.string().uuid()
+})
+
+export const updateSalesRefundResponseAmountCentsMax = 9007199254740991;
+
+
+
+
+export const UpdateSalesRefundResponse = zod.object({
+  "id": zod.string().uuid(),
+  "saleId": zod.string().uuid(),
+  "refundDate": zod.coerce.date(),
+  "amountCents": zod.number().int().min(1).max(updateSalesRefundResponseAmountCentsMax),
+  "reason": zod.string(),
+  "status": zod.enum(['active', 'voided']),
+  "voidReason": zod.string().nullable(),
+  "version": zod.number().int().min(1),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Void a refund with a reason while preserving its history
+ */
+export const VoidSalesRefundParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+export const voidSalesRefundBodyReasonMax = 500;
+
+
+
+
+export const VoidSalesRefundBody = zod.object({
+  "reason": zod.string().min(1).max(voidSalesRefundBodyReasonMax),
+  "expectedVersion": zod.number().int().min(1),
+  "idempotencyKey": zod.string().uuid()
+})
+
+export const voidSalesRefundResponseAmountCentsMax = 9007199254740991;
+
+
+
+
+export const VoidSalesRefundResponse = zod.object({
+  "id": zod.string().uuid(),
+  "saleId": zod.string().uuid(),
+  "refundDate": zod.coerce.date(),
+  "amountCents": zod.number().int().min(1).max(voidSalesRefundResponseAmountCentsMax),
+  "reason": zod.string(),
+  "status": zod.enum(['active', 'voided']),
+  "voidReason": zod.string().nullable(),
+  "version": zod.number().int().min(1),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Read the audit history of a refund
+ */
+export const GetSalesRefundHistoryParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+export const GetSalesRefundHistoryResponseItem = zod.object({
+  "id": zod.string().uuid(),
+  "entityType": zod.string(),
+  "entityId": zod.string().uuid(),
+  "operation": zod.string(),
+  "actorId": zod.string(),
+  "beforeData": zod.record(zod.string(), zod.unknown()).nullable(),
+  "afterData": zod.record(zod.string(), zod.unknown()).nullable(),
   "createdAt": zod.coerce.date()
 })
+export const GetSalesRefundHistoryResponse = zod.array(GetSalesRefundHistoryResponseItem)
 
 
 /**
@@ -84,12 +492,15 @@ export const getSalesGoalsResponseTargetCentsMax = 9007199254740991;
 
 
 
+
 export const GetSalesGoalsResponseItem = zod.object({
   "id": zod.string().uuid(),
   "month": zod.string().regex(getSalesGoalsResponseMonthRegExp),
   "productName": zod.string().nullable(),
+  "productId": zod.string().uuid().nullable(),
   "targetCents": zod.number().int().min(1).max(getSalesGoalsResponseTargetCentsMax),
-  "updatedAt": zod.coerce.date()
+  "updatedAt": zod.coerce.date(),
+  "version": zod.number().int().min(1)
 })
 export const GetSalesGoalsResponse = zod.array(GetSalesGoalsResponseItem)
 
@@ -107,7 +518,8 @@ export const upsertSalesGoalBodyTargetCentsMax = 9007199254740991;
 export const UpsertSalesGoalBody = zod.object({
   "month": zod.string().regex(upsertSalesGoalBodyMonthRegExp),
   "productName": zod.string().max(upsertSalesGoalBodyProductNameMax).nullable(),
-  "targetCents": zod.number().int().min(1).max(upsertSalesGoalBodyTargetCentsMax)
+  "targetCents": zod.number().int().min(1).max(upsertSalesGoalBodyTargetCentsMax),
+  "idempotencyKey": zod.string().uuid()
 })
 
 export const upsertSalesGoalResponseMonthRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
@@ -115,12 +527,15 @@ export const upsertSalesGoalResponseTargetCentsMax = 9007199254740991;
 
 
 
+
 export const UpsertSalesGoalResponse = zod.object({
   "id": zod.string().uuid(),
   "month": zod.string().regex(upsertSalesGoalResponseMonthRegExp),
   "productName": zod.string().nullable(),
+  "productId": zod.string().uuid().nullable(),
   "targetCents": zod.number().int().min(1).max(upsertSalesGoalResponseTargetCentsMax),
-  "updatedAt": zod.coerce.date()
+  "updatedAt": zod.coerce.date(),
+  "version": zod.number().int().min(1)
 })
 
 
@@ -207,44 +622,104 @@ export const UpdateSaleParams = zod.object({
   "id": zod.coerce.string().uuid()
 })
 
-export const updateSaleBodyProductNameMax = 120;
+export const updateSaleBodyOneProductNameMax = 120;
 
-export const updateSaleBodyQuantityMax = 2147483647;
+export const updateSaleBodyOneQuantityMax = 2147483647;
 
-export const updateSaleBodyUnitAmountCentsMin = 0;
-export const updateSaleBodyUnitAmountCentsMax = 9007199254740991;
+export const updateSaleBodyOneUnitAmountCentsMin = 0;
+export const updateSaleBodyOneUnitAmountCentsMax = 9007199254740991;
 
-export const updateSaleBodyNotesMax = 1000;
+export const updateSaleBodyOneNotesMax = 1000;
+
 
 
 
 export const UpdateSaleBody = zod.object({
   "saleDate": zod.coerce.date(),
-  "productName": zod.string().min(1).max(updateSaleBodyProductNameMax),
-  "quantity": zod.number().int().min(1).max(updateSaleBodyQuantityMax),
-  "unitAmountCents": zod.number().int().min(updateSaleBodyUnitAmountCentsMin).max(updateSaleBodyUnitAmountCentsMax),
-  "notes": zod.string().max(updateSaleBodyNotesMax).nullable()
-})
+  "productName": zod.string().min(1).max(updateSaleBodyOneProductNameMax),
+  "quantity": zod.number().int().min(1).max(updateSaleBodyOneQuantityMax),
+  "unitAmountCents": zod.number().int().min(updateSaleBodyOneUnitAmountCentsMin).max(updateSaleBodyOneUnitAmountCentsMax),
+  "notes": zod.string().max(updateSaleBodyOneNotesMax).nullable()
+}).and(zod.object({
+  "idempotencyKey": zod.string().uuid(),
+  "expectedVersion": zod.number().int().min(1)
+}))
+
+
+
 
 export const UpdateSaleResponse = zod.object({
-  "id": zod.string(),
+  "id": zod.string().uuid(),
+  "productId": zod.string().uuid(),
   "saleDate": zod.string(),
   "productName": zod.string(),
   "quantity": zod.number().int(),
   "unitAmountCents": zod.number().int(),
   "totalCents": zod.number().int(),
   "notes": zod.string().nullable(),
-  "createdAt": zod.coerce.date()
+  "status": zod.enum(['active', 'cancelled']),
+  "cancellationReason": zod.string().nullable(),
+  "version": zod.number().int().min(1),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
 })
 
 
 /**
- * @summary Delete a sale
+ * @summary Cancel a sale with a required reason
  */
-export const DeleteSaleParams = zod.object({
+export const CancelSaleParams = zod.object({
   "id": zod.coerce.string().uuid()
 })
 
-export const DeleteSaleResponse = zod.void()
+export const cancelSaleBodyReasonMax = 500;
+
+
+
+
+export const CancelSaleBody = zod.object({
+  "reason": zod.string().min(1).max(cancelSaleBodyReasonMax),
+  "expectedVersion": zod.number().int().min(1),
+  "idempotencyKey": zod.string().uuid()
+})
+
+
+
+
+export const CancelSaleResponse = zod.object({
+  "id": zod.string().uuid(),
+  "productId": zod.string().uuid(),
+  "saleDate": zod.string(),
+  "productName": zod.string(),
+  "quantity": zod.number().int(),
+  "unitAmountCents": zod.number().int(),
+  "totalCents": zod.number().int(),
+  "notes": zod.string().nullable(),
+  "status": zod.enum(['active', 'cancelled']),
+  "cancellationReason": zod.string().nullable(),
+  "version": zod.number().int().min(1),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Read the audit history of a sale
+ */
+export const GetSaleHistoryParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+export const GetSaleHistoryResponseItem = zod.object({
+  "id": zod.string().uuid(),
+  "entityType": zod.string(),
+  "entityId": zod.string().uuid(),
+  "operation": zod.string(),
+  "actorId": zod.string(),
+  "beforeData": zod.record(zod.string(), zod.unknown()).nullable(),
+  "afterData": zod.record(zod.string(), zod.unknown()).nullable(),
+  "createdAt": zod.coerce.date()
+})
+export const GetSaleHistoryResponse = zod.array(GetSaleHistoryResponseItem)
 
 

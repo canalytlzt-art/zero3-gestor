@@ -9,8 +9,17 @@ export interface HealthStatus {
   status: string;
 }
 
+export type SaleStatus = typeof SaleStatus[keyof typeof SaleStatus];
+
+
+export const SaleStatus = {
+  active: 'active',
+  cancelled: 'cancelled',
+} as const;
+
 export interface Sale {
   id: string;
+  productId: string;
   saleDate: string;
   productName: string;
   quantity: number;
@@ -18,7 +27,13 @@ export interface Sale {
   totalCents: number;
   /** @nullable */
   notes: string | null;
+  status: SaleStatus;
+  /** @nullable */
+  cancellationReason: string | null;
+  /** @minimum 1 */
+  version: number;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface SaleInput {
@@ -45,18 +60,32 @@ export interface SaleInput {
   notes: string | null;
 }
 
+export type CreateSaleInput = SaleInput & {
+  idempotencyKey: string;
+};
+
+export type UpdateSaleInput = SaleInput & {
+  idempotencyKey: string;
+  /** @minimum 1 */
+  expectedVersion: number;
+};
+
 export interface SalesGoal {
   id: string;
   /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
   month: string;
   /** @nullable */
   productName: string | null;
+  /** @nullable */
+  productId: string | null;
   /**
      * @minimum 1
      * @maximum 9007199254740991
      */
   targetCents: number;
   updatedAt: string;
+  /** @minimum 1 */
+  version: number;
 }
 
 export interface SalesGoalInput {
@@ -72,6 +101,254 @@ export interface SalesGoalInput {
      * @maximum 9007199254740991
      */
   targetCents: number;
+  idempotencyKey: string;
+}
+
+export interface Product {
+  id: string;
+  name: string;
+  normalizedName: string;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  suggestedPriceCents: number;
+  isActive: boolean;
+  /** @minimum 1 */
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProductInput {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  name: string;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  suggestedPriceCents: number;
+  isActive: boolean;
+}
+
+export type CreateProductInput = ProductInput & {
+  idempotencyKey: string;
+};
+
+export type UpdateProductInput = ProductInput & {
+  idempotencyKey: string;
+  /** @minimum 1 */
+  expectedVersion: number;
+};
+
+export interface CancelSaleInput {
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  reason: string;
+  /** @minimum 1 */
+  expectedVersion: number;
+  idempotencyKey: string;
+}
+
+/**
+ * @nullable
+ */
+export type SalesHistoryEntryBeforeData = { [key: string]: unknown } | null;
+
+/**
+ * @nullable
+ */
+export type SalesHistoryEntryAfterData = { [key: string]: unknown } | null;
+
+export interface SalesHistoryEntry {
+  id: string;
+  entityType: string;
+  entityId: string;
+  operation: string;
+  actorId: string;
+  /** @nullable */
+  beforeData: SalesHistoryEntryBeforeData;
+  /** @nullable */
+  afterData: SalesHistoryEntryAfterData;
+  createdAt: string;
+}
+
+export interface SalesImportRow {
+  saleDate: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  productName: string;
+  /**
+     * @minimum 1
+     * @maximum 2147483647
+     */
+  quantity: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  unitAmountCents: number;
+  /**
+     * @maxLength 1000
+     * @nullable
+     */
+  notes: string | null;
+  /** @minimum 1 */
+  sourceRow: number;
+}
+
+export interface SalesImportInput {
+  /** @pattern ^[a-f0-9]{64}$ */
+  fileHash: string;
+  /**
+     * @minLength 1
+     * @maxLength 255
+     */
+  filename: string;
+  /**
+     * @minItems 1
+     * @maxItems 500
+     */
+  rows: SalesImportRow[];
+}
+
+export interface SalesImportResult {
+  batchId: string;
+  fileName: string;
+  replayed: boolean;
+  /** @minimum 0 */
+  importedCount: number;
+  sales: Sale[];
+}
+
+export type SalesRefundStatus = typeof SalesRefundStatus[keyof typeof SalesRefundStatus];
+
+
+export const SalesRefundStatus = {
+  active: 'active',
+  voided: 'voided',
+} as const;
+
+export interface SalesRefund {
+  id: string;
+  saleId: string;
+  refundDate: string;
+  /**
+     * @minimum 1
+     * @maximum 9007199254740991
+     */
+  amountCents: number;
+  reason: string;
+  status: SalesRefundStatus;
+  /** @nullable */
+  voidReason: string | null;
+  /** @minimum 1 */
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SalesRefundCandidate {
+  saleId: string;
+  saleDate: string;
+  productId: string;
+  productName: string;
+  /** @minimum 1 */
+  quantity: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  totalCents: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  refundedCents: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  remainingCents: number;
+  /** @minimum 1 */
+  version: number;
+}
+
+export type SalesRefundRecordSaleStatus = typeof SalesRefundRecordSaleStatus[keyof typeof SalesRefundRecordSaleStatus];
+
+
+export const SalesRefundRecordSaleStatus = {
+  active: 'active',
+  cancelled: 'cancelled',
+} as const;
+
+export type SalesRefundRecord = SalesRefund & {
+  saleDate: string;
+  productId: string;
+  productName: string;
+  /** @minimum 1 */
+  quantity: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  unitAmountCents: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  totalCents: number;
+  saleStatus: SalesRefundRecordSaleStatus;
+};
+
+export interface CreateSalesRefundInput {
+  refundDate: string;
+  /**
+     * @minimum 1
+     * @maximum 9007199254740991
+     */
+  amountCents: number;
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  reason: string;
+  idempotencyKey: string;
+}
+
+export interface UpdateSalesRefundInput {
+  refundDate: string;
+  /**
+     * @minimum 1
+     * @maximum 9007199254740991
+     */
+  amountCents: number;
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  reason: string;
+  /** @minimum 1 */
+  expectedVersion: number;
+  idempotencyKey: string;
+}
+
+export interface VoidSalesRefundInput {
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  reason: string;
+  /** @minimum 1 */
+  expectedVersion: number;
+  idempotencyKey: string;
 }
 
 export interface SalesBackupRecord {

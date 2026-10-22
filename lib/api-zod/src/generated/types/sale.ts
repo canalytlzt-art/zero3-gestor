@@ -5,9 +5,11 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { SaleStatus } from './saleStatus';
 
 export interface Sale {
   id: string;
+  productId: string;
   saleDate: string;
   productName: string;
   quantity: number;
@@ -15,5 +17,11 @@ export interface Sale {
   totalCents: number;
   /** @nullable */
   notes: string | null;
+  status: SaleStatus;
+  /** @nullable */
+  cancellationReason: string | null;
+  /** @minimum 1 */
+  version: number;
   createdAt: Date;
+  updatedAt: Date;
 }

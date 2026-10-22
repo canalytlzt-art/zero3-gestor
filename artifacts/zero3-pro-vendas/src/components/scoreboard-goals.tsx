@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { CircleHelp, RefreshCw, Target } from 'lucide-react';
 import {
@@ -85,6 +85,7 @@ export default function ScoreboardGoals({
 }: ScoreboardGoalsProps) {
   const queryClient = useQueryClient();
   const saveGoal = useUpsertSalesGoal();
+  const pendingGoalKey = useRef<{ fingerprint: string; key: string } | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [goalMonth, setGoalMonth] = useState('');
   const [goalScope, setGoalScope] = useState('');
@@ -161,14 +162,25 @@ export default function ScoreboardGoals({
     }
 
     try {
+      const productName = selectedScopeProduct?.name ?? null;
+      const fingerprint = JSON.stringify({
+        month: goalMonth,
+        productName,
+        targetCents: targetCentsValue,
+      });
+      if (pendingGoalKey.current?.fingerprint !== fingerprint) {
+        pendingGoalKey.current = { fingerprint, key: crypto.randomUUID() };
+      }
       await saveGoal.mutateAsync({
         data: {
           month: goalMonth,
-          productName: selectedScopeProduct?.name ?? null,
+          productName,
           targetCents: targetCentsValue,
+          idempotencyKey: pendingGoalKey.current.key,
         },
       });
       await queryClient.invalidateQueries({ queryKey: getGetSalesGoalsQueryKey() });
+      pendingGoalKey.current = null;
       setDialogOpen(false);
     } catch (error) {
       setSaveError(getGoalErrorMessage(error));

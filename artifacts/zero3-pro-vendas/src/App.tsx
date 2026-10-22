@@ -76,9 +76,8 @@ const clerkAppearance = {
 
 function Brand() {
   return (
-    <Link href="/" className="wordmark inline-flex items-baseline gap-2 text-[25px] font-extrabold text-[#29253b] no-underline" data-testid="link-brand-home">
-      Zero3 <span className="text-[#7656b8]">PRO</span>
-      <span className="ml-1 inline-block h-2 w-2 rounded-full bg-[#a8d755]" aria-hidden="true" />
+    <Link href="/" aria-label="Zero3 PRO — início" className="wordmark inline-flex items-center no-underline" data-testid="link-brand-home">
+      <img src={`${basePath}/logo.svg`} alt="Zero3 PRO" width="138" height="40" className="h-10 w-[138px] rounded-[11px]" />
     </Link>
   );
 }
