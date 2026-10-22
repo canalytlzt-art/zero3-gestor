@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { AlertCircle, Check, FileSpreadsheet, LoaderCircle, Upload, X } from "lucide-react";
 import {
   useCommitOccupancyImport,
+  useGetOccupancyModalities,
   usePreviewOccupancyImport,
   type OccupancyImportPreviewRow,
   type OccupancyImportRowInput,
@@ -10,7 +11,13 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { parseOccupancySpreadsheet, type ParsedOccupancyImport } from "@/lib/occupancy-import";
 
 type Props = { open: boolean; onOpenChange: (open: boolean) => void; onImported: () => void };
-type PreviewItem = { local: ParsedOccupancyImport["entries"][number]; remote?: OccupancyImportPreviewRow; conflictUpdate: boolean; included: boolean };
+type PreviewItem = {
+  local: ParsedOccupancyImport["entries"][number];
+  remote?: OccupancyImportPreviewRow;
+  conflictUpdate: boolean;
+  keepBothConfirmed: boolean;
+  included: boolean;
+};
 type ScaleChoice = "fraction" | "percent";
 
 const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-xl px-4 text-xs font-extrabold transition disabled:cursor-not-allowed disabled:opacity-50";
@@ -28,29 +35,69 @@ const statusLabel = (status?: string) => ({
 export default function OccupancyImportDialog({ open, onOpenChange, onImported }: Props) {
   const previewMutation = usePreviewOccupancyImport();
   const commitMutation = useCommitOccupancyImport();
+  const modalitiesQuery = useGetOccupancyModalities();
+  const existingModalities = modalitiesQuery.data ?? [];
   const bytesRef = useRef<ArrayBuffer | null>(null);
   const [filename, setFilename] = useState("");
   const [parsed, setParsed] = useState<ParsedOccupancyImport | null>(null);
   const [items, setItems] = useState<PreviewItem[]>([]);
   const [year, setYear] = useState("");
   const [scales, setScales] = useState<Record<string, ScaleChoice>>({});
+  const [modalityMappings, setModalityMappings] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
   const [results, setResults] = useState<Array<{ index: number; status: string; message: string }>>([]);
 
   const selectedSheets = useMemo(() => new Set(parsed?.sheets.filter((s) => s.selected).map((s) => s.name) ?? []), [parsed]);
-  const overlapBlocked = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const item of items) {
-      if (item.local.overlapKey && item.included && selectedSheets.has(item.local.sourceSheet)) {
-        counts.set(item.local.overlapKey, (counts.get(item.local.overlapKey) ?? 0) + 1);
-      }
+  const modalityAssociations = useMemo(() => {
+    const names = [...new Set(items.map(({ local }) => local.modalityName).filter((name): name is string => Boolean(name)))];
+    return names.flatMap((sourceName) => {
+      const candidate = existingModalities.find(({ name }) => isCrossFitAlias(sourceName, name));
+      return candidate ? [{ sourceName, target: candidate }] : [];
+    });
+  }, [items, existingModalities]);
+  const duplicateKeyByIndex = useMemo(() => {
+    const exactGroups = new Map<string, number[]>();
+    const monthlyGroups = new Map<string, Array<{ index: number; kind: "daily" | "monthly" }>>();
+    const effectiveName = (name: string) => {
+      const mappedId = modalityMappings[name];
+      return existingModalities.find(({ id }) => id === mappedId)?.name ?? name;
+    };
+    for (const { local } of items) {
+      if (local.status !== "ready" || !local.kind || !local.period || !local.modalityName) continue;
+      const modality = normalizeModality(effectiveName(local.modalityName));
+      const className = normalizeModality(local.className ?? "");
+      const exact = `${modality}\u0000${local.kind}\u0000${local.period}\u0000${className}\u0000${local.startTime ?? ""}`;
+      exactGroups.set(exact, [...(exactGroups.get(exact) ?? []), local.index]);
+      const monthScope = `${modality}\u0000${local.period.slice(0, 7)}\u0000${className}`;
+      monthlyGroups.set(monthScope, [...(monthlyGroups.get(monthScope) ?? []), { index: local.index, kind: local.kind }]);
     }
-    return new Set(items.filter((item) => item.local.overlapKey && (counts.get(item.local.overlapKey) ?? 0) > 1).map((item) => item.local.index));
-  }, [items, selectedSheets]);
-  const actionable = items.filter((item) => selectedSheets.has(item.local.sourceSheet)
-    && item.local.status === "ready" && !overlapBlocked.has(item.local.index));
+    const result = new Map<number, string>();
+    for (const [key, indices] of exactGroups) {
+      if (indices.length > 1) indices.forEach((index) => result.set(index, `same-scope\u0000${key}`));
+    }
+    for (const [key, group] of monthlyGroups) {
+      if (!group.some((row) => row.kind === "daily") || !group.some((row) => row.kind === "monthly")) continue;
+      group.forEach(({ index }) => result.set(index, `daily-monthly\u0000${key}`));
+    }
+    return result;
+  }, [items, modalityMappings, existingModalities]);
+  const overlapBlocked = useMemo(() => {
+    const groups = new Map<string, PreviewItem[]>();
+    for (const item of items) {
+      const key = duplicateKeyByIndex.get(item.local.index);
+      if (!key || !item.included || !selectedSheets.has(item.local.sourceSheet)) continue;
+      groups.set(key, [...(groups.get(key) ?? []), item]);
+    }
+    const blocked = new Set<number>();
+    for (const group of groups.values()) {
+      if (group.length < 2) continue;
+      group.sort((a, b) => a.local.index - b.local.index);
+      group.slice(1).filter((item) => !item.keepBothConfirmed).forEach((item) => blocked.add(item.local.index));
+    }
+    return blocked;
+  }, [items, selectedSheets, duplicateKeyByIndex]);
   const counts = {
     new: items.filter((i) => i.remote?.status === "new").length,
     known: items.filter((i) => i.remote?.status === "already_imported").length,
@@ -61,42 +108,56 @@ export default function OccupancyImportDialog({ open, onOpenChange, onImported }
   const commitReady = items.filter((item) => {
     const { local, remote } = item;
     if (!item.included || !selectedSheets.has(local.sourceSheet) || local.status !== "ready" || overlapBlocked.has(local.index)) return false;
-    if (local.overlapKey && items.filter((candidate) => candidate.local.overlapKey === local.overlapKey && candidate.included && selectedSheets.has(candidate.local.sourceSheet)).length !== 1) return false;
-    return remote?.status === "new" || (remote?.status === "conflict" && item.conflictUpdate
-      && !!remote.existingRecord?.id && Number.isFinite(remote.existingRecord.version));
+    if (remote?.status === "new") return true;
+    if (remote?.status === "conflict") return (item.conflictUpdate
+      && !!remote.existingRecord?.id && Number.isFinite(remote.existingRecord.version))
+      || (item.keepBothConfirmed && (!remote.existingRecord || (!!remote.existingRecord.id && Number.isFinite(remote.existingRecord.version))));
+    return false;
   });
 
   const clear = () => {
     bytesRef.current = null; setFilename(""); setParsed(null); setItems([]); setYear(""); setScales({});
-    setError(""); setProgress(""); setResults([]); setBusy(false);
+    setModalityMappings({}); setError(""); setProgress(""); setResults([]); setBusy(false);
   };
   const close = (next: boolean) => { if (!next && !busy) { clear(); onOpenChange(false); } else onOpenChange(next); };
 
-  const runParser = async (arrayBuffer: ArrayBuffer, name: string, options?: { missingYear?: number; scaleDecisions?: Record<string, ScaleChoice> }) => {
+  const runParser = async (
+    arrayBuffer: ArrayBuffer,
+    name: string,
+    options?: { missingYear?: number; scaleDecisions?: Record<string, ScaleChoice> },
+    mappings: Record<string, string> = modalityMappings,
+  ) => {
     setError(""); setItems([]); setResults([]);
     const result = await parseOccupancySpreadsheet(arrayBuffer, name, options);
     setParsed(result);
     setScales(options?.scaleDecisions ?? {});
-    if (!result.missingYear && result.scaleDecisions.length === 0) await runPreview(result);
+    if (!result.missingYear && result.scaleDecisions.length === 0) await runPreview(result, mappings);
   };
 
-  const runPreview = async (data: ParsedOccupancyImport) => {
+  const runPreview = async (data: ParsedOccupancyImport, mappings: Record<string, string> = modalityMappings) => {
     const candidates = data.entries.filter((entry) => entry.status === "ready"
       && data.sheets.some((sheet) => sheet.name === entry.sourceSheet && sheet.selected));
     const remoteByIndex = new Map<number, OccupancyImportPreviewRow>();
-    if (!candidates.length) { setItems(data.entries.map((local) => ({ local, conflictUpdate: false, included: false }))); return; }
+    if (!candidates.length) {
+      setItems(data.entries.map((local) => ({ local, conflictUpdate: false, keepBothConfirmed: false, included: false })));
+      return;
+    }
     setBusy(true);
     try {
       for (let start = 0; start < candidates.length; start += 250) {
         setProgress(`Conferindo ${Math.min(start + 250, candidates.length)} de ${candidates.length} linhas…`);
-        const entries = candidates.slice(start, start + 250).map(toPreviewInput);
+        const entries = candidates.slice(start, start + 250).map((entry) => toPreviewInput(entry, mappings, existingModalities));
         const response = await previewMutation.mutateAsync({ data: { fileHash: data.fileHash, entries } });
         response.rows.forEach((row) => remoteByIndex.set(row.index, row));
       }
       setItems((previous) => data.entries.map((local) => {
         const remote = remoteByIndex.get(local.index);
         const prior = previous.find((item) => item.local.index === local.index);
-        return { local, remote, conflictUpdate: prior?.conflictUpdate ?? false, included: prior?.included ?? remote?.status === "new" };
+        return {
+          local, remote, conflictUpdate: prior?.conflictUpdate ?? false,
+          keepBothConfirmed: prior?.keepBothConfirmed ?? false,
+          included: prior?.included ?? remote?.status === "new",
+        };
       }));
       setProgress("");
     } catch (e) {
@@ -110,7 +171,7 @@ export default function OccupancyImportDialog({ open, onOpenChange, onImported }
     try {
       const bytes = await file.arrayBuffer();
       bytesRef.current = bytes;
-      await runParser(bytes, file.name);
+      await runParser(bytes, file.name, undefined, {});
     } catch (e) { setError(readError(e, "Não foi possível ler esta planilha.")); }
     finally { setBusy(false); }
   };
@@ -139,8 +200,23 @@ export default function OccupancyImportDialog({ open, onOpenChange, onImported }
     const resolved = (!next.missingYear || /^\d{4}$/.test(year)) && next.scaleDecisions.every((decision) => !!scales[decision.key]);
     if (eligible && resolved) void runPreview(next);
   };
-  const toggleConflict = (index: number, checked: boolean) => setItems((current) => current.map((item) => item.local.index === index ? { ...item, conflictUpdate: checked, included: checked || item.included } : item));
-  const toggleRow = (index: number, checked: boolean) => setItems((current) => current.map((item) => item.local.index === index ? { ...item, included: checked } : item));
+  const toggleConflict = (index: number, checked: boolean) => setItems((current) => current.map((item) => item.local.index === index
+    ? { ...item, conflictUpdate: checked, keepBothConfirmed: false, included: checked }
+    : item));
+  const toggleKeepBoth = (index: number, checked: boolean) => setItems((current) => current.map((item) => item.local.index === index
+    ? { ...item, conflictUpdate: false, keepBothConfirmed: checked, included: checked || (item.remote?.status === "new" && item.included) }
+    : item));
+  const toggleRow = (index: number, checked: boolean) => setItems((current) => current.map((item) => item.local.index === index
+    ? { ...item, included: checked, keepBothConfirmed: checked ? item.keepBothConfirmed : false }
+    : item));
+  const updateModalityMapping = async (sourceName: string, modalityId: string) => {
+    const next = { ...modalityMappings, [sourceName]: modalityId };
+    setModalityMappings(next);
+    setItems((current) => current.map((item) => ({
+      ...item, conflictUpdate: false, keepBothConfirmed: false, included: item.remote?.status === "new",
+    })));
+    if (parsed && !parsed.missingYear && parsed.scaleDecisions.length === 0) await runPreview(parsed, next);
+  };
 
   const commit = async () => {
     if (!parsed || !commitReady.length || !choicesResolved || busy) return;
@@ -154,9 +230,12 @@ export default function OccupancyImportDialog({ open, onOpenChange, onImported }
         const response = await commitMutation.mutateAsync({ data: {
           fileHash: parsed.fileHash,
           entries: batch.map((item) => {
-            const record = toPreviewInput(item.local);
+            const record = toPreviewInput(item.local, modalityMappings, existingModalities);
             const existing = item.remote?.status === "conflict" ? item.remote.existingRecord : null;
-            return { record, ...(existing ? { existingRecordId: existing.id, expectedVersion: existing.version } : {}) };
+            return {
+              record, ...(existing ? { existingRecordId: existing.id, expectedVersion: existing.version } : {}),
+              ...(item.keepBothConfirmed ? { keepBothConfirmed: true } : {}),
+            };
           }),
         } });
         committedAny = true;
@@ -199,10 +278,21 @@ export default function OccupancyImportDialog({ open, onOpenChange, onImported }
               <section className="rounded-2xl border border-[#ece7ee] bg-white p-4">
                 <div className="flex items-center justify-between gap-2"><div><h3 className="text-xs font-extrabold">Abas da planilha</h3><p className="mt-1 text-[10px] text-[#8a8491]">{parsed.sheets.length} abas · {parsed.blankCount} linhas vazias ignoradas</p></div></div>
                 <div className="mt-3 flex flex-wrap gap-2">{parsed.sheets.map((sheet) => <label key={sheet.name} className={`inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-lg border px-3 text-[11px] font-bold ${sheet.selected ? "border-[#c7b7dd] bg-[#f5f1fa] text-[#5d4a78]" : "border-[#ebe7ed] bg-[#fbfafb] text-[#837d89]"}`}>
-                  <input type="checkbox" checked={sheet.selected} disabled={sheet.hidden} onChange={() => toggleSheet(sheet.name)} className="accent-[#7656b8]"/>
+                  <input type="checkbox" checked={sheet.selected} onChange={() => toggleSheet(sheet.name)} className="accent-[#7656b8]"/>
                   <span>{sheet.name}</span><span className="font-mono text-[9px] opacity-70">{sheet.entryCount}</span>{sheet.hidden && <span className="text-[9px]">oculta</span>}
                 </label>)}</div>
               </section>
+              {modalityAssociations.length > 0 && <section className="space-y-3 rounded-2xl border border-[#e7def1] bg-[#faf8fc] p-4">
+                <div><h3 className="text-xs font-extrabold text-[#51445f]">Confirmar modalidade semelhante</h3><p className="mt-1 text-[10px] leading-4 text-[#817b89]">Nenhuma associação é automática. Se os nomes significarem a mesma modalidade, associe aqui uma vez para este envio.</p></div>
+                {modalityAssociations.map(({ sourceName, target }) => <label key={sourceName} className="grid gap-2 text-[10px] font-semibold text-[#5c5367] sm:grid-cols-[1fr_260px] sm:items-center">
+                  <span><b>{sourceName}</b> na planilha corresponde a {target.name} já cadastrado?</span>
+                  <select value={modalityMappings[sourceName] ?? ""} onChange={(event) => void updateModalityMapping(sourceName, event.target.value)} className="h-10 rounded-lg border border-[#d9cee5] bg-white px-3 text-xs font-semibold text-[#51445f]">
+                    <option value="">Manter como modalidade separada</option>
+                    <option value={target.id}>Associar a {target.name}</option>
+                  </select>
+                </label>)}
+                {modalitiesQuery.isError && <p role="status" className="text-[10px] text-[#8e3d33]">Não foi possível carregar modalidades existentes; a importação manterá os nomes da planilha separados.</p>}
+              </section>}
               {(parsed.missingYear || parsed.scaleDecisions.length > 0) && <section className="space-y-3 rounded-2xl border border-[#e9d9a7] bg-[#fffaf0] p-4">
                 <div><h3 className="text-xs font-extrabold text-[#665126]">Confirmações necessárias</h3><p className="mt-1 text-[10px] leading-4 text-[#81724c]">A prévia só libera após resolver todas as escolhas. Nenhum valor será ajustado sem sua confirmação.</p></div>
                 {parsed.missingYear && <label className="block text-[10px] font-bold uppercase tracking-[.08em] text-[#81724c]">Ano dos períodos sem ano
@@ -224,18 +314,42 @@ export default function OccupancyImportDialog({ open, onOpenChange, onImported }
                 <div className="flex flex-col gap-1 border-b border-[#ece7ee] px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-xs font-extrabold">Revisão das linhas</h3><p className="mt-1 text-[10px] text-[#8a8491]">Origem preservada por aba e célula. Linhas pendentes, ignoradas ou sobrepostas nunca são enviadas.</p></div><span className="text-[10px] font-semibold text-[#8a8491]">{items.length} linhas analisadas</span></div>
                 <div className="max-h-[min(40dvh,420px)] overflow-auto">
                   <ul className="divide-y divide-[#f0edf1]">
-                    {items.map(({ local, remote, conflictUpdate, included }) => {
+                    {items.map(({ local, remote, conflictUpdate, keepBothConfirmed, included }) => {
                       const blocked = overlapBlocked.has(local.index);
-                      const shownStatus = local.status !== "ready" ? local.status : blocked ? "pending" : remote?.status;
+                      const duplicateKey = duplicateKeyByIndex.get(local.index);
+                      const localDuplicates = duplicateKey ? items.filter((candidate) => duplicateKeyByIndex.get(candidate.local.index) === duplicateKey) : [];
+                      const duplicatePeer = localDuplicates.find((candidate) => candidate.local.index !== local.index);
+                      const localDuplicate = localDuplicates.length > 1;
+                      const shownStatus = local.status !== "ready" ? local.status
+                        : blocked ? "pending"
+                          : localDuplicate && remote?.status === "new" ? "duplicate_in_file" : remote?.status;
+                      const rowMessage = blocked
+                        ? "Há mais de uma linha selecionada para o mesmo escopo. Desmarque uma ou confirme que representam aulas distintas."
+                        : localDuplicate && remote?.status === "new"
+                          ? `Este escopo também aparece em ${duplicatePeer?.local.sourceSheet} · ${duplicatePeer?.local.sourceCell}. Importe só uma linha ou confirme que são aulas diferentes.`
+                          : remote?.message || local.reason || "Aguardando conferência da base.";
                       return <li key={local.index} className="grid gap-2 px-4 py-3 sm:grid-cols-[22px_minmax(130px,.8fr)_minmax(150px,1fr)_minmax(200px,1.5fr)_auto] sm:items-center">
                         <input type="checkbox" aria-label={`Incluir linha ${local.sourceSheet} ${local.sourceCell}`} checked={included} disabled={local.status !== "ready" || !selectedSheets.has(local.sourceSheet) || remote?.status === "already_imported" || remote?.status === "duplicate_in_file"} onChange={(e) => toggleRow(local.index, e.target.checked)} className="accent-[#7656b8]"/>
                         <div className="min-w-0"><p className="truncate text-[11px] font-extrabold">{local.modalityName || "Modalidade não identificada"}</p><p className="mt-1 font-mono text-[9px] text-[#8a8491]">{local.sourceSheet} · {local.sourceCell}</p></div>
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-semibold text-[#5c5367]"><span>{formatPeriod(local.period)}</span><span className="rounded bg-[#f3f0f5] px-1.5 py-0.5">{local.kind === "daily" ? "Diário" : local.kind === "monthly" ? "Mensal" : "Tipo —"}</span><span className="tabular-nums">{pct(local.percentage)}</span></div>
-                        <div className="min-w-0"><span className={`inline-flex rounded-full px-2 py-1 text-[9px] font-extrabold ${badgeClass(shownStatus)}`}>{statusLabel(shownStatus)}</span>
-                          <p className="mt-1 text-[10px] leading-4 text-[#817b89]">{blocked ? "Há mais de uma representação selecionada. Desmarque as duplicadas para importar apenas uma." : remote?.message || local.reason || "Aguardando conferência da base."}</p>
-                          {remote?.status === "conflict" && remote.existingRecord && <p className="mt-1 text-[10px] text-[#746b7c]">Atual: {remote.existingRecord.modalityName} · {formatPeriod(remote.existingRecord.period)} · {pct(remote.existingRecord.percentage)}</p>}
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-semibold text-[#5c5367]">
+                          <span>{formatPeriod(local.period)}</span>
+                          <span className="rounded bg-[#f3f0f5] px-1.5 py-0.5">{local.kind === "daily" ? "Diário" : local.kind === "monthly" ? "Mensal" : "Tipo —"}</span>
+                          {(local.startTime || local.endTime) && <span className="tabular-nums">{local.startTime || "—"}{local.endTime ? `–${local.endTime}` : ""}</span>}
+                          {(local.presences !== null || local.capacity !== null) && <span className="tabular-nums">{local.presences ?? "—"}/{local.capacity ?? "—"}</span>}
+                          <span className="tabular-nums">Calc.: {pct(local.percentage)}</span>
+                          {local.reportedPercentage !== null && <span className="tabular-nums">Planilha: {pct(local.reportedPercentage)}</span>}
                         </div>
-                        {remote?.status === "conflict" && local.status === "ready" && !blocked && <label className="inline-flex items-center gap-2 text-[10px] font-bold text-[#8e3d33]"><input type="checkbox" checked={conflictUpdate} onChange={(e) => toggleConflict(local.index, e.target.checked)} className="accent-[#a24f45]"/> Atualizar este registro</label>}
+                        <div className="min-w-0"><span className={`inline-flex rounded-full px-2 py-1 text-[9px] font-extrabold ${badgeClass(shownStatus)}`}>{statusLabel(shownStatus)}</span>
+                          <p className="mt-1 text-[10px] leading-4 text-[#817b89]">{rowMessage}</p>
+                          {remote?.status === "conflict" && remote.existingRecord && <p className="mt-1 text-[10px] text-[#746b7c]">Atual: {remote.existingRecord.modalityName} · {formatPeriod(remote.existingRecord.period)} · {remote.existingRecord.startTime || "sem horário"} · {remote.existingRecord.presences ?? "—"}/{remote.existingRecord.capacity ?? "—"} · {pct(remote.existingRecord.percentage)}</p>}
+                        </div>
+                        <div className="space-y-2">
+                          {remote?.status === "conflict" && local.status === "ready" && <label className="inline-flex items-center gap-2 text-[10px] font-bold text-[#8e3d33]"><input type="checkbox" checked={conflictUpdate} onChange={(e) => toggleConflict(local.index, e.target.checked)} className="accent-[#a24f45]"/> Atualizar registro existente</label>}
+                          {local.status === "ready" && (remote?.status === "conflict" || (localDuplicate && remote?.status === "new")) && <label className="flex items-start gap-2 text-[10px] font-bold leading-4 text-[#695287]">
+                            <input type="checkbox" checked={keepBothConfirmed} onChange={(e) => toggleKeepBoth(local.index, e.target.checked)} className="mt-0.5 accent-[#7656b8]"/>
+                            <span>Confirmo que são aulas distintas; manter ambas</span>
+                          </label>}
+                        </div>
                       </li>;
                     })}
                     {!items.length && <li className="px-4 py-8 text-center text-xs text-[#8a8491]">{previewing ? "Conferindo planilha…" : "Aplique as confirmações para exibir a prévia."}</li>}
@@ -268,15 +382,39 @@ function badgeClass(status?: string) {
   if (status === "conflict" || status === "pending") return "bg-[#fff0ec] text-[#9c5144]";
   return "bg-[#f2f0f2] text-[#77717f]";
 }
-function toPreviewInput(entry: ParsedOccupancyImport["entries"][number]): OccupancyImportRowInput {
-  if (entry.kind === null || entry.period === null || !entry.modalityName || entry.percentage === null) {
+function toPreviewInput(
+  entry: ParsedOccupancyImport["entries"][number],
+  mappings: Record<string, string> = {},
+  modalities: Array<{ id: string; name: string }> = [],
+): OccupancyImportRowInput {
+  const modalityId = entry.modalityName ? mappings[entry.modalityName] : undefined;
+  const mappedModality = modalities.find((modality) => modality.id === modalityId);
+  const hasValidMeasurements = entry.presences !== null && entry.capacity !== null && entry.startTime !== null;
+  if (entry.kind === null || entry.period === null || !entry.modalityName || (entry.percentage === null && !hasValidMeasurements)) {
     throw new Error("Uma linha sem dados obrigatórios foi impedida de seguir para a importação.");
   }
   return {
-    index: entry.index, kind: entry.kind, period: entry.period, modalityName: entry.modalityName,
-    percentage: entry.percentage, ...(entry.className ? { className: entry.className } : {}),
+    index: entry.index, kind: entry.kind, period: entry.period,
+    modalityName: mappedModality?.name ?? entry.modalityName,
+    ...(mappedModality ? { modalityId: mappedModality.id } : {}),
+    ...(!hasValidMeasurements && entry.percentage !== null ? { percentage: entry.percentage } : {}),
+    ...(entry.reportedPercentage !== null ? { reportedPercentage: entry.reportedPercentage } : {}),
+    ...(entry.presences !== null ? { presences: entry.presences } : {}),
+    ...(entry.capacity !== null ? { capacity: entry.capacity } : {}),
+    ...(hasValidMeasurements && entry.startTime ? { startTime: entry.startTime } : {}),
+    ...(hasValidMeasurements && entry.endTime ? { endTime: entry.endTime } : {}),
+    ...(entry.className ? { className: entry.className } : {}),
     sourceSheet: entry.sourceSheet, sourceCell: entry.sourceCell, sourceCells: entry.sourceCells,
   };
+}
+function normalizeModality(value: string) {
+  return value.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR").replace(/\s+/g, " ");
+}
+function isCrossFitAlias(a: string, b: string) {
+  const left = normalizeModality(a);
+  const right = normalizeModality(b);
+  return (left === "crossfit" && right === "crossfit presencial")
+    || (right === "crossfit" && left === "crossfit presencial");
 }
 function readError(error: unknown, fallback: string) {
   const value = error && typeof error === "object" ? error as { message?: unknown; data?: { error?: unknown } } : null;

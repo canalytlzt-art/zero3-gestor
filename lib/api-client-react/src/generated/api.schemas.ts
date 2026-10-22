@@ -46,11 +46,35 @@ export interface OccupancyRecord {
   month: string;
   modalityId: string;
   modalityName: string;
+  /** @minimum 0 */
+  percentage: number;
   /**
      * @minimum 0
-     * @maximum 100
+     * @nullable
      */
-  percentage: number;
+  reportedPercentage: number | null;
+  /**
+     * @minimum 0
+     * @maximum 2147483647
+     * @nullable
+     */
+  presences: number | null;
+  /**
+     * @minimum 1
+     * @maximum 2147483647
+     * @nullable
+     */
+  capacity: number | null;
+  /**
+     * @nullable
+     * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
+     */
+  startTime: string | null;
+  /**
+     * @nullable
+     * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
+     */
+  endTime: string | null;
   /** @nullable */
   className: string | null;
   /** @nullable */
@@ -90,10 +114,29 @@ export interface OccupancyRecordInput {
      */
   modalityName: string;
   /**
+     * Para registros antigos
      * @minimum 0
-     * @maximum 100
      */
-  percentage: number;
+  percentage?: number;
+  /** @minimum 0 */
+  reportedPercentage?: number;
+  /**
+     * @minimum 0
+     * @maximum 2147483647
+     */
+  presences?: number;
+  /**
+     * @minimum 1
+     * @maximum 2147483647
+     */
+  capacity?: number;
+  /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$ */
+  startTime?: string;
+  /**
+     * @nullable
+     * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
+     */
+  endTime?: string | null;
   /**
      * @maxLength 120
      * @nullable
@@ -168,6 +211,8 @@ export interface OccupancyImportCommitEntry {
   existingRecordId?: string;
   /** @minimum 1 */
   expectedVersion?: number;
+  /** Confirma que a linha representa uma aula distinta da aula existente */
+  keepBothConfirmed?: boolean;
 }
 
 export interface OccupancyImportCommitInput {
@@ -878,6 +923,26 @@ toDate?: string;
  * Meses AAAA-MM separados por vírgula; exclusivo com intervalo
  */
 months?: string;
+/**
+ * Ano civil; pode combinar com meses ou trimestre
+ * @minimum 1900
+ * @maximum 2100
+ */
+year?: number;
+/**
+ * Trimestre civil: janeiro-março, abril-junho, julho-setembro ou outubro-dezembro
+ * @minimum 1
+ * @maximum 4
+ */
+quarter?: number;
+/**
+ * Horários iniciais HH:mm separados por vírgula
+ */
+startTimes?: string;
+/**
+ * Dias da semana ISO 1-7 separados por vírgula, segunda a domingo
+ */
+weekdays?: string;
 modalityId?: string;
 /**
  * @maxLength 120

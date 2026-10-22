@@ -18,10 +18,24 @@ import { PurpleSelect } from '@/components/ui/purple-select';
 import { buildFinancialChartAnalytics } from '@/lib/financial-chart-data';
 import { buildOccupancyChartAnalytics, type OccupancyChartSupportRow } from '@/lib/occupancy-chart-data';
 import { formatCents, formatMonthKey, getSaoPauloMonthKey, getSalesGoalComparison, isCompleteCalendarMonthRange, monthKeysBetween } from '@/lib/sales-utils';
+import {
+  changeOccupancyPeriod,
+  clearOccupancyFilters,
+  currentOccupancyMonth,
+  occupancyFilterProblem,
+  occupancyFilterSummary,
+  occupancyAnalyticsMonths,
+  occupancyQueryParams,
+  updateOccupancyFilters,
+  updateOccupancyQuarter,
+  updateOccupancyYear,
+  useOccupancyFilterState,
+  type OccupancyChartViewMode,
+  type OccupancyPeriodMode,
+} from '@/lib/occupancy-filter-store';
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
-type PeriodMode = 'day' | 'range' | 'months';
-type ViewMode = 'daily' | 'monthly';
+type ViewMode = OccupancyChartViewMode;
 
 const palette = {
   ink: '#342d40',
@@ -45,11 +59,30 @@ function formatDay(value: string) {
 }
 
 function periodLabel(value: string, mode: ViewMode) {
-  return mode === 'monthly' ? formatMonthKey(value) : formatDay(value);
+  if (mode === 'monthly') return formatMonthKey(value);
+  if (mode === 'quarterly') {
+    const [year, quarter] = value.split('-Q');
+    return `${quarter}º tri · ${year}`;
+  }
+  return formatDay(value);
+}
+
+function formatCount(value: number | null) {
+  return value == null ? '—' : value.toLocaleString('pt-BR');
+}
+
+function percentAxisMax(values: Array<number | null | undefined>) {
+  const max = Math.max(100, ...values.filter((value): value is number => value != null));
+  return Math.ceil(max / 10) * 10;
+}
+
+function percentAxisTicks(max: number) {
+  return [...new Set([0, 25, 50, 75, 100, max])].filter((tick) => tick <= max);
 }
 
 function sourceLabel(source: OccupancyChartSupportRow['source']) {
-  return source === 'reported' ? 'Percentual informado' : 'Média dos percentuais informados';
+  if (source === 'weighted') return 'Presenças ÷ vagas';
+  return source === 'reported' ? 'Percentual legado informado' : 'Média de percentuais legados';
 }
 
 function formatError(error: unknown) {
@@ -290,45 +323,27 @@ function FinancialCharts({ onOccupancy }: { onOccupancy: () => void }) {
 
 export default function OccupancyChartsPage() {
   const [activeTab, setActiveTab] = useState<'occupancy' | 'financial'>('occupancy');
-  const [periodMode, setPeriodMode] = useState<PeriodMode>('months');
-  const [day, setDay] = useState('');
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
-  const [months, setMonths] = useState<string[]>([getSaoPauloMonthKey()]);
-  const [monthToAdd, setMonthToAdd] = useState(getSaoPauloMonthKey());
-  const [modalityId, setModalityId] = useState('');
-  const [className, setClassName] = useState('');
-  const [viewMode, setViewMode] = useState<ViewMode>('daily');
+  const filters = useOccupancyFilterState();
+  const [monthToAdd, setMonthToAdd] = useState(currentOccupancyMonth());
+  const viewMode = filters.viewMode;
+  const setViewMode = (next: ViewMode) => updateOccupancyFilters({ viewMode: next });
 
-  const filterProblem = periodMode === 'day' && !day
-    ? 'Escolha o dia que deseja consultar.'
-    : periodMode === 'range' && (!fromDate || !toDate)
-      ? 'Informe a data inicial e final do intervalo.'
-      : periodMode === 'range' && fromDate > toDate
-        ? 'A data inicial deve ser anterior ou igual à data final.'
-        : periodMode === 'months' && months.length === 0
-          ? 'Selecione ao menos um mês.'
-          : null;
+  const filterProblem = occupancyFilterProblem(filters);
   const filterInvalid = Boolean(filterProblem);
 
-  const params = useMemo<GetOccupancyRecordsParams>(() => {
-    const query: GetOccupancyRecordsParams = { kind: 'all' };
-    if (periodMode === 'day' && day) {
-      query.fromDate = day;
-      query.toDate = day;
-    } else if (periodMode === 'range' && fromDate && toDate && fromDate <= toDate) {
-      query.fromDate = fromDate;
-      query.toDate = toDate;
-    } else if (periodMode === 'months' && months.length) {
-      query.months = [...months].sort().join(',');
-    }
-    if (className.trim()) query.className = className.trim();
-    return query;
-  }, [periodMode, day, fromDate, toDate, months, className]);
+  const params = useMemo<GetOccupancyRecordsParams>(() => occupancyQueryParams(filters), [filters]);
 
   const modalitiesQuery = useGetOccupancyModalities({
     query: {
       queryKey: getGetOccupancyModalitiesQueryKey(),
+      refetchOnMount: 'always',
+      refetchOnWindowFocus: true,
+      staleTime: 20_000,
+    },
+  });
+  const filterOptionsQuery = useGetOccupancyRecords({ kind: 'all' }, {
+    query: {
+      queryKey: getGetOccupancyRecordsQueryKey({ kind: 'all' }),
       refetchOnMount: 'always',
       refetchOnWindowFocus: true,
       staleTime: 20_000,
@@ -347,28 +362,37 @@ export default function OccupancyChartsPage() {
     () => [...(modalitiesQuery.data ?? [])].sort((a: OccupancyModality, b: OccupancyModality) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' })),
     [modalitiesQuery.data],
   );
+  const filterOptions = filterOptionsQuery.data ?? [];
+  const startTimeOptions = useMemo(() => [...new Set(filterOptions.map((record) => record.startTime).filter((value): value is string => Boolean(value)))].sort(), [filterOptions]);
+  const yearOptions = useMemo(() => [...new Set([currentOccupancyMonth().slice(0, 4), ...filterOptions.map((record) => record.month.slice(0, 4))])].sort().reverse(), [filterOptions]);
+  const analyticsMonths = useMemo(
+    () => occupancyAnalyticsMonths(filters),
+    [filters.periodMode, filters.months, filters.year, filters.quarter],
+  );
 
   const analyticsFilters = useMemo(() => ({
     viewMode,
-    ...(periodMode === 'months' ? { selectedMonths: months } : {}),
-    ...(periodMode === 'day' && day ? { fromDate: day, toDate: day } : {}),
-    ...(periodMode === 'range' && fromDate && toDate && fromDate <= toDate ? { fromDate, toDate } : {}),
-    modalityId: modalityId || undefined,
-  }), [viewMode, periodMode, months, day, fromDate, toDate, modalityId]);
+    ...(analyticsMonths ? { selectedMonths: analyticsMonths } : {}),
+    ...(filters.periodMode === 'day' && filters.day ? { fromDate: filters.day, toDate: filters.day } : {}),
+    ...(filters.periodMode === 'range' && filters.fromDate && filters.toDate && filters.fromDate <= filters.toDate ? { fromDate: filters.fromDate, toDate: filters.toDate } : {}),
+    modalityId: filters.modalityId || undefined,
+    startTimes: filters.startTimes,
+    weekdays: filters.weekdays,
+  }), [viewMode, analyticsMonths, filters.periodMode, filters.day, filters.fromDate, filters.toDate, filters.modalityId, filters.startTimes, filters.weekdays]);
   const analytics = useMemo(
     () => buildOccupancyChartAnalytics(filterInvalid ? [] : recordsQuery.data ?? [], analyticsFilters),
     [filterInvalid, recordsQuery.data, analyticsFilters],
   );
 
   const refresh = () => {
-    void Promise.all([modalitiesQuery.refetch(), ...(filterInvalid ? [] : [recordsQuery.refetch()])]);
+    void Promise.all([modalitiesQuery.refetch(), filterOptionsQuery.refetch(), ...(filterInvalid ? [] : [recordsQuery.refetch()])]);
   };
-  const isRefreshing = modalitiesQuery.isFetching || recordsQuery.isFetching;
-  const selectedModality = modalities.find((item) => item.id === modalityId);
+  const isRefreshing = modalitiesQuery.isFetching || recordsQuery.isFetching || filterOptionsQuery.isFetching;
+  const selectedModality = modalities.find((item) => item.id === filters.modalityId);
   const donutData = analytics.donut
     ? [
-      { name: 'Ocupada', value: analytics.donut.occupied, fill: palette.purple },
-      { name: 'Complemento', value: analytics.donut.unoccupied, fill: '#e6e0eb' },
+      { name: 'Ocupada', value: Math.min(100, Math.max(0, analytics.donut.occupied)), fill: palette.purple },
+      { name: 'Complemento', value: Math.max(0, 100 - Math.min(100, Math.max(0, analytics.donut.occupied))), fill: '#e6e0eb' },
     ]
     : [];
   const comparisonData = analytics.comparison.map((item) => ({
@@ -378,13 +402,17 @@ export default function OccupancyChartsPage() {
   const evolutionData = analytics.evolution
     .map((point) => ({ ...point, label: periodLabel(point.period, viewMode), value: point.percentage }));
   const supportRows = analytics.supportRows;
-  const anyError = modalitiesQuery.isError || recordsQuery.isError;
-  const initialLoading = modalitiesQuery.isLoading || (!filterInvalid && recordsQuery.isLoading);
+  const comparisonMax = percentAxisMax(comparisonData.map((item) => item.percentage));
+  const evolutionMax = percentAxisMax(evolutionData.map((item) => item.value));
+  const hourMax = percentAxisMax(analytics.byHour.map((item) => item.percentage));
+  const weekdayMax = percentAxisMax(analytics.byWeekday.map((item) => item.percentage));
+  const anyError = modalitiesQuery.isError || recordsQuery.isError || filterOptionsQuery.isError;
+  const initialLoading = modalitiesQuery.isLoading || filterOptionsQuery.isLoading || (!filterInvalid && recordsQuery.isLoading);
   const hasContent = analytics.supportRows.length > 0;
 
   const addMonth = () => {
-    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthToAdd) || months.includes(monthToAdd)) return;
-    setMonths((current) => [...current, monthToAdd].sort());
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthToAdd) || filters.months.includes(monthToAdd)) return;
+    updateOccupancyFilters({ months: [...filters.months, monthToAdd].sort() });
   };
 
   if (activeTab === 'financial') {
@@ -410,58 +438,95 @@ export default function OccupancyChartsPage() {
       <div className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" data-testid="panel-occupancy-filters">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2"><SlidersHorizontal size={15} className="text-[#8c73b4]" /><h2 className="text-sm font-extrabold text-[#443d50]">Filtros do gráfico</h2></div>
-          <button type="button" onClick={refresh} disabled={isRefreshing} className="inline-flex h-9 items-center gap-2 rounded-full border border-[#e7e2ea] px-3 text-xs font-bold text-[#62586d] transition hover:bg-[#f7f3f9] disabled:cursor-wait disabled:opacity-60" data-testid="button-refresh-occupancy-charts">
-            <RefreshCw size={13} className={isRefreshing ? 'animate-spin' : ''} /> Atualizar
-          </button>
+          <div className="flex gap-2">
+            <button type="button" onClick={clearOccupancyFilters} className="h-9 rounded-full px-3 text-xs font-bold text-[#62586d] transition hover:bg-[#f7f3f9]" data-testid="button-clear-occupancy-chart-filters">Limpar filtros</button>
+            <button type="button" onClick={refresh} disabled={isRefreshing} className="inline-flex h-9 items-center gap-2 rounded-full border border-[#e7e2ea] px-3 text-xs font-bold text-[#62586d] transition hover:bg-[#f7f3f9] disabled:cursor-wait disabled:opacity-60" data-testid="button-refresh-occupancy-charts">
+              <RefreshCw size={13} className={isRefreshing ? 'animate-spin' : ''} /> Atualizar
+            </button>
+          </div>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
           <div>
             <label className={labelClass} htmlFor="occupancy-period-mode">Período</label>
             <div className="relative">
-              <select id="occupancy-period-mode" className={fieldClass} value={periodMode} onChange={(event) => setPeriodMode(event.target.value as PeriodMode)} data-testid="select-occupancy-period-mode">
-                <option value="day">Um dia</option><option value="range">Intervalo</option><option value="months">Mês ou meses</option>
+              <select id="occupancy-period-mode" className={fieldClass} value={filters.periodMode} onChange={(event) => changeOccupancyPeriod(event.target.value as OccupancyPeriodMode)} data-testid="select-occupancy-period-mode">
+                <option value="all">Todo o histórico</option><option value="day">Um dia</option><option value="range">Intervalo</option><option value="months">Mês ou meses</option>
               </select><ChevronDown size={14} className="pointer-events-none absolute right-3 top-4 text-[#857a90]" />
             </div>
           </div>
-          {periodMode === 'day' && <div>
+          <div>
+            <label className={labelClass} htmlFor="occupancy-chart-year">Ano</label>
+            <select id="occupancy-chart-year" className={fieldClass} value={filters.year} onChange={(event) => updateOccupancyYear(event.target.value)} data-testid="select-occupancy-chart-year" disabled={filters.periodMode === 'day' || filters.periodMode === 'range'}>
+              <option value="">Todos os anos</option>{yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="occupancy-chart-quarter">Trimestre</label>
+            <select id="occupancy-chart-quarter" className={fieldClass} value={filters.quarter} onChange={(event) => updateOccupancyQuarter(event.target.value)} data-testid="select-occupancy-chart-quarter" disabled={filters.periodMode === 'day' || filters.periodMode === 'range'}>
+              <option value="">Todos os trimestres</option><option value="1">1º · jan–mar</option><option value="2">2º · abr–jun</option><option value="3">3º · jul–set</option><option value="4">4º · out–dez</option>
+            </select>
+          </div>
+          {filters.periodMode === 'day' && <div>
             <label className={labelClass} htmlFor="occupancy-chart-day">Dia</label>
-            <input id="occupancy-chart-day" type="date" className={fieldClass} value={day} onChange={(event) => setDay(event.target.value)} data-testid="input-occupancy-chart-day" />
+            <input id="occupancy-chart-day" type="date" className={fieldClass} value={filters.day} onChange={(event) => updateOccupancyFilters({ day: event.target.value })} data-testid="input-occupancy-chart-day" />
           </div>}
-          {periodMode === 'range' && <>
-            <div><label className={labelClass} htmlFor="occupancy-chart-from">De</label><input id="occupancy-chart-from" type="date" className={fieldClass} value={fromDate} onChange={(event) => setFromDate(event.target.value)} data-testid="input-occupancy-chart-from" /></div>
-            <div><label className={labelClass} htmlFor="occupancy-chart-to">Até</label><input id="occupancy-chart-to" type="date" className={fieldClass} value={toDate} onChange={(event) => setToDate(event.target.value)} data-testid="input-occupancy-chart-to" /></div>
+          {filters.periodMode === 'range' && <>
+            <div><label className={labelClass} htmlFor="occupancy-chart-from">De</label><input id="occupancy-chart-from" type="date" className={fieldClass} value={filters.fromDate} onChange={(event) => updateOccupancyFilters({ fromDate: event.target.value })} data-testid="input-occupancy-chart-from" /></div>
+            <div><label className={labelClass} htmlFor="occupancy-chart-to">Até</label><input id="occupancy-chart-to" type="date" className={fieldClass} value={filters.toDate} onChange={(event) => updateOccupancyFilters({ toDate: event.target.value })} data-testid="input-occupancy-chart-to" /></div>
           </>}
-          {periodMode === 'months' && <div className="sm:col-span-2">
+          {filters.periodMode === 'months' && <div className="sm:col-span-2">
             <label className={labelClass} htmlFor="occupancy-chart-month">Meses selecionados</label>
             <div className="flex gap-2">
               <input id="occupancy-chart-month" type="month" className={fieldClass} value={monthToAdd} onChange={(event) => setMonthToAdd(event.target.value)} data-testid="input-occupancy-chart-month" />
-              <button type="button" onClick={addMonth} disabled={!monthToAdd || months.includes(monthToAdd)} className="mt-1.5 h-10 shrink-0 rounded-xl bg-[#ece6f4] px-4 text-xs font-bold text-[#65479c] transition hover:bg-[#e4daef] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-add-occupancy-month">Adicionar</button>
+              <button type="button" onClick={addMonth} disabled={!monthToAdd || filters.months.includes(monthToAdd)} className="mt-1.5 h-10 shrink-0 rounded-xl bg-[#ece6f4] px-4 text-xs font-bold text-[#65479c] transition hover:bg-[#e4daef] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-add-occupancy-month">Adicionar</button>
             </div>
             <div className="mt-2 flex min-h-7 flex-wrap gap-1.5" data-testid="list-occupancy-chart-months">
-              {months.map((month) => <span key={month} className="inline-flex items-center gap-2 rounded-full bg-[#f2edf6] px-3 py-1 text-[11px] font-bold capitalize text-[#65479c]" data-testid={`chip-occupancy-chart-month-${month}`}>
-                {formatMonthKey(month)}<button type="button" aria-label={`Remover ${formatMonthKey(month)}`} onClick={() => setMonths((current) => current.filter((item) => item !== month))} className="text-[#8a73ad] hover:text-[#46335f]" data-testid={`button-remove-occupancy-month-${month}`}>×</button>
+              {filters.months.map((month) => <span key={month} className="inline-flex items-center gap-2 rounded-full bg-[#f2edf6] px-3 py-1 text-[11px] font-bold capitalize text-[#65479c]" data-testid={`chip-occupancy-chart-month-${month}`}>
+                {formatMonthKey(month)}<button type="button" aria-label={`Remover ${formatMonthKey(month)}`} onClick={() => updateOccupancyFilters({ months: filters.months.filter((item) => item !== month) })} className="text-[#8a73ad] hover:text-[#46335f]" data-testid={`button-remove-occupancy-month-${month}`}>×</button>
               </span>)}
-              {months.length === 0 && <span className="py-1 text-xs text-[#908897]">Adicione ao menos um mês.</span>}
+              {filters.months.length === 0 && <span className="py-1 text-xs text-[#908897]">Adicione ao menos um mês.</span>}
             </div>
           </div>}
           <div>
             <label className={labelClass} htmlFor="occupancy-chart-modality">Modalidade</label>
             <PurpleSelect
-              value={modalityId || '__all_modalities__'}
-              onValueChange={(value) => setModalityId(value === '__all_modalities__' ? '' : value)}
+              value={filters.modalityId || '__all_modalities__'}
+              onValueChange={(value) => updateOccupancyFilters({ modalityId: value === '__all_modalities__' ? '' : value })}
               className="mt-1.5 rounded-xl"
               testId="select-occupancy-chart-modality"
               options={[
-                { value: '__all_modalities__', label: 'Selecione uma modalidade' },
+                { value: '__all_modalities__', label: 'Todas as modalidades' },
                 ...modalities.map((modality) => ({ value: modality.id, label: modality.name })),
               ]}
             />
           </div>
           <div>
             <label className={labelClass} htmlFor="occupancy-chart-class">Turma / horário <span className="font-medium normal-case tracking-normal">(opcional)</span></label>
-            <input id="occupancy-chart-class" type="search" maxLength={120} className={fieldClass} placeholder="Todas as turmas" value={className} onChange={(event) => setClassName(event.target.value)} data-testid="input-occupancy-chart-class" />
+            <input id="occupancy-chart-class" type="search" maxLength={120} className={fieldClass} placeholder="Todas as turmas" value={filters.className} onChange={(event) => updateOccupancyFilters({ className: event.target.value })} data-testid="input-occupancy-chart-class" />
           </div>
         </div>
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <fieldset><legend className={labelClass}>Horário inicial</legend><div className="mt-1.5 flex flex-wrap gap-1.5" data-testid="filters-occupancy-chart-times">
+            {startTimeOptions.map((time) => {
+              const selected = filters.startTimes.includes(time);
+              return <label key={time} className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-bold tabular-nums ${selected ? 'border-[#7656b8] bg-[#eee8f7] text-[#5d4a78]' : 'border-[#e7e2ea] bg-white text-[#746c7e]'}`}>
+                <input type="checkbox" checked={selected} onChange={() => updateOccupancyFilters({ startTimes: selected ? filters.startTimes.filter((item) => item !== time) : [...filters.startTimes, time].sort() })} className="accent-[#7656b8]" data-testid={`filter-occupancy-chart-time-${time.replace(':', '')}`} />{time}
+              </label>;
+            })}
+            {!startTimeOptions.length && <span className="text-xs text-[#908897]">Os horários aparecem após cadastrar aulas.</span>}
+          </div></fieldset>
+          <fieldset><legend className={labelClass}>Dia da semana</legend><div className="mt-1.5 flex flex-wrap gap-1.5" data-testid="filters-occupancy-chart-weekdays">
+            {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'].map((day, index) => {
+              const weekday = index + 1;
+              const selected = filters.weekdays.includes(weekday);
+              return <label key={day} className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-bold ${selected ? 'border-[#7656b8] bg-[#eee8f7] text-[#5d4a78]' : 'border-[#e7e2ea] bg-white text-[#746c7e]'}`}>
+                <input type="checkbox" checked={selected} onChange={() => updateOccupancyFilters({ weekdays: selected ? filters.weekdays.filter((item) => item !== weekday) : [...filters.weekdays, weekday].sort() })} className="accent-[#7656b8]" data-testid={`filter-occupancy-chart-weekday-${weekday}`} />{day}
+              </label>;
+            })}
+          </div></fieldset>
+        </div>
+        {(filters.startTimes.length > 0 || filters.weekdays.length > 0) && <p className="mt-3 text-[10px] leading-4 text-[#8a8491]" role="status" data-testid="status-occupancy-chart-daily-only-filter">Horário e dia da semana filtram aulas diárias; registros mensais legados não têm esses dados.</p>}
+        <p className="mt-3 text-[10px] font-semibold text-[#766d83]" data-testid="text-occupancy-chart-applied-filters">Recorte aplicado: {occupancyFilterSummary(filters)}{filters.modalityId ? ` · ${modalities.find((modality) => modality.id === filters.modalityId)?.name ?? 'Modalidade'}` : ''}{filters.className.trim() ? ` · Turma ${filters.className.trim()}` : ''}</p>
         {filterProblem && <p className="mt-3 flex items-center gap-2 text-xs font-semibold text-[#a24f4d]" role="alert" data-testid="status-invalid-occupancy-filter"><CircleAlert size={14} />{filterProblem}</p>}
       </div>
 
@@ -469,7 +534,7 @@ export default function OccupancyChartsPage() {
         {[0, 1, 2].map((item) => <div key={item} className="min-h-[310px] animate-pulse rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-5"><div className="h-3 w-24 rounded bg-[#eee9f1]" /><div className="mt-4 h-5 w-40 rounded bg-[#eee9f1]" /><div className="mt-8 h-48 rounded-2xl bg-[#f5f2f6]" /></div>)}
       </div> : anyError ? <div className="rounded-[22px] border border-[#ecd5d4] bg-[#fff9f8] p-6" role="alert" data-testid="error-occupancy-charts">
         <div className="flex items-start gap-3"><CircleAlert size={18} className="mt-0.5 text-[#ad5955]" /><div><h2 className="text-sm font-extrabold text-[#673d3c]">Não foi possível montar os gráficos</h2>
-          <p className="mt-1 text-xs leading-5 text-[#806462]">{formatError(recordsQuery.error ?? modalitiesQuery.error)}</p>
+          <p className="mt-1 text-xs leading-5 text-[#806462]">{formatError(recordsQuery.error ?? filterOptionsQuery.error ?? modalitiesQuery.error)}</p>
           <button type="button" onClick={refresh} className="mt-4 rounded-full bg-[#65479c] px-4 py-2 text-xs font-bold text-white hover:bg-[#583d89]" data-testid="button-retry-occupancy-charts">Tentar novamente</button>
         </div></div>
       </div> : filterInvalid ? null : !hasContent ? <div className="rounded-[22px] border border-dashed border-[#ded7e4] bg-[#fbf9fc] px-6 py-12 text-center" data-testid="empty-occupancy-records">
@@ -477,17 +542,44 @@ export default function OccupancyChartsPage() {
         <h2 className="mt-4 text-base font-extrabold text-[#443d50]">Nenhum percentual neste recorte</h2>
         <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-[#837b8b]">Ajuste o período ou a turma. Os gráficos exibem apenas percentuais persistidos, sem completar dias ou meses ausentes.</p>
       </div> : <>
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Indicadores de ocupação" data-testid="occupancy-indicators">
+          <article className="rounded-[20px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_10px_28px_-28px_rgba(55,40,72,.3)]" data-testid="metric-occupancy-classes">
+            <p className="text-[9px] font-bold uppercase tracking-[.12em] text-[#8a8491]">Aulas registradas</p>
+            <p className="mt-2 font-[family-name:var(--app-font-serif)] text-2xl font-extrabold tabular-nums tracking-[-.05em] text-[#342d40]">{formatCount(analytics.totals.classes)}</p>
+            <p className="mt-1 text-[10px] text-[#837b8b]">No recorte aplicado</p>
+          </article>
+          <article className="rounded-[20px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_10px_28px_-28px_rgba(55,40,72,.3)]" data-testid="metric-occupancy-presences">
+            <p className="text-[9px] font-bold uppercase tracking-[.12em] text-[#8a8491]">Total de presenças</p>
+            <p className="mt-2 font-[family-name:var(--app-font-serif)] text-2xl font-extrabold tabular-nums tracking-[-.05em] text-[#342d40]">{formatCount(analytics.totals.presences)}</p>
+            <p className="mt-1 text-[10px] text-[#837b8b]">Soma das aulas medidas</p>
+          </article>
+          <article className="rounded-[20px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_10px_28px_-28px_rgba(55,40,72,.3)]" data-testid="metric-occupancy-capacity">
+            <p className="text-[9px] font-bold uppercase tracking-[.12em] text-[#8a8491]">Vagas ofertadas</p>
+            <p className="mt-2 font-[family-name:var(--app-font-serif)] text-2xl font-extrabold tabular-nums tracking-[-.05em] text-[#342d40]">{formatCount(analytics.totals.capacity)}</p>
+            <p className="mt-1 text-[10px] text-[#837b8b]">Capacidade total das aulas medidas</p>
+          </article>
+          <article className="rounded-[20px] border border-[#e0d7ed] bg-[#f8f5fb] p-4 shadow-[0_10px_28px_-28px_rgba(55,40,72,.3)]" data-testid="metric-occupancy-rate">
+            <p className="text-[9px] font-bold uppercase tracking-[.12em] text-[#806aa0]">Ocupação calculada</p>
+            <p className="mt-2 font-[family-name:var(--app-font-serif)] text-2xl font-extrabold tabular-nums tracking-[-.05em] text-[#65479c]">{formatPercent(analytics.totals.percentage)}</p>
+            <p className="mt-1 text-[10px] text-[#837b8b]">{analytics.totals.percentage == null ? 'Sem base de presenças e vagas' : `${formatCount(analytics.totals.presences)} de ${formatCount(analytics.totals.capacity)} presenças/vagas`}</p>
+          </article>
+        </section>
+        {analytics.totals.legacyRecordCount > 0 && <p className="rounded-xl bg-[#f6f3f8] px-4 py-2.5 text-[10px] leading-4 text-[#716879]" role="status" data-testid="status-occupancy-legacy-count">{formatCount(analytics.totals.legacyRecordCount)} registro(s) legado(s) sem presenças/vagas permanecem fora do cálculo ponderado.</p>}
         <div className="grid gap-5 lg:grid-cols-[.9fr_1.1fr]">
           <section className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" data-testid="card-occupancy-donut">
-            <SectionHeading eyebrow="ocupação escolhida" title="Ocupação e capacidade restante" detail={selectedModality?.name ?? 'Selecione uma modalidade'} />
+            <SectionHeading eyebrow="ocupação calculada" title="Ocupação e capacidade restante" detail={selectedModality?.name ?? 'Todas as modalidades'} />
             {analytics.donut ? <>
-              <div className="relative mx-auto h-[220px] max-w-[360px]" role="img" aria-label={`${selectedModality?.name ?? 'Modalidade'}: ${formatPercent(analytics.donut.occupied)} ocupada e ${formatPercent(analytics.donut.unoccupied)} de complemento`}>
+              <div className="mb-2 flex flex-wrap items-end justify-between gap-3 rounded-2xl bg-[#f8f5fb] px-4 py-3">
+                <div><p className="text-[9px] font-bold uppercase tracking-[.12em] text-[#806aa0]">Taxa real</p><p className="mt-1 font-[family-name:var(--app-font-serif)] text-3xl font-extrabold tracking-[-.06em] text-[#65479c]" data-testid="text-occupancy-donut-real-rate">{formatPercent(analytics.donut.occupied)}</p></div>
+                {analytics.donut.occupied > 100 && <p className="max-w-[230px] text-right text-[10px] font-semibold leading-4 text-[#765c31]" data-testid="text-occupancy-capacity-exceeded">{analytics.donut.presences != null && analytics.donut.capacity != null ? `Excedente: ${formatCount(analytics.donut.presences - analytics.donut.capacity)} presença(s) acima das vagas` : `Ocupação acima da capacidade em ${formatPercent(analytics.donut.occupied - 100)} p.p.`}</p>}
+              </div>
+              <div className="relative mx-auto h-[220px] max-w-[360px]" role="img" aria-label={`${selectedModality?.name ?? 'Todas as modalidades'}: ${formatPercent(analytics.donut.occupied)} de ocupação real e ${formatPercent(analytics.donut.unoccupied)} de complemento visual`}>
                 <ChartContainer config={{ occupied: { label: 'Ocupada', color: palette.purple }, unoccupied: { label: 'Complemento', color: '#e6e0eb' } }} className="h-full w-full">
                   <PieChart>
                     <Pie data={donutData} dataKey="value" nameKey="name" innerRadius="65%" outerRadius="88%" paddingAngle={2} stroke="none">
                       {donutData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
                     </Pie>
-                    <Tooltip formatter={(value) => formatPercent(Number(value))} />
+                  <Tooltip formatter={(value, name) => [String(name) === 'Ocupada' ? formatPercent(analytics.donut?.occupied) : formatPercent(Number(value)), String(name)]} />
                   </PieChart>
                 </ChartContainer>
               </div>
@@ -496,47 +588,82 @@ export default function OccupancyChartsPage() {
                 <span className="inline-flex items-center gap-2 text-[#62586d]"><i className="h-2.5 w-2.5 rounded-sm bg-[#e6e0eb]" />Complemento <b>{formatPercent(analytics.donut.unoccupied)}</b></span>
               </div>
               <p className="mt-3 text-center text-[10px] text-[#837b8b]" data-testid="text-occupancy-donut-source">
-                {sourceLabel(analytics.donut.source)}{analytics.donut.coveredPeriods > 1 ? ' · média simples dos períodos com dados' : ''}
+                {sourceLabel(analytics.donut.source)}
               </p>
               <CoverageNote covered={analytics.donut.coveredPeriods} available={analytics.donut.availablePeriods} />
-            </> : <ChartEmpty title="Escolha uma modalidade" detail="O anel representa uma única modalidade e o complemento até 100%." />}
+            </> : <ChartEmpty title="Sem base para calcular" detail="O anel aparece quando há presenças e vagas, ou percentuais legados, no recorte." />}
           </section>
 
           <section className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" data-testid="card-occupancy-comparison">
-            <SectionHeading eyebrow="mesmo período selecionado" title="Comparativo por modalidade" detail="Escala fixa de 0 a 100%" />
-            {comparisonData.length ? <ChartContainer role="img" aria-label="Percentuais de ocupação comparados por modalidade, escala de zero a cem por cento" config={{ percentage: { label: 'Ocupação', color: palette.purple } }} className="h-[270px] w-full">
+            <SectionHeading eyebrow="mesmo período selecionado" title="Comparativo por modalidade" detail={comparisonMax > 100 ? `Escala até ${formatPercent(comparisonMax)}` : 'Escala de 0 a 100%'} />
+            {comparisonData.length ? <ChartContainer role="img" aria-label={`Percentuais de ocupação comparados por modalidade, escala de zero a ${formatPercent(comparisonMax)}`} config={{ percentage: { label: 'Ocupação', color: palette.purple } }} className="h-[270px] w-full">
               <BarChart data={comparisonData} margin={{ top: 8, right: 10, bottom: 38, left: 0 }}>
                 <CartesianGrid vertical={false} stroke="#eee9f1" />
                 <XAxis dataKey="label" interval={0} angle={-20} textAnchor="end" height={62} tick={{ fill: palette.ink, fontSize: 10 }} tickLine={false} axisLine={false} />
-                <YAxis type="number" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickFormatter={(value) => `${value}%`} tick={{ fill: palette.muted, fontSize: 10 }} tickLine={false} axisLine={false} />
+                <YAxis type="number" domain={[0, comparisonMax]} ticks={percentAxisTicks(comparisonMax)} tickFormatter={(value) => `${value}%`} tick={{ fill: palette.muted, fontSize: 10 }} tickLine={false} axisLine={false} />
                 <Tooltip formatter={(value) => value == null ? 'Sem dados' : formatPercent(Number(value))} labelStyle={{ color: palette.ink }} />
                 <Bar dataKey="percentage" name="Ocupação" radius={[6, 6, 0, 0]} maxBarSize={34} fill={palette.purple} />
               </BarChart>
             </ChartContainer> : <ChartEmpty title="Sem comparação disponível" detail="Não há modalidades com percentuais registrados neste recorte." />}
-            <p className="mt-1 text-[10px] leading-4 text-[#837b8b]" data-testid="text-comparison-coverage">Os resultados são comparados por média simples dos percentuais com dados, sem ponderação por capacidade. Períodos sem registro não contam como 0%.</p>
+            <p className="mt-1 text-[10px] leading-4 text-[#837b8b]" data-testid="text-comparison-coverage">Aulas com presenças e vagas são ponderadas pelos totais; percentuais legados permanecem separados. Períodos sem registro não contam como 0%.</p>
           </section>
         </div>
 
+        <section className="grid gap-5 lg:grid-cols-2" aria-label="Ocupação por horário e dia da semana">
+          <article className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" data-testid="card-occupancy-by-hour">
+            <SectionHeading eyebrow="horário inicial · ordem cronológica" title="Ocupação por horário" detail="Aulas diárias com horário registrado" />
+            {analytics.byHour.length ? <>
+              <ChartContainer role="img" aria-label="Ocupação calculada por horário inicial, em ordem cronológica" config={{ percentage: { label: 'Ocupação', color: palette.purple } }} className="h-[270px] w-full">
+                <BarChart data={analytics.byHour} margin={{ top: 10, right: 12, bottom: 4, left: -18 }}>
+                  <CartesianGrid vertical={false} stroke="#eee9f1" />
+                  <XAxis dataKey="label" tick={{ fill: palette.ink, fontSize: 10 }} tickLine={false} axisLine={false} />
+                  <YAxis type="number" domain={[0, hourMax]} ticks={percentAxisTicks(hourMax)} tickFormatter={(value) => `${value}%`} tick={{ fill: palette.muted, fontSize: 10 }} tickLine={false} axisLine={false} />
+                  <Tooltip formatter={(value) => value == null ? 'Sem dados' : formatPercent(Number(value))} labelStyle={{ color: palette.ink }} />
+                  <Bar dataKey="percentage" name="Ocupação" radius={[6, 6, 0, 0]} maxBarSize={38} fill={palette.purple} />
+                </BarChart>
+              </ChartContainer>
+              <p className="mt-1 text-[10px] leading-4 text-[#837b8b]">Só entram aulas diárias com horário de início. Resumos mensais não são atribuídos a um horário; percentuais legados não se misturam às medições.</p>
+            </> : <ChartEmpty title="Sem aulas com horário inicial" detail="Não há registros diários com horário no recorte atual." />}
+          </article>
+
+          <article className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" data-testid="card-occupancy-by-weekday">
+            <SectionHeading eyebrow="segunda a domingo" title="Ocupação por dia da semana" detail="Aulas diárias do recorte aplicado" />
+            {analytics.byWeekday.length ? <>
+              <ChartContainer role="img" aria-label="Ocupação calculada por dia da semana, de segunda a domingo" config={{ percentage: { label: 'Ocupação', color: palette.purple } }} className="h-[270px] w-full">
+                <BarChart data={analytics.byWeekday} margin={{ top: 10, right: 12, bottom: 4, left: -18 }}>
+                  <CartesianGrid vertical={false} stroke="#eee9f1" />
+                  <XAxis dataKey="label" tick={{ fill: palette.ink, fontSize: 10 }} tickLine={false} axisLine={false} />
+                  <YAxis type="number" domain={[0, weekdayMax]} ticks={percentAxisTicks(weekdayMax)} tickFormatter={(value) => `${value}%`} tick={{ fill: palette.muted, fontSize: 10 }} tickLine={false} axisLine={false} />
+                  <Tooltip formatter={(value) => value == null ? 'Sem dados' : formatPercent(Number(value))} labelStyle={{ color: palette.ink }} />
+                  <Bar dataKey="percentage" name="Ocupação" radius={[6, 6, 0, 0]} maxBarSize={38} fill={palette.purple} />
+                </BarChart>
+              </ChartContainer>
+              <p className="mt-1 text-[10px] leading-4 text-[#837b8b]">Dias sem registros não são convertidos em ocupação zero.</p>
+            </> : <ChartEmpty title="Sem aulas diárias no recorte" detail="A comparação por dia da semana precisa de registros com data diária." />}
+          </article>
+        </section>
+
         <section className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" data-testid="card-occupancy-evolution">
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-            <SectionHeading eyebrow="histórico da modalidade" title="Evolução da ocupação" detail={selectedModality?.name ?? 'Selecione uma modalidade'} />
+            <SectionHeading eyebrow="histórico do recorte" title="Evolução da ocupação" detail={selectedModality?.name ?? 'Todas as modalidades'} />
             <div className="flex w-fit rounded-full bg-[#f3f0f5] p-1" role="group" aria-label="Granularidade da evolução">
               <button type="button" aria-pressed={viewMode === 'daily'} onClick={() => setViewMode('daily')} className={`rounded-full px-4 py-2 text-xs font-bold transition ${viewMode === 'daily' ? 'bg-[#65479c] text-white shadow-sm' : 'text-[#716879] hover:bg-white'}`} data-testid="button-view-daily">Diária</button>
               <button type="button" aria-pressed={viewMode === 'monthly'} onClick={() => setViewMode('monthly')} className={`rounded-full px-4 py-2 text-xs font-bold transition ${viewMode === 'monthly' ? 'bg-[#65479c] text-white shadow-sm' : 'text-[#716879] hover:bg-white'}`} data-testid="button-view-monthly">Mensal</button>
+              <button type="button" aria-pressed={viewMode === 'quarterly'} onClick={() => setViewMode('quarterly')} className={`rounded-full px-4 py-2 text-xs font-bold transition ${viewMode === 'quarterly' ? 'bg-[#65479c] text-white shadow-sm' : 'text-[#716879] hover:bg-white'}`} data-testid="button-view-quarterly">Trimestral</button>
             </div>
           </div>
-          {evolutionData.some((point) => point.value !== null) && modalityId ? <>
-            <ChartContainer role="img" aria-label={`Evolução ${viewMode === 'daily' ? 'diária' : 'mensal'} de ocupação para ${selectedModality?.name ?? 'modalidade selecionada'}`} config={{ value: { label: 'Ocupação', color: palette.purple } }} className="h-[270px] w-full">
+          {evolutionData.some((point) => point.value !== null) ? <>
+            <ChartContainer role="img" aria-label={`Evolução ${viewMode === 'daily' ? 'diária' : viewMode === 'monthly' ? 'mensal' : 'trimestral'} de ocupação para ${selectedModality?.name ?? 'todas as modalidades'}`} config={{ value: { label: 'Ocupação', color: palette.purple } }} className="h-[270px] w-full">
               <BarChart data={evolutionData} margin={{ top: 8, right: 12, bottom: 5, left: -18 }}>
                 <CartesianGrid vertical={false} stroke="#eee9f1" />
                 <XAxis dataKey="label" tick={{ fill: palette.muted, fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                <YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickFormatter={(value) => `${value}%`} tick={{ fill: palette.muted, fontSize: 10 }} tickLine={false} axisLine={false} />
+                <YAxis type="number" domain={[0, evolutionMax]} ticks={percentAxisTicks(evolutionMax)} tickFormatter={(value) => `${value}%`} tick={{ fill: palette.muted, fontSize: 10 }} tickLine={false} axisLine={false} />
                 <Tooltip formatter={(value) => value == null ? 'Sem dados' : formatPercent(Number(value))} labelStyle={{ color: palette.ink }} />
                 <Bar dataKey="value" name="Ocupação" radius={[5, 5, 0, 0]} maxBarSize={34} fill={palette.purple} />
               </BarChart>
             </ChartContainer>
             <CoverageNote covered={analytics.donut?.coveredPeriods ?? 0} available={analytics.donut?.availablePeriods ?? 0} />
-          </> : <ChartEmpty title={modalityId ? 'Sem dados de evolução' : 'Selecione uma modalidade'} detail={modalityId ? 'Não há percentuais registrados para esta modalidade no recorte atual.' : 'A evolução acompanha somente a modalidade escolhida.'} />}
+          </> : <ChartEmpty title="Sem dados de evolução" detail="Não há percentuais registrados para o período e os filtros selecionados." />}
         </section>
 
         <section className="overflow-hidden rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)]" data-testid="card-occupancy-support-table">
@@ -545,21 +672,25 @@ export default function OccupancyChartsPage() {
             <p className="text-[10px] text-[#837b8b]" data-testid="text-support-row-count">{supportRows.length} {supportRows.length === 1 ? 'linha' : 'linhas'} · sem soma de percentuais</p>
           </div>
           {supportRows.length ? <div className="overflow-x-auto">
-            <table className="w-full min-w-[700px] border-collapse text-left text-xs">
+            <table className="w-full min-w-[1080px] border-collapse text-left text-xs">
               <thead><tr className="bg-[#faf8fb] text-[9px] font-bold uppercase tracking-[.1em] text-[#837b8b]">
-                <th scope="col" className="px-5 py-3">Período</th><th scope="col" className="px-5 py-3">Modalidade</th><th scope="col" className="px-5 py-3">Turma / horário</th><th scope="col" className="px-5 py-3 text-right">Percentual</th><th scope="col" className="px-5 py-3">Fonte</th>
+                <th scope="col" className="px-5 py-3">Período</th><th scope="col" className="px-5 py-3">Modalidade</th><th scope="col" className="px-5 py-3">Turma</th><th scope="col" className="px-5 py-3">Horário</th><th scope="col" className="px-5 py-3 text-right">Presenças</th><th scope="col" className="px-5 py-3 text-right">Vagas</th><th scope="col" className="px-5 py-3 text-right">Aulas</th><th scope="col" className="px-5 py-3 text-right">Taxa usada</th><th scope="col" className="px-5 py-3">Base</th>
               </tr></thead>
               <tbody>{supportRows.map((row) => <tr key={row.key} className="border-t border-[#f0edf1] hover:bg-[#fcfafc]" data-testid={`row-occupancy-chart-${row.key}`}>
                 <td className="whitespace-nowrap px-5 py-3 font-semibold capitalize text-[#4b4357]">{periodLabel(row.period, viewMode)}</td>
                 <td className="px-5 py-3 font-semibold text-[#4b4357]">{row.modalityName}</td>
-                <td className="px-5 py-3 text-[#716879]">{row.className || 'Sem turma/horário'}</td>
+                <td className="px-5 py-3 text-[#716879]">{row.className || '—'}</td>
+                <td className="whitespace-nowrap px-5 py-3 tabular-nums text-[#716879]">{row.startTime ?? '—'}</td>
+                <td className="px-5 py-3 text-right tabular-nums text-[#4b4357]">{formatCount(row.presences)}</td>
+                <td className="px-5 py-3 text-right tabular-nums text-[#4b4357]">{formatCount(row.capacity)}</td>
+                <td className="px-5 py-3 text-right tabular-nums text-[#4b4357]">{formatCount(row.recordCount)}</td>
                 <td className="px-5 py-3 text-right font-extrabold tabular-nums text-[#65479c]">{formatPercent(row.percentage)}</td>
                 <td className="px-5 py-3 text-[#716879]">{sourceLabel(row.source)}</td>
               </tr>)}</tbody>
             </table>
           </div> : <div className="px-5 py-8 text-center text-xs text-[#837b8b]">Sem linhas para o período selecionado.</div>}
           <div className="border-t border-[#eee9f1] px-4 py-3 sm:px-5">
-            <p className="flex items-start gap-2 text-[10px] leading-5 text-[#837b8b]"><Clock3 size={13} className="mt-0.5 shrink-0 text-[#8c73b4]" />Percentuais repetidos no período são consolidados por média aritmética simples. Períodos sem dados não são interpolados nem tratados como 0%.</p>
+            <p className="flex items-start gap-2 text-[10px] leading-5 text-[#837b8b]"><Clock3 size={13} className="mt-0.5 shrink-0 text-[#8c73b4]" />Aulas medidas são consolidadas pela soma das presenças dividida pela soma das vagas. Registros legados não entram nesse cálculo e períodos sem dados não são tratados como 0%.</p>
           </div>
         </section>
       </>}

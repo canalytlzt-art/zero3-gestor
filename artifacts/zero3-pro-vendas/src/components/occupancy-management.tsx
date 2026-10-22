@@ -18,10 +18,24 @@ import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescript
 import { PurpleSelect } from '@/components/ui/purple-select';
 import { SuggestionInput } from '@/components/ui/suggestion-input';
 import { formatMonthKey, getSaoPauloMonthKey } from '@/lib/sales-utils';
+import { buildOccupancyChartAnalytics } from '@/lib/occupancy-chart-data';
+import {
+  changeOccupancyPeriod,
+  clearOccupancyFilters,
+  currentOccupancyMonth,
+  occupancyAnalyticsMonths,
+  occupancyFilterProblem,
+  occupancyFilterSummary,
+  occupancyQueryParams,
+  updateOccupancyFilters,
+  updateOccupancyQuarter,
+  updateOccupancyYear,
+  useOccupancyFilterState,
+  type OccupancyPeriodMode,
+} from '@/lib/occupancy-filter-store';
 import OccupancyImportDialog from '@/components/occupancy-import-dialog';
 
 type Kind = 'daily' | 'monthly';
-type FilterMode = 'all' | 'day' | 'range' | 'months';
 
 const fieldClass = 'mt-1.5 h-10 w-full rounded-lg border border-[#e7e2ea] bg-[#fffefc] px-3 text-xs font-medium normal-case tracking-normal text-[#443d50] outline-none focus:border-[#9477bf]';
 const labelClass = 'block text-[10px] font-bold uppercase tracking-[.1em] text-[#817b89]';
@@ -39,8 +53,23 @@ export function parsePercentage(raw: string): { value: number | null; error: str
   return { value, error: null };
 }
 
+function parseCount(raw: string, label: string, minimum: number): { value: number | null; error: string | null } {
+  const text = raw.trim();
+  if (!text) return { value: null, error: `Informe ${label}.` };
+  if (!/^\d+$/.test(text)) return { value: null, error: `Use um número inteiro para ${label}.` };
+  const value = Number(text);
+  if (!Number.isSafeInteger(value) || value < minimum || value > 2_147_483_647) {
+    return { value: null, error: `${label} deve ser um inteiro entre ${minimum} e 2.147.483.647.` };
+  }
+  return { value, error: null };
+}
+
 function formatPct(value: number) {
   return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 15 })}%`;
+}
+
+function formatCalculatedPct(value: number) {
+  return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`;
 }
 
 function formatDay(iso: string) {
@@ -60,7 +89,7 @@ function apiErrorMessage(error: unknown, context: 'record' | 'modality' | 'delet
     if (context === 'modality') return 'Já existe uma modalidade com esse nome ou ela foi alterada desde que você abriu. Atualize a lista e tente de novo.';
     return typeof e.data?.error === 'string'
       ? `${e.data.error} Atualize a base e reabra o registro se necessário.`
-      : 'Conflito: já existe registro para este período, modalidade, tipo e turma, ou o registro foi alterado. Atualize a base e reabra antes de salvar.';
+      : 'Conflito: já existe aula para esta modalidade, data, horário e turma, ou o registro foi alterado. Atualize a base e reabra antes de salvar.';
   }
   if (typeof e?.data?.error === 'string') return e.data.error;
   if (typeof e?.message === 'string') return e.message;
@@ -71,8 +100,12 @@ const emptyForm = (kind: Kind = 'daily') => ({
   kind,
   day: '',
   month: getSaoPauloMonthKey(),
-  modalityName: '',
+  modalityName: 'CrossFit',
   percentage: '',
+  startTime: '',
+  endTime: '',
+  presences: '',
+  capacity: '',
   className: '',
   notes: '',
 });
@@ -83,7 +116,7 @@ export default function OccupancyManagement() {
 
   // ---- form state (independent from filters)
   const [form, setForm] = useState(emptyForm());
-  const [editing, setEditing] = useState<{ id: string; version: number; label: string; modalityId: string; modalityName: string } | null>(null);
+  const [editing, setEditing] = useState<{ id: string; version: number; label: string; modalityId: string; modalityName: string; legacy: boolean; reportedPercentage: number | null } | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [formConflict, setFormConflict] = useState(false);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
@@ -91,14 +124,8 @@ export default function OccupancyManagement() {
   const submitLock = useRef(false);
 
   // ---- filter state
-  const [filterMode, setFilterMode] = useState<FilterMode>('all');
-  const [filterDay, setFilterDay] = useState('');
-  const [filterFrom, setFilterFrom] = useState('');
-  const [filterTo, setFilterTo] = useState('');
-  const [filterMonths, setFilterMonths] = useState<string[]>([currentMonth]);
   const [monthToAdd, setMonthToAdd] = useState(currentMonth);
-  const [filterModality, setFilterModality] = useState('');
-  const [filterClass, setFilterClass] = useState('');
+  const filterState = useOccupancyFilterState();
   const [filterKind, setFilterKind] = useState<'all' | Kind>('all');
 
   // ---- delete + modality dialogs
@@ -108,31 +135,19 @@ export default function OccupancyManagement() {
   const [modalitiesOpen, setModalitiesOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
 
-  const filterInvalid = (filterMode === 'day' && !filterDay)
-    || (filterMode === 'range' && (!filterFrom || !filterTo || filterFrom > filterTo))
-    || (filterMode === 'months' && filterMonths.length === 0);
-  const filterProblem = filterMode === 'day' && !filterDay
-    ? 'Escolha o dia que deseja consultar.'
-    : filterMode === 'range' && (!filterFrom || !filterTo)
-      ? 'Informe as datas inicial e final para consultar o intervalo.'
-      : filterMode === 'range' && filterFrom > filterTo
-        ? 'A data inicial deve ser anterior ou igual à data final.'
-        : filterMode === 'months' && filterMonths.length === 0
-          ? 'Selecione ao menos um mês.'
-          : null;
+  const filterProblem = occupancyFilterProblem(filterState);
+  const filterInvalid = Boolean(filterProblem);
 
-  const params = useMemo<GetOccupancyRecordsParams>(() => {
-    const p: GetOccupancyRecordsParams = { kind: filterKind };
-    if (filterMode === 'day' && filterDay) { p.fromDate = filterDay; p.toDate = filterDay; }
-    if (filterMode === 'range' && filterFrom && filterTo) { p.fromDate = filterFrom; p.toDate = filterTo; }
-    if (filterMode === 'months' && filterMonths.length) p.months = [...filterMonths].sort().join(',');
-    if (filterModality) p.modalityId = filterModality;
-    if (filterClass.trim()) p.className = filterClass.trim();
-    return p;
-  }, [filterKind, filterMode, filterDay, filterFrom, filterTo, filterMonths, filterModality, filterClass]);
+  const params = useMemo<GetOccupancyRecordsParams>(
+    () => occupancyQueryParams(filterState, filterKind),
+    [filterState, filterKind],
+  );
 
   const modalitiesQuery = useGetOccupancyModalities({
     query: { queryKey: getGetOccupancyModalitiesQueryKey(), refetchOnMount: 'always', refetchOnWindowFocus: true, staleTime: 15000 },
+  });
+  const filterOptionsQuery = useGetOccupancyRecords({ kind: 'all' }, {
+    query: { queryKey: getGetOccupancyRecordsQueryKey({ kind: 'all' }), refetchOnMount: 'always', refetchOnWindowFocus: true, staleTime: 15000 },
   });
   const recordsQuery = useGetOccupancyRecords(params, {
     query: { queryKey: getGetOccupancyRecordsQueryKey(params), enabled: !filterInvalid, refetchOnMount: 'always', refetchOnWindowFocus: true, staleTime: 15000 },
@@ -143,20 +158,52 @@ export default function OccupancyManagement() {
 
   const modalities = useMemo(() => [...(modalitiesQuery.data ?? [])].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' })), [modalitiesQuery.data]);
   const records = filterInvalid ? [] : recordsQuery.data ?? [];
+  const filterOptions = filterOptionsQuery.data ?? [];
+  const startTimeOptions = useMemo(() => [...new Set(filterOptions.map((record) => record.startTime).filter((value): value is string => Boolean(value)))].sort(), [filterOptions]);
+  const yearOptions = useMemo(() => [...new Set([currentOccupancyMonth().slice(0, 4), ...filterOptions.map((record) => record.month.slice(0, 4))])].sort().reverse(), [filterOptions]);
 
   const invalidateAll = () => Promise.all([
     queryClient.invalidateQueries({ queryKey: getGetOccupancyRecordsQueryKey() }),
     queryClient.invalidateQueries({ queryKey: getGetOccupancyModalitiesQueryKey() }),
   ]);
-  const refreshBase = () => { void Promise.all([...(filterInvalid ? [] : [recordsQuery.refetch()]), modalitiesQuery.refetch()]); };
-  const isRefreshing = recordsQuery.isFetching || modalitiesQuery.isFetching;
+  const refreshBase = () => { void Promise.all([...(filterInvalid ? [] : [recordsQuery.refetch()]), modalitiesQuery.refetch(), filterOptionsQuery.refetch()]); };
+  const isRefreshing = recordsQuery.isFetching || modalitiesQuery.isFetching || filterOptionsQuery.isFetching;
 
+  const summaryViewMode = filterKind === 'all' ? filterState.viewMode : filterKind;
+  const summaryAnalytics = useMemo(() => {
+    const selectedMonths = occupancyAnalyticsMonths(filterState);
+    return buildOccupancyChartAnalytics(records, {
+      viewMode: summaryViewMode,
+      ...(selectedMonths ? { selectedMonths } : {}),
+      ...(filterState.periodMode === 'day' && filterState.day ? { fromDate: filterState.day, toDate: filterState.day } : {}),
+      ...(filterState.periodMode === 'range' && filterState.fromDate && filterState.toDate ? { fromDate: filterState.fromDate, toDate: filterState.toDate } : {}),
+      modalityId: filterState.modalityId || undefined,
+      startTimes: filterState.startTimes,
+      weekdays: filterState.weekdays,
+    });
+  }, [records, summaryViewMode, filterState]);
+  const measuredRecords = summaryAnalytics.totals.measuredClassCount;
+  const legacyRecords = summaryAnalytics.totals.legacyRecordCount;
+  const totalPresences = summaryAnalytics.totals.presences;
+  const totalCapacity = summaryAnalytics.totals.capacity;
+  const weightedOccupancy = summaryAnalytics.totals.percentage;
+
+  const legacyEdit = editing?.legacy ?? false;
   const pct = parsePercentage(form.percentage);
+  const presenceCount = parseCount(form.presences, 'as presenças', 0);
+  const capacityCount = parseCount(form.capacity, 'a capacidade total', 1);
+  const calculatedPercentage = presenceCount.value !== null && capacityCount.value !== null
+    ? Number(((presenceCount.value / capacityCount.value) * 100).toFixed(6))
+    : null;
   const periodValue = form.kind === 'daily' ? form.day : form.month;
   const validation = {
     period: !periodValue ? (form.kind === 'daily' ? 'Informe o dia.' : 'Informe o mês.') : null,
     modality: !form.modalityName.trim() ? 'Informe a modalidade.' : form.modalityName.trim().length > 120 ? 'Máximo de 120 caracteres.' : null,
-    percentage: pct.error,
+    percentage: legacyEdit ? pct.error : null,
+    startTime: !legacyEdit && !/^([01]\d|2[0-3]):[0-5]\d$/.test(form.startTime) ? 'Informe um horário inicial válido.' : null,
+    endTime: !legacyEdit && form.endTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(form.endTime) ? 'Informe um horário final válido.' : null,
+    presences: legacyEdit ? null : presenceCount.error,
+    capacity: legacyEdit ? null : capacityCount.error,
     className: form.className.trim().length > 120 ? 'Máximo de 120 caracteres.' : null,
     notes: form.notes.length > 1000 ? 'Máximo de 1000 caracteres.' : null,
   };
@@ -169,7 +216,7 @@ export default function OccupancyManagement() {
   };
 
   const resetForm = () => {
-    setForm((f) => emptyForm(f.kind));
+    setForm(emptyForm());
     setEditing(null);
     setFormError(null);
     setFormConflict(false);
@@ -177,13 +224,21 @@ export default function OccupancyManagement() {
   };
 
   const startEdit = (record: OccupancyRecord) => {
-    setEditing({ id: record.id, version: record.version, label: recordLabel(record), modalityId: record.modalityId, modalityName: record.modalityName });
+    const legacy = record.presences === null || record.capacity === null;
+    setEditing({
+      id: record.id, version: record.version, label: recordLabel(record), modalityId: record.modalityId,
+      modalityName: record.modalityName, legacy, reportedPercentage: record.reportedPercentage,
+    });
     setForm({
       kind: record.kind,
       day: record.kind === 'daily' ? record.period : '',
       month: record.kind === 'monthly' ? record.period : record.month,
       modalityName: record.modalityName,
       percentage: String(record.percentage).replace('.', ','),
+      startTime: record.startTime ?? '',
+      endTime: record.endTime ?? '',
+      presences: record.presences === null ? '' : String(record.presences),
+      capacity: record.capacity === null ? '' : String(record.capacity),
       className: record.className ?? '',
       notes: record.notes ?? '',
     });
@@ -197,7 +252,7 @@ export default function OccupancyManagement() {
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setTouched(true);
-    if (submitLock.current || isSaving || hasErrors || pct.value === null) return;
+    if (submitLock.current || isSaving || hasErrors) return;
     submitLock.current = true;
     setFormError(null);
     setFormConflict(false);
@@ -205,14 +260,29 @@ export default function OccupancyManagement() {
     const match = modalities.find((m) => normalizeModalityName(m.name) === normalizeModalityName(typed));
     const className = form.className.trim();
     const notes = form.notes.trim();
-    const input: OccupancyRecordInput = {
-      kind: form.kind,
-      period: periodValue,
-      modalityName: match ? match.name : typed,
-      percentage: pct.value,
-      className: className ? className : null,
-      notes: notes ? notes : null,
-    };
+    const input: OccupancyRecordInput = legacyEdit
+      ? {
+          kind: form.kind,
+          period: periodValue,
+          modalityName: match ? match.name : typed,
+          percentage: pct.value!,
+          className: className ? className : null,
+          notes: notes ? notes : null,
+        }
+      : {
+          kind: 'daily',
+          period: form.day,
+          modalityName: match ? match.name : typed,
+          presences: presenceCount.value!,
+          capacity: capacityCount.value!,
+          startTime: form.startTime,
+          endTime: form.endTime || null,
+          ...(editing?.reportedPercentage !== null && editing?.reportedPercentage !== undefined
+            ? { reportedPercentage: editing.reportedPercentage }
+            : {}),
+          className: className ? className : null,
+          notes: notes ? notes : null,
+        };
     if (match) input.modalityId = match.id;
     else if (editing && normalizeModalityName(typed) === normalizeModalityName(editing.modalityName)) input.modalityId = editing.modalityId;
     try {
@@ -221,7 +291,7 @@ export default function OccupancyManagement() {
         setFormSuccess('Registro atualizado.');
       } else {
         await createRecord.mutateAsync({ data: input });
-        setFormSuccess(form.kind === 'daily' ? 'Ocupação diária registrada.' : 'Consolidado mensal registrado.');
+        setFormSuccess('Aula registrada.');
       }
       resetForm();
       await invalidateAll();
@@ -250,16 +320,21 @@ export default function OccupancyManagement() {
     }
   };
 
-  const changeFilterMode = (mode: FilterMode) => {
-    setFilterMode(mode);
-    if (mode !== 'day') setFilterDay('');
-    if (mode !== 'range') { setFilterFrom(''); setFilterTo(''); }
-    if (mode === 'months' && filterMonths.length === 0) setFilterMonths([currentMonth]);
-  };
+  const changeFilterMode = (mode: OccupancyPeriodMode) => changeOccupancyPeriod(mode);
   const clearFilters = () => {
-    setFilterMode('all'); setFilterDay(''); setFilterFrom(''); setFilterTo('');
-    setFilterMonths([currentMonth]); setMonthToAdd(currentMonth);
-    setFilterModality(''); setFilterClass(''); setFilterKind('all');
+    clearOccupancyFilters();
+    setMonthToAdd(currentMonth);
+    setFilterKind('all');
+  };
+  const toggleFilterTime = (time: string) => {
+    const selected = filterState.startTimes.includes(time);
+    updateOccupancyFilters({ startTimes: selected ? filterState.startTimes.filter((item) => item !== time) : [...filterState.startTimes, time].sort() });
+    if (!selected) setFilterKind('daily');
+  };
+  const toggleFilterWeekday = (weekday: number) => {
+    const selected = filterState.weekdays.includes(weekday);
+    updateOccupancyFilters({ weekdays: selected ? filterState.weekdays.filter((item) => item !== weekday) : [...filterState.weekdays, weekday].sort() });
+    if (!selected) setFilterKind('daily');
   };
 
   const showErr = (msg: string | null) => touched && msg;
@@ -268,8 +343,8 @@ export default function OccupancyManagement() {
     <div className="space-y-5" data-testid="occupancy-page">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="eyebrow text-[9px] font-bold text-[#8a8491]">percentuais informados</p>
-          <p className="mt-1 max-w-[560px] text-sm text-[#77717f]">Registre a ocupação das aulas como ela chega do sistema de presença. Cada percentual fica como foi informado, por dia ou como consolidado do mês.</p>
+          <p className="eyebrow text-[9px] font-bold text-[#8a8491]">aulas concluídas</p>
+          <p className="mt-1 max-w-[560px] text-sm text-[#77717f]">Registre presenças e capacidade total. A ocupação é calculada automaticamente, inclusive quando as presenças ultrapassam as vagas.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => setImportOpen(true)} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#d7f500] px-4 text-sm font-extrabold text-[#262b15] transition hover:bg-[#c9e600]" data-testid="button-import-occupancy"><Upload size={15} /> Importar ocupação</button>
@@ -283,39 +358,52 @@ export default function OccupancyManagement() {
         <form id="occupancy-entry-form" onSubmit={(e) => void submit(e)} noValidate className="rounded-[24px] border border-[#e7e1e9] bg-[#fffefc] p-4 shadow-[0_8px_28px_rgba(47,39,62,.035)] sm:p-6 xl:sticky xl:top-[96px]" data-testid="form-occupancy" aria-labelledby="occupancy-form-heading">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="eyebrow text-[9px] font-bold text-[#8a8491]">{editing ? 'editando registro' : 'novo registro'}</p>
-              <h2 id="occupancy-form-heading" className="mt-1 text-xl font-extrabold tracking-[-.04em] text-[#171522]">{editing ? 'Corrigir ocupação' : 'Lançar ocupação'}</h2>
+              <p className="eyebrow text-[9px] font-bold text-[#8a8491]">{editing ? 'editando registro' : 'nova aula'}</p>
+              <h2 id="occupancy-form-heading" className="mt-1 text-xl font-extrabold tracking-[-.04em] text-[#171522]">{editing ? (editing.legacy ? 'Corrigir registro legado' : 'Corrigir dados da aula') : 'Registrar aula'}</h2>
               {editing && <p className="mt-1 text-xs text-[#77717f]" data-testid="text-occupancy-editing">{editing.label}</p>}
             </div>
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[#eee8f7] text-[#7656b8]"><Gauge size={18} /></span>
           </div>
 
-          <fieldset className="mt-5">
-            <legend className={labelClass}>Tipo de registro</legend>
-            <div className="mt-1.5 grid grid-cols-2 gap-1 rounded-xl bg-[#f3f0f5] p-1" role="radiogroup" data-testid="input-occupancy-kind">
-              {(['daily', 'monthly'] as const).map((k) => (
-                <button key={k} type="button" role="radio" aria-checked={form.kind === k} onClick={() => setField('kind', k)} className={`rounded-lg px-3 py-2 text-left transition ${form.kind === k ? 'bg-white text-[#3f3354] shadow-sm' : 'text-[#7a7383] hover:text-[#4c4358]'}`} data-testid={`option-occupancy-kind-${k}`}>
-                  <span className="block text-xs font-extrabold">{k === 'daily' ? 'Diário' : 'Mensal consolidado'}</span>
-                  <span className="block text-[10px] font-medium opacity-80">{k === 'daily' ? 'Percentual de um dia' : 'Resumo informado do mês'}</span>
-                </button>
-              ))}
-            </div>
-          </fieldset>
+          {legacyEdit && <div className="mt-4 rounded-xl border border-[#eadfbf] bg-[#fffaf0] px-3.5 py-2.5 text-[11px] leading-5 text-[#746039]" role="status">
+            Registro legado sem presenças e capacidade. A edição mantém o formato antigo; nenhum dado será estimado.
+          </div>}
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <label className={labelClass}>{form.kind === 'daily' ? 'Dia' : 'Mês'}
-              {form.kind === 'daily'
-                ? <input type="date" value={form.day} onChange={(e) => setField('day', e.target.value)} className={fieldClass} data-testid="input-occupancy-period" aria-invalid={!!showErr(validation.period)} />
-                : <input type="month" value={form.month} onChange={(e) => setField('month', e.target.value)} className={fieldClass} data-testid="input-occupancy-period" aria-invalid={!!showErr(validation.period)} />}
+            <label className={labelClass}>{legacyEdit && form.kind === 'monthly' ? 'Mês do registro legado' : 'Data da aula'}
+              {legacyEdit && form.kind === 'monthly'
+                ? <input type="month" value={form.month} onChange={(e) => setField('month', e.target.value)} className={fieldClass} data-testid="input-occupancy-period" aria-invalid={!!showErr(validation.period)} />
+                : <input type="date" value={form.day} onChange={(e) => setField('day', e.target.value)} className={fieldClass} data-testid="input-occupancy-period" aria-invalid={!!showErr(validation.period)} />}
               {showErr(validation.period) && <span className="mt-1 block text-[10px] normal-case tracking-normal text-[#a24f45]" data-testid="error-occupancy-period">{validation.period}</span>}
             </label>
-            <label className={labelClass}>Percentual de ocupação
+            {legacyEdit ? <label className={labelClass}>Percentual legado
               <div className="relative">
                 <input inputMode="decimal" value={form.percentage} onChange={(e) => setField('percentage', e.target.value)} placeholder="ex.: 72,5" className={`${fieldClass} pr-8 tabular-nums`} data-testid="input-occupancy-percentage" aria-invalid={!!showErr(validation.percentage)} />
                 <span className="pointer-events-none absolute right-3 top-[calc(50%+3px)] -translate-y-1/2 text-xs font-bold text-[#9a93a3]">%</span>
               </div>
               {showErr(validation.percentage) && <span className="mt-1 block text-[10px] normal-case leading-4 tracking-normal text-[#a24f45]" role="alert" data-testid="error-occupancy-percentage">{validation.percentage}</span>}
-            </label>
+            </label> : <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
+              <label className={labelClass}>Horário inicial
+                <input type="time" value={form.startTime} onChange={(e) => setField('startTime', e.target.value)} className={fieldClass} data-testid="input-occupancy-start-time" aria-invalid={!!showErr(validation.startTime)} />
+                {showErr(validation.startTime) && <span className="mt-1 block text-[10px] normal-case tracking-normal text-[#a24f45]">{validation.startTime}</span>}
+              </label>
+              <label className={labelClass}>Horário final <span className="font-medium normal-case tracking-normal text-[#a39dab]">(opcional)</span>
+                <input type="time" value={form.endTime} onChange={(e) => setField('endTime', e.target.value)} className={fieldClass} data-testid="input-occupancy-end-time" aria-invalid={!!showErr(validation.endTime)} />
+                {showErr(validation.endTime) && <span className="mt-1 block text-[10px] normal-case tracking-normal text-[#a24f45]">{validation.endTime}</span>}
+              </label>
+              <label className={labelClass}>Presenças
+                <input type="number" inputMode="numeric" min="0" max="2147483647" step="1" value={form.presences} onChange={(e) => setField('presences', e.target.value)} placeholder="0" className={`${fieldClass} tabular-nums`} data-testid="input-occupancy-presences" aria-invalid={!!showErr(validation.presences)} />
+                {showErr(validation.presences) && <span className="mt-1 block text-[10px] normal-case tracking-normal text-[#a24f45]">{validation.presences}</span>}
+              </label>
+              <label className={labelClass}>Vagas <span className="font-medium normal-case tracking-normal text-[#a39dab]">(capacidade total)</span>
+                <input type="number" inputMode="numeric" min="1" max="2147483647" step="1" value={form.capacity} onChange={(e) => setField('capacity', e.target.value)} placeholder="ex.: 18" className={`${fieldClass} tabular-nums`} data-testid="input-occupancy-capacity" aria-invalid={!!showErr(validation.capacity)} />
+                {showErr(validation.capacity) && <span className="mt-1 block text-[10px] normal-case tracking-normal text-[#a24f45]">{validation.capacity}</span>}
+              </label>
+              <div className="rounded-xl bg-[#f3eff8] px-3.5 py-3 sm:col-span-2" aria-live="polite" data-testid="text-occupancy-calculated">
+                <span className="text-[10px] font-bold uppercase tracking-[.08em] text-[#817b89]">Ocupação calculada</span>
+                <span className="ml-2 text-sm font-extrabold tabular-nums text-[#5d4a78]">{calculatedPercentage === null ? 'Informe presenças e vagas' : formatCalculatedPct(calculatedPercentage)}</span>
+              </div>
+            </div>}
           </div>
 
           <label className={`${labelClass} mt-3`}>Modalidade
@@ -336,7 +424,7 @@ export default function OccupancyManagement() {
             )}
           </label>
 
-          <label className={`${labelClass} mt-3`}>Turma ou horário <span className="font-medium normal-case tracking-normal text-[#a39dab]">(opcional)</span>
+          <label className={`${labelClass} mt-3`}>Turma / identificação <span className="font-medium normal-case tracking-normal text-[#a39dab]">(opcional)</span>
             <input value={form.className} onChange={(e) => setField('className', e.target.value)} placeholder="ex.: 07h ou Turma A" className={fieldClass} data-testid="input-occupancy-class" />
             {showErr(validation.className) && <span className="mt-1 block text-[10px] normal-case tracking-normal text-[#a24f45]">{validation.className}</span>}
           </label>
@@ -356,7 +444,7 @@ export default function OccupancyManagement() {
 
           <div className="mt-5 flex flex-wrap gap-2">
             <button type="submit" disabled={isSaving} aria-busy={isSaving} className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-[#d7f500] px-4 text-sm font-extrabold text-[#262b15] transition hover:bg-[#c9e600] disabled:cursor-wait disabled:opacity-60" data-testid="button-submit-occupancy">
-              {isSaving ? 'Salvando…' : editing ? 'Salvar correção' : <><Plus size={16} /> Registrar ocupação</>}
+              {isSaving ? 'Salvando…' : editing ? 'Salvar correção' : <><Plus size={16} /> Registrar aula</>}
             </button>
             {(editing || touched) && <button type="button" onClick={resetForm} disabled={isSaving} className="h-11 rounded-xl border border-[#ded7e7] bg-white px-4 text-sm font-bold text-[#5d4a78] hover:bg-[#f7f4fa]" data-testid="button-cancel-occupancy-edit">{editing ? 'Cancelar edição' : 'Limpar'}</button>}
           </div>
@@ -369,9 +457,9 @@ export default function OccupancyManagement() {
               <div><p className="eyebrow text-[9px] font-bold text-[#8a8491]">histórico</p><h2 id="occupancy-history-heading" className="mt-1 text-base font-extrabold tracking-[-.035em] text-[#332d40]">Registros de ocupação</h2></div>
               <span className="text-[10px] font-semibold text-[#8a8491]" data-testid="text-occupancy-count">{records.length} {records.length === 1 ? 'registro' : 'registros'}</span>
             </div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" data-testid="filters-occupancy">
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-6" data-testid="filters-occupancy">
               <label className={labelClass}>Período
-                <select value={filterMode} onChange={(e) => changeFilterMode(e.target.value as FilterMode)} className={fieldClass} data-testid="filter-occupancy-mode">
+                <select value={filterState.periodMode} onChange={(e) => changeFilterMode(e.target.value as OccupancyPeriodMode)} className={fieldClass} data-testid="filter-occupancy-mode">
                   <option value="all">Todo o histórico</option>
                   <option value="day">Um dia</option>
                   <option value="range">Intervalo de datas</option>
@@ -387,8 +475,8 @@ export default function OccupancyManagement() {
               </label>
               <label className={labelClass}>Modalidade
                 <PurpleSelect
-                  value={filterModality || '__all_modalities__'}
-                  onValueChange={(value) => setFilterModality(value === '__all_modalities__' ? '' : value)}
+                  value={filterState.modalityId || '__all_modalities__'}
+                  onValueChange={(value) => updateOccupancyFilters({ modalityId: value === '__all_modalities__' ? '' : value })}
                   className="mt-1.5 rounded-lg"
                   testId="filter-occupancy-modality"
                   options={[
@@ -398,46 +486,102 @@ export default function OccupancyManagement() {
                 />
               </label>
               <label className={labelClass}>Turma / horário
-                <input value={filterClass} onChange={(e) => setFilterClass(e.target.value)} placeholder="Todas" className={fieldClass} data-testid="filter-occupancy-class" />
+                <input value={filterState.className} onChange={(e) => updateOccupancyFilters({ className: e.target.value })} placeholder="Todas" className={fieldClass} data-testid="filter-occupancy-class" />
               </label>
             </div>
-            {filterMode !== 'all' && (
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className={labelClass}>Ano
+                <select value={filterState.year} onChange={(event) => updateOccupancyYear(event.target.value)} className={fieldClass} data-testid="filter-occupancy-year" disabled={filterState.periodMode === 'day' || filterState.periodMode === 'range'}>
+                  <option value="">Todos os anos</option>
+                  {yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+                </select>
+              </label>
+              <label className={labelClass}>Trimestre
+                <select value={filterState.quarter} onChange={(event) => updateOccupancyQuarter(event.target.value)} className={fieldClass} data-testid="filter-occupancy-quarter" disabled={filterState.periodMode === 'day' || filterState.periodMode === 'range'}>
+                  <option value="">Todos os trimestres</option>
+                  <option value="1">1º trimestre · jan–mar</option>
+                  <option value="2">2º trimestre · abr–jun</option>
+                  <option value="3">3º trimestre · jul–set</option>
+                  <option value="4">4º trimestre · out–dez</option>
+                </select>
+              </label>
+            </div>
+            {filterState.periodMode !== 'all' && (
               <div className="mt-3" data-testid="controls-occupancy-period">
-                {filterMode === 'day' && (
+                {filterState.periodMode === 'day' && (
                   <label className={`${labelClass} max-w-[220px]`}>Dia
-                    <input type="date" value={filterDay} onChange={(e) => setFilterDay(e.target.value)} className={fieldClass} data-testid="filter-occupancy-day" />
+                    <input type="date" value={filterState.day} onChange={(e) => updateOccupancyFilters({ day: e.target.value })} className={fieldClass} data-testid="filter-occupancy-day" />
                   </label>
                 )}
-                {filterMode === 'range' && (
+                {filterState.periodMode === 'range' && (
                   <div className="grid max-w-[440px] grid-cols-2 gap-2">
-                    <label className={labelClass}>Data inicial<input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} className={fieldClass} data-testid="filter-occupancy-date-from" /></label>
-                    <label className={labelClass}>Data final<input type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} className={fieldClass} data-testid="filter-occupancy-date-to" /></label>
+                    <label className={labelClass}>Data inicial<input type="date" value={filterState.fromDate} onChange={(e) => updateOccupancyFilters({ fromDate: e.target.value })} className={fieldClass} data-testid="filter-occupancy-date-from" /></label>
+                    <label className={labelClass}>Data final<input type="date" value={filterState.toDate} onChange={(e) => updateOccupancyFilters({ toDate: e.target.value })} className={fieldClass} data-testid="filter-occupancy-date-to" /></label>
                   </div>
                 )}
-                {filterMode === 'months' && (
+                {filterState.periodMode === 'months' && (
                   <div className="space-y-2">
                     <div className="flex max-w-[360px] items-end gap-2">
                       <label className={`${labelClass} min-w-0 flex-1`}>Adicionar mês<input type="month" value={monthToAdd} onChange={(e) => setMonthToAdd(e.target.value)} className={fieldClass} data-testid="filter-occupancy-month-to-add" /></label>
-                      <button type="button" onClick={() => monthToAdd && setFilterMonths((ms) => [...new Set([...ms, monthToAdd])].sort())} disabled={!monthToAdd || filterMonths.includes(monthToAdd)} className="h-10 shrink-0 rounded-lg bg-[#7656b8] px-3 text-xs font-bold text-white hover:bg-[#6748a7] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-add-occupancy-month">Adicionar</button>
+                      <button type="button" onClick={() => monthToAdd && updateOccupancyFilters({ months: [...new Set([...filterState.months, monthToAdd])].sort() })} disabled={!monthToAdd || filterState.months.includes(monthToAdd)} className="h-10 shrink-0 rounded-lg bg-[#7656b8] px-3 text-xs font-bold text-white hover:bg-[#6748a7] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-add-occupancy-month">Adicionar</button>
                     </div>
                     <div className="flex min-h-7 flex-wrap gap-1.5" data-testid="list-occupancy-selected-months">
-                      {filterMonths.map((m) => (
+                      {filterState.months.map((m) => (
                         <span key={m} className="inline-flex items-center gap-1 rounded-full bg-[#eee8f7] py-1 pl-2.5 pr-1 text-[10px] font-semibold capitalize text-[#5d4a78]" data-testid={`chip-occupancy-month-${m}`}>
                           {formatMonthKey(m)}
-                          <button type="button" onClick={() => setFilterMonths((ms) => ms.filter((x) => x !== m))} aria-label={`Remover ${formatMonthKey(m)}`} className="grid h-5 w-5 place-items-center rounded-full text-[#7656b8] hover:bg-white" data-testid={`button-remove-occupancy-month-${m}`}><X size={11} /></button>
+                          <button type="button" onClick={() => updateOccupancyFilters({ months: filterState.months.filter((x) => x !== m) })} aria-label={`Remover ${formatMonthKey(m)}`} className="grid h-5 w-5 place-items-center rounded-full text-[#7656b8] hover:bg-white" data-testid={`button-remove-occupancy-month-${m}`}><X size={11} /></button>
                         </span>
                       ))}
                     </div>
                   </div>
                 )}
-                {filterMode === 'range' && <p className="mt-2 text-[10px] leading-4 text-[#8a8491]">Consolidados mensais aparecem somente quando o mês inteiro está dentro do intervalo.</p>}
+                {filterState.periodMode === 'range' && <p className="mt-2 text-[10px] leading-4 text-[#8a8491]">Consolidados mensais aparecem somente quando o mês inteiro está dentro do intervalo.</p>}
               </div>
             )}
+            <div className="mt-3 grid gap-3 lg:grid-cols-2">
+              <fieldset className="min-w-0">
+                <legend className={labelClass}>Horário inicial</legend>
+                <div className="mt-1.5 flex flex-wrap gap-1.5" data-testid="filter-occupancy-times">
+                  {startTimeOptions.map((time) => {
+                    const selected = filterState.startTimes.includes(time);
+                    return <label key={time} className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-bold tabular-nums ${selected ? 'border-[#7656b8] bg-[#eee8f7] text-[#5d4a78]' : 'border-[#e7e2ea] bg-white text-[#746c7e]'}`}>
+                      <input type="checkbox" checked={selected} onChange={() => toggleFilterTime(time)} className="accent-[#7656b8]" data-testid={`filter-occupancy-time-${time.replace(':', '')}`} />
+                      {time}
+                    </label>;
+                  })}
+                  {!startTimeOptions.length && <span className="text-xs font-medium text-[#908897]">Os horários aparecem após cadastrar aulas.</span>}
+                </div>
+              </fieldset>
+              <fieldset className="min-w-0">
+                <legend className={labelClass}>Dia da semana</legend>
+                <div className="mt-1.5 flex flex-wrap gap-1.5" data-testid="filter-occupancy-weekdays">
+                  {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'].map((day, index) => {
+                    const weekday = index + 1;
+                    const selected = filterState.weekdays.includes(weekday);
+                    return <label key={day} className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-bold ${selected ? 'border-[#7656b8] bg-[#eee8f7] text-[#5d4a78]' : 'border-[#e7e2ea] bg-white text-[#746c7e]'}`}>
+                      <input type="checkbox" checked={selected} onChange={() => toggleFilterWeekday(weekday)} className="accent-[#7656b8]" data-testid={`filter-occupancy-weekday-${weekday}`} />
+                      {day}
+                    </label>;
+                  })}
+                </div>
+              </fieldset>
+            </div>
+            {(filterState.startTimes.length > 0 || filterState.weekdays.length > 0) && <p className="mt-2 text-[10px] leading-4 text-[#8a8491]" role="status" data-testid="status-occupancy-daily-only-filter">Filtros de horário e dia da semana mostram apenas aulas diárias; registros mensais antigos não têm esses dados.</p>}
+            <p className="mt-2 text-[10px] font-semibold text-[#766d83]" data-testid="text-occupancy-applied-filters">Recorte aplicado: {occupancyFilterSummary(filterState)}{filterState.modalityId ? ` · ${modalities.find((modality) => modality.id === filterState.modalityId)?.name ?? 'Modalidade'}` : ''}{filterState.className.trim() ? ` · Turma ${filterState.className.trim()}` : ''}</p>
+            {filterOptionsQuery.isError && <p className="mt-2 text-xs font-semibold text-[#a24f45]" role="alert" data-testid="error-occupancy-filter-options">Não foi possível carregar as opções de ano e horário. Use Atualizar base para tentar novamente.</p>}
             <div className="mt-3 flex items-center justify-between gap-2">
               {filterProblem ? <p className="text-xs font-semibold text-[#a24f45]" role="alert" data-testid="status-occupancy-filter">{filterProblem}</p> : <span />}
               <button type="button" onClick={clearFilters} className="h-8 rounded-lg px-3 text-xs font-semibold text-[#766d83] hover:bg-[#f6f3f8]" data-testid="button-clear-occupancy-filters">Limpar filtros</button>
             </div>
           </div>
+
+          {records.length > 0 && <div className="grid gap-2 border-b border-[#f0edf1] bg-[#fbfafb] p-3 sm:grid-cols-3" data-testid="summary-occupancy-selection">
+            <div className="rounded-xl bg-white px-3 py-2.5"><p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Aulas com presenças e vagas</p><p className="mt-1 text-sm font-extrabold tabular-nums text-[#443d50]" data-testid="text-occupancy-measured-count">{measuredRecords.toLocaleString('pt-BR')}</p></div>
+            <div className="rounded-xl bg-white px-3 py-2.5"><p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Presenças / vagas</p><p className="mt-1 text-sm font-extrabold tabular-nums text-[#443d50]" data-testid="text-occupancy-presence-capacity">{totalPresences?.toLocaleString('pt-BR') ?? '—'} / {totalCapacity?.toLocaleString('pt-BR') ?? '—'}</p></div>
+            <div className="rounded-xl bg-white px-3 py-2.5"><p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Ocupação ponderada</p><p className="mt-1 text-sm font-extrabold tabular-nums text-[#5d4a78]" data-testid="text-occupancy-weighted-rate">{weightedOccupancy === null ? 'Sem capacidade registrada' : formatCalculatedPct(weightedOccupancy)}</p></div>
+            {legacyRecords > 0 && <p className="text-[10px] font-medium text-[#817b89] sm:col-span-3" data-testid="text-occupancy-legacy-count">{legacyRecords} registro(s) legado(s) sem presenças/vagas ficam fora do cálculo ponderado.</p>}
+            {filterKind === 'all' && filterState.viewMode !== 'daily' && <p className="text-[10px] font-medium text-[#817b89] sm:col-span-3" data-testid="text-occupancy-summary-precedence">No modo mensal ou trimestral, o resumo mensal substitui os detalhes diários da mesma turma e mês para evitar duplicidade.</p>}
+          </div>}
 
           {recordsQuery.isLoading && !filterInvalid ? (
             <div className="space-y-2 p-4" data-testid="status-occupancy-loading">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton h-14 rounded-xl" />)}</div>
@@ -453,7 +597,7 @@ export default function OccupancyManagement() {
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#eee8f7] text-[#7656b8]"><CalendarDays size={17} /></span>
               <div>
                 <p className="text-sm font-bold text-[#40374e]">{filterInvalid ? 'Complete o filtro para consultar' : 'Sem dados neste recorte'}</p>
-                <p className="mt-1 text-xs leading-5 text-[#827b8b]">Ausência de registro não significa ocupação zero. Lance o percentual ao lado quando ele estiver disponível.</p>
+                  <p className="mt-1 text-xs leading-5 text-[#827b8b]">Ausência de registro não significa ocupação zero. Registre presenças e capacidade da aula para calcular o percentual.</p>
               </div>
             </div>
           ) : (
@@ -467,6 +611,9 @@ export default function OccupancyManagement() {
                   <p className="row-span-2 text-right font-[family-name:var(--app-font-serif)] text-xl font-extrabold tracking-[-.04em] tabular-nums text-[#2f2a3d] sm:order-3 sm:row-span-1" data-testid={`text-occupancy-percentage-${r.id}`}>{formatPct(r.percentage)}</p>
                   <div className="min-w-0 sm:order-2">
                     <p className="truncate text-sm font-semibold text-[#3f384b]" data-testid={`text-occupancy-modality-${r.id}`}>{r.modalityName}{r.className && <span className="font-medium text-[#857e8e]"> · {r.className}</span>}</p>
+                    {r.presences !== null && r.capacity !== null && <p className="mt-0.5 text-[10px] font-medium tabular-nums text-[#817b89]" data-testid={`text-occupancy-measurements-${r.id}`}>
+                      {r.startTime}{r.endTime ? `–${r.endTime}` : ''} · {r.presences}/{r.capacity} presenças/vagas
+                    </p>}
                     {r.notes && <p className="truncate text-[11px] text-[#8a8491]" title={r.notes}>{r.notes}</p>}
                   </div>
                   <div className="col-span-2 flex justify-end gap-1 sm:order-4 sm:col-span-1">

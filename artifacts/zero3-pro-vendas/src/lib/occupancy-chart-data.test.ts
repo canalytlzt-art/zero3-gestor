@@ -11,6 +11,7 @@ function record(
   modalityName: string,
   percentage: number,
   className: string | null = null,
+  startTime: string | null = null,
 ): OccupancyRecord {
   const month = kind === 'daily' ? period.slice(0, 7) : period;
   return {
@@ -21,6 +22,11 @@ function record(
     modalityId,
     modalityName,
     percentage,
+    reportedPercentage: null,
+    presences: null,
+    capacity: null,
+    startTime,
+    endTime: null,
     className,
     notes: null,
     sourceFileHash: null,
@@ -86,7 +92,7 @@ test('partial-month interval ignores monthly records and uses only daily entries
 
   assert.equal(analytics.evolution.length, 1);
   assert.equal(analytics.evolution[0].percentage, 55);
-  assert.equal(analytics.evolution[0].source, 'average');
+  assert.equal(analytics.evolution[0].source, 'reported');
 });
 
 test('multi-month indicators average available month results and never fill missing months with zero', () => {
@@ -134,4 +140,130 @@ test('modality comparison keeps independent modalities separate and reports peri
   assert.equal(analytics.comparison.find((item) => item.modalityId === 'pilates')?.coveredPeriods, 2);
   assert.equal(analytics.comparison.find((item) => item.modalityId === 'yoga')?.percentage, 25);
   assert.equal(analytics.comparison.find((item) => item.modalityId === 'yoga')?.coveredPeriods, 1);
+});
+
+test('measured classes use weighted totals across dates and keep legacy percentages separate', () => {
+  const analytics = buildOccupancyChartAnalytics([
+    { ...record('small', 'daily', '2026-10-01', 'crossfit', 'CrossFit', 50), presences: 1, capacity: 2 },
+    { ...record('large', 'daily', '2026-10-02', 'crossfit', 'CrossFit', 90), presences: 9, capacity: 10 },
+    record('legacy', 'daily', '2026-10-02', 'crossfit', 'CrossFit', 40, 'legado'),
+  ], {
+    viewMode: 'daily',
+    selectedMonths: ['2026-10'],
+    modalityId: 'crossfit',
+  });
+
+  assert.equal(analytics.supportRows.length, 3);
+  assert.equal(analytics.comparison[0].percentage, (10 / 12) * 100);
+  assert.equal(analytics.comparison[0].source, 'weighted');
+  assert.equal(analytics.donut?.occupied, (10 / 12) * 100);
+  assert.equal(analytics.supportRows.find((row) => row.source === 'reported')?.percentage, 40);
+  assert.equal(analytics.supportRows.find((row) => row.source === 'weighted')?.presences, 1);
+});
+
+test('quarter-like selected month sets aggregate monthly measured records from total presence and capacity', () => {
+  const analytics = buildOccupancyChartAnalytics([
+    { ...record('jan', 'daily', '2026-01-10', 'crossfit', 'CrossFit', 50), presences: 1, capacity: 2 },
+    { ...record('feb', 'daily', '2026-02-10', 'crossfit', 'CrossFit', 90), presences: 9, capacity: 10 },
+  ], {
+    viewMode: 'monthly',
+    selectedMonths: ['2026-01', '2026-02', '2026-03'],
+    modalityId: 'crossfit',
+  });
+
+  assert.deepEqual(analytics.evolution.map((point) => point.percentage), [50, 90, null]);
+  assert.equal(analytics.donut?.occupied, (10 / 12) * 100);
+  assert.equal(analytics.donut?.source, 'weighted');
+});
+
+test('monthly legacy percentages remain separate from weighted daily classes in the same scope', () => {
+  const analytics = buildOccupancyChartAnalytics([
+    { ...record('d1', 'daily', '2026-10-01', 'crossfit', 'CrossFit', 50, 'Manhã'), presences: 1, capacity: 2 },
+    { ...record('d2', 'daily', '2026-10-02', 'crossfit', 'CrossFit', 90, 'Manhã'), presences: 9, capacity: 10 },
+    record('legacy-month', 'monthly', '2026-10', 'crossfit', 'CrossFit', 75, 'Manhã'),
+  ], {
+    viewMode: 'monthly',
+    selectedMonths: ['2026-10'],
+    modalityId: 'crossfit',
+  });
+
+  assert.equal(analytics.supportRows.length, 2);
+  assert.equal(analytics.supportRows.find((row) => row.source === 'reported')?.percentage, 75);
+  assert.equal(analytics.evolution[0].percentage, (10 / 12) * 100);
+  assert.equal(analytics.evolution[0].source, 'weighted');
+});
+
+test('hour and weekday groupings use weighted counts and retain rates above capacity', () => {
+  const records = [
+    { ...record('mon-06', 'daily', '2026-10-05', 'crossfit', 'CrossFit', 106, 'Manhã', '06:00'), presences: 19, capacity: 18 },
+    { ...record('mon-07-small', 'daily', '2026-10-05', 'crossfit', 'CrossFit', 50, 'Manhã', '07:00'), presences: 1, capacity: 2 },
+    { ...record('tue-07-large', 'daily', '2026-10-06', 'crossfit', 'CrossFit', 90, 'Manhã', '07:00'), presences: 9, capacity: 10 },
+  ];
+  const analytics = buildOccupancyChartAnalytics(records, {
+    viewMode: 'daily',
+    selectedMonths: ['2026-10'],
+    modalityId: 'crossfit',
+  });
+
+  assert.deepEqual(analytics.byHour.map((item) => item.label), ['06:00', '07:00']);
+  assert.equal(analytics.byHour[0].percentage, (19 / 18) * 100);
+  assert.equal(analytics.byHour[1].percentage, (10 / 12) * 100);
+  const sixAmRow = analytics.supportRows.find((row) => row.startTime === '06:00' && row.source === 'weighted');
+  assert.equal(sixAmRow?.presences, 19);
+  assert.equal(sixAmRow?.capacity, 18);
+  assert.equal(sixAmRow?.recordCount, 1);
+  assert.deepEqual(analytics.byWeekday.map((item) => item.label), ['Segunda', 'Terça']);
+  assert.equal(analytics.byWeekday[0].percentage, (20 / 20) * 100);
+  assert.equal(analytics.totals.classes, 3);
+  assert.equal(analytics.totals.measuredClassCount, 3);
+  assert.equal(analytics.totals.presences, 29);
+  assert.equal(analytics.totals.capacity, 30);
+  assert.equal(analytics.totals.percentage, (29 / 30) * 100);
+
+  const overCapacity = buildOccupancyChartAnalytics(records, {
+    viewMode: 'daily',
+    selectedMonths: ['2026-10'],
+    modalityId: 'crossfit',
+    startTimes: ['06:00'],
+    weekdays: [1],
+  });
+  assert.equal(overCapacity.donut?.occupied, (19 / 18) * 100);
+  assert.equal(overCapacity.donut?.unoccupied, 0);
+  assert.equal(overCapacity.donut?.presences, 19);
+  assert.equal(overCapacity.donut?.capacity, 18);
+  assert.deepEqual(overCapacity.byHour.map((item) => item.label), ['06:00']);
+});
+
+test('quarterly view replaces daily data only for the same class and month', () => {
+  const analytics = buildOccupancyChartAnalytics([
+    { ...record('jan-daily', 'daily', '2026-01-10', 'crossfit', 'CrossFit', 50, 'Manhã', '06:00'), presences: 1, capacity: 2 },
+    { ...record('jan-monthly', 'monthly', '2026-01', 'crossfit', 'CrossFit', 80, 'Manhã'), presences: 8, capacity: 10 },
+    { ...record('feb-daily', 'daily', '2026-02-10', 'crossfit', 'CrossFit', 90, 'Manhã', '06:00'), presences: 9, capacity: 10 },
+    { ...record('mar-daily', 'daily', '2026-03-10', 'crossfit', 'CrossFit', 80, 'Manhã', '06:00'), presences: 4, capacity: 5 },
+  ], {
+    viewMode: 'quarterly',
+    selectedMonths: ['2026-01', '2026-02', '2026-03'],
+    modalityId: 'crossfit',
+  });
+
+  assert.deepEqual(analytics.evolution.map((point) => point.period), ['2026-Q1']);
+  assert.equal(analytics.evolution[0].percentage, (21 / 25) * 100);
+  assert.equal(analytics.totals.classes, 3);
+  assert.equal(analytics.totals.measuredClassCount, 3);
+  assert.equal(analytics.totals.presences, 21);
+  assert.equal(analytics.totals.capacity, 25);
+  assert.deepEqual(analytics.supportRows.map((row) => row.period), ['2026-Q1', '2026-Q1']);
+});
+
+test('all-modality indicators combine presence and capacity totals instead of averaging rates', () => {
+  const analytics = buildOccupancyChartAnalytics([
+    { ...record('small', 'daily', '2026-10-05', 'crossfit', 'CrossFit', 50), presences: 1, capacity: 2 },
+    { ...record('large', 'daily', '2026-10-05', 'yoga', 'Yoga', 90), presences: 9, capacity: 10 },
+  ], { viewMode: 'daily', selectedMonths: ['2026-10'] });
+
+  assert.equal(analytics.totals.percentage, (10 / 12) * 100);
+  assert.equal(analytics.donut?.occupied, (10 / 12) * 100);
+  assert.equal(analytics.evolution.find((point) => point.period === '2026-10-05')?.percentage, (10 / 12) * 100);
+  assert.equal(analytics.comparison.find((item) => item.modalityId === 'crossfit')?.percentage, 50);
+  assert.equal(analytics.comparison.find((item) => item.modalityId === 'yoga')?.percentage, 90);
 });

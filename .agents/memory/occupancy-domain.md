@@ -15,6 +15,12 @@ Preservar registros legados que só têm percentual sem inventar presenças ou c
 
 **How to apply:** Manter dados antigos e novos compatíveis durante a migração; ausência de registros nunca significa aula com zero presenças. Calcular taxas novas sempre com somas de presenças e vagas.
 
+Ao misturar detalhe diário com resumo mensal, escolher a fonte por modalidade/turma/mês: o resumo substitui o detalhe apenas naquele mês; nos outros meses do trimestre, os registros diários continuam entrando. Resumos percentuais legados substituem somente percentuais legados do mesmo grupo e nunca se misturam às medições. Gráficos por horário ou dia da semana usam apenas registros diários, sem distribuir totais mensais por categorias que a fonte não informa.
+
+**Why:** A planilha pode conter níveis de agregação diferentes; escolher a precedência no trimestre inteiro perde dados, somar ambos duplica valores, e repartir um resumo mensal por horário/dia inventaria informação.
+
+**How to apply:** Resolver substituição dentro de cada mês antes de juntar meses em um trimestre. Para gráficos por horário e dia da semana, usar dados diários com esses atributos e manter totais mensais fora dessas quebras.
+
 O modelo de aula não exige cliente, professor, venda ou cadastro individual de participantes. “Vagas” é capacidade total, não vagas restantes. Horário inicial distingue aulas da mesma modalidade no mesmo dia; horário final pode faltar.
 
 **Why:** A ocupação é uma medida operacional por aula, e a mesma turma pode ter várias sessões no mesmo dia.

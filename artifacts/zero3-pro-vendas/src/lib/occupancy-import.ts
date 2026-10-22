@@ -14,6 +14,11 @@ export type OccupancyImportEntry = {
   period: string | null;
   modalityName: string | null;
   percentage: number | null;
+  reportedPercentage: number | null;
+  presences: number | null;
+  capacity: number | null;
+  startTime: string | null;
+  endTime: string | null;
   className: string | null;
   status: "ready" | "pending" | "ignored";
   reason: string;
@@ -41,6 +46,12 @@ type Block = {
   periodColumn?: number;
   modalityColumn?: number;
   percentageColumn?: number;
+  timeColumn?: number;
+  startTimeColumn?: number;
+  endTimeColumn?: number;
+  presenceCapacityColumn?: number;
+  presencesColumn?: number;
+  capacityColumn?: number;
   classColumn?: number;
   yearColumn?: number;
   forceMonthly?: boolean;
@@ -176,12 +187,18 @@ function parseMonthHeading(value: unknown, yearHint?: number): Period | null {
   return null;
 }
 
-function fieldForHeader(value: unknown): "period" | "month" | "modality" | "percentage" | "class" | "year" | null {
+function fieldForHeader(value: unknown): "period" | "month" | "modality" | "percentage" | "class" | "year" | "time" | "startTime" | "endTime" | "presenceCapacity" | "presences" | "capacity" | null {
   const header = normalize(value).replace(/%/g, " ").replace(/\s+/g, " ").trim();
   if (/^(data|dia|data da aula|data da atividade|data aula)$/.test(header)) return "period";
   if (/^(mes|mes ano|mes ano competencia|competencia|mes competencia|month|year month|mes e ano)$/.test(header)) return "month";
   if (/^(modalidade|atividade|modality|activity|aula)$/.test(header)) return "modality";
   if (/^(ocupacao|ocupacao percentual|percentual ocupacao|percentual|percentual de ocupacao|taxa ocupacao|occupancy|occupancy rate|percent|taxa)$/.test(header)) return "percentage";
+  if (/^(presencas vagas|presencas capacidade|presenca vagas|presenca capacidade|presencas por vagas|presencas\/vagas|presencas-vagas)$/.test(header)) return "presenceCapacity";
+  if (/^(presencas|presenca|participantes|frequencia)$/.test(header)) return "presences";
+  if (/^(vagas|vagas totais|capacidade|capacidade total|lotacao total)$/.test(header)) return "capacity";
+  if (/^(horario inicial|hora inicial|hora de inicio|horario de inicio|inicio|hora inicio|start time)$/.test(header)) return "startTime";
+  if (/^(horario final|hora final|hora de fim|horario de fim|fim|hora fim|end time)$/.test(header)) return "endTime";
+  if (/^(horario|hora|horario da aula|hora da aula|time)$/.test(header)) return "time";
   if (/^(turma|horario|turma horario|classe|class|horario turma)$/.test(header)) return "class";
   if (/^(ano|year)$/.test(header)) return "year";
   return null;
@@ -235,15 +252,31 @@ function createBlock(source: SourceSheet, rowIndex: number, globalYears: number[
   const monthColumn = one("month");
   const modalityColumn = one("modality");
   const percentageColumn = one("percentage");
+  const timeColumn = one("time");
+  const startTimeColumn = one("startTime");
+  const endTimeColumn = one("endTime");
+  const presenceCapacityColumn = one("presenceCapacity");
+  const presencesColumn = one("presences");
+  const capacityColumn = one("capacity");
   const classColumn = one("class");
   const yearColumn = one("year");
   const periodInputColumn = periodColumn ?? monthColumn;
-  if (periodInputColumn !== undefined && modalityColumn !== undefined && percentageColumn !== undefined) {
-    const otherAmbiguity = [fields.get("period"), fields.get("month"), fields.get("modality"), fields.get("percentage")].some((columns) => (columns?.length ?? 0) > 1);
+  const hasCountColumns = presenceCapacityColumn !== undefined || presencesColumn !== undefined || capacityColumn !== undefined;
+  if (periodInputColumn !== undefined && modalityColumn !== undefined && (percentageColumn !== undefined || hasCountColumns)) {
+    const otherAmbiguity = [
+      fields.get("period"), fields.get("month"), fields.get("modality"), fields.get("percentage"),
+      fields.get("time"), fields.get("startTime"), fields.get("endTime"),
+      fields.get("presenceCapacity"), fields.get("presences"), fields.get("capacity"),
+    ].some((columns) => (columns?.length ?? 0) > 1)
+      || (presenceCapacityColumn !== undefined && (presencesColumn !== undefined || capacityColumn !== undefined))
+      || (timeColumn !== undefined && (startTimeColumn !== undefined || endTimeColumn !== undefined));
     return {
       headerRow: rowIndex, kind: "records", periodColumn: periodInputColumn, modalityColumn, percentageColumn,
+      timeColumn, startTimeColumn, endTimeColumn, presenceCapacityColumn, presencesColumn, capacityColumn,
       classColumn, yearColumn, forceMonthly: periodColumn === undefined || monthColumn !== undefined,
-      ambiguousPeriod: otherAmbiguity, scaleKey: `${source.name}::${rowIndex + 1}::${columnName(percentageColumn)}`, scaleColumn: columnName(percentageColumn),
+      ambiguousPeriod: otherAmbiguity,
+      scaleKey: `${source.name}::${rowIndex + 1}::${columnName(percentageColumn ?? presenceCapacityColumn ?? presencesColumn ?? 0)}`,
+      scaleColumn: percentageColumn === undefined ? "—" : columnName(percentageColumn),
     };
   }
   if (modalityColumn !== undefined) {
@@ -286,6 +319,77 @@ function percentFormat(format: string) {
   return cleaned.includes("%");
 }
 
+function parseClock(raw: unknown): string | null {
+  const text = String(raw ?? "").trim();
+  const match = text.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const second = Number(match[3] ?? 0);
+  if (hour > 23 || minute > 59 || second !== 0) return null;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function parseTimeValue(raw: unknown): string | null {
+  if (raw instanceof Date && Number.isFinite(raw.getTime())) {
+    return `${String(raw.getUTCHours()).padStart(2, "0")}:${String(raw.getUTCMinutes()).padStart(2, "0")}`;
+  }
+  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0 && raw < 1) {
+    const minutes = Math.round(raw * 24 * 60);
+    if (minutes < 0 || minutes >= 24 * 60) return null;
+    return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  }
+  return parseClock(raw);
+}
+
+function parseTimeCell(cell: Cell | undefined, allowRange: boolean) {
+  if (!cell || isBlank(cell.value)) return { startTime: null, endTime: null, error: "Horário inicial ausente." };
+  if (cell.error || (cell.formula && isBlank(cell.value))) {
+    return { startTime: null, endTime: null, error: cellError(cell, "Horário") };
+  }
+  if (allowRange && typeof cell.value === "string") {
+    const text = cell.value.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const range = text.match(/^(.+?)\s*(?:[-–—]|(?:\s+)(?:a|as|ate)\s+)\s*(.*?)$/i);
+    if (range) {
+      const startTime = parseTimeValue(range[1]);
+      const endTime = range[2] ? parseTimeValue(range[2]) : null;
+      if (!startTime) return { startTime: null, endTime: null, error: `Horário inicial inválido em ${cell.address}; use HH:MM.` };
+      if (range[2] && !endTime) return { startTime, endTime: null, error: `Horário final inválido em ${cell.address}; use HH:MM.` };
+      return { startTime, endTime, error: null };
+    }
+  }
+  const startTime = parseTimeValue(cell.value);
+  return startTime
+    ? { startTime, endTime: null, error: null }
+    : { startTime: null, endTime: null, error: `Horário inválido em ${cell.address}; use HH:MM ou HH:MM - HH:MM.` };
+}
+
+function parseCountCell(cell: Cell | undefined, label: string, allowZero: boolean) {
+  if (!cell || isBlank(cell.value)) return { value: null, error: `${label} ausente${cell ? ` em ${cell.address}` : ""}.` };
+  if (cell.error || (cell.formula && isBlank(cell.value))) return { value: null, error: cellError(cell, label) };
+  const raw = cell.value;
+  const value = typeof raw === "number"
+    ? (Number.isSafeInteger(raw) ? raw : null)
+    : (/^\d+$/.test(String(raw).trim()) ? Number(String(raw).trim()) : null);
+  if (value === null || !Number.isSafeInteger(value) || value > 2_147_483_647 || (allowZero ? value < 0 : value < 1)) {
+    return { value: null, error: `${label} em ${cell.address} deve ser um número inteiro ${allowZero ? "maior ou igual a zero" : "maior que zero"}.` };
+  }
+  return { value, error: null };
+}
+
+function parsePresenceCapacityCell(cell: Cell | undefined) {
+  if (!cell || isBlank(cell.value)) return { presences: null, capacity: null, error: `Presenças/vagas ausentes${cell ? ` em ${cell.address}` : ""}.` };
+  if (cell.error || (cell.formula && isBlank(cell.value))) return { presences: null, capacity: null, error: cellError(cell, "Presenças/vagas") };
+  const match = String(cell.value).trim().match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (!match) return { presences: null, capacity: null, error: `Presenças/vagas inválidas em ${cell.address}; use um formato como 10/18.` };
+  const presences = Number(match[1]);
+  const capacity = Number(match[2]);
+  if (!Number.isSafeInteger(presences) || presences > 2_147_483_647 || !Number.isSafeInteger(capacity) || capacity < 1 || capacity > 2_147_483_647) {
+    return { presences: null, capacity: null, error: `Presenças/vagas inválidas em ${cell.address}; presenças devem ser inteiras e vagas maiores que zero.` };
+  }
+  return { presences, capacity, error: null };
+}
+
 function parsePercent(raw: unknown): { value: number | null; explicitPercent: boolean; error: string | null } {
   if (typeof raw === "number") return Number.isFinite(raw)
     ? { value: raw, explicitPercent: false, error: null }
@@ -314,8 +418,8 @@ function explainFormula(cell: Cell | undefined, label: string) {
   return null;
 }
 
-function finalizePercentage(cell: Cell | undefined, scale: "fraction" | "percent" | undefined) {
-  if (!cell || isBlank(cell.value)) return { value: null, error: explainFormula(cell, "Percentual") ?? "Percentual ausente.", needsScale: false };
+function finalizePercentage(cell: Cell | undefined, scale: "fraction" | "percent" | undefined, optional = false) {
+  if (!cell || isBlank(cell.value)) return { value: null, error: optional ? null : explainFormula(cell, "Percentual") ?? "Percentual ausente.", needsScale: false };
   if (cell.error) return { value: null, error: `Erro de fórmula em ${cell.address}: ${cell.error}.`, needsScale: false };
   const parsed = parsePercent(cell.value);
   if (parsed.error || parsed.value === null) return { value: null, error: `Percentual inválido em ${cell.address}.`, needsScale: false };
@@ -323,16 +427,16 @@ function finalizePercentage(cell: Cell | undefined, scale: "fraction" | "percent
   const fractionFromText = parsed.explicitPercent;
   if (fractionFromFormat || fractionFromText) {
     const value = fractionFromText ? parsed.value : parsed.value * 100;
-    return { value, error: value < 0 || value > 100 ? `Valor ${value}% fora do intervalo de 0% a 100%. Revise na planilha; nada foi ajustado automaticamente.` : null, needsScale: false };
+    return { value, error: value < 0 ? `Percentual negativo em ${cell.address}; revise na planilha.` : null, needsScale: false };
   }
   if (scale === "fraction") {
     if (parsed.value < 0 || parsed.value > 1) return { value: parsed.value, error: `A escala confirmada de 0 a 1 não corresponde a ${parsed.value} em ${cell.address}.`, needsScale: false };
     return { value: parsed.value * 100, error: null, needsScale: false };
   }
   if (scale === "percent") {
-    return { value: parsed.value, error: parsed.value < 0 || parsed.value > 100 ? `Valor ${parsed.value} fora de 0% a 100%. Nada foi ajustado automaticamente.` : null, needsScale: false };
+    return { value: parsed.value, error: parsed.value < 0 ? `Percentual negativo em ${cell.address}; revise a planilha.` : null, needsScale: false };
   }
-  return { value: parsed.value, error: parsed.value < 0 || parsed.value > 100 ? `Valor ${parsed.value} fora de 0% a 100%. Nada foi ajustado automaticamente.` : null, needsScale: false, ambiguous: parsed.value > 0 && parsed.value <= 1 };
+  return { value: parsed.value, error: parsed.value < 0 ? `Percentual negativo em ${cell.address}; revise a planilha.` : null, needsScale: false, ambiguous: parsed.value > 0 && parsed.value <= 1 };
 }
 
 function inferBlockScale(source: SourceSheet, block: Block) {
@@ -348,7 +452,7 @@ function inferBlockScale(source: SourceSheet, block: Block) {
       const cell = row.get(column);
       if (!cell || isBlank(cell.value) || percentFormat(cell.format)) continue;
       const parsed = parsePercent(cell.value);
-      if (parsed.error || parsed.explicitPercent || parsed.value === null || parsed.value < 0 || parsed.value > 100) continue;
+       if (parsed.error || parsed.explicitPercent || parsed.value === null || parsed.value < 0) continue;
       values.push(parsed.value);
     }
   }
@@ -410,23 +514,59 @@ export async function parseOccupancySpreadsheet(bytes: ArrayBuffer, filename: st
   let ignoredCount = 0;
   const pendingScale: ParsedOccupancyImport["scaleDecisions"] = [];
   let index = 0;
+  const isInstructionSheet = (name: string) => {
+    const normalized = normalize(name).replace(/\s+/g, "");
+    return normalized === "modelo" || normalized === "comousar";
+  };
   const appendUnmapped = (source: SourceSheet, rowIndex: number, cells: Cell[], reason: string) => {
     index += 1;
     if (index > MAX_ROWS) throw new Error("A planilha contém mais de 25 mil registros possíveis. Divida a planilha em arquivos menores.");
     entries.push({
       index, sourceSheet: source.name, sourceCell: cells[0]?.address ?? cellAddress(source, rowIndex, 0),
       sourceCells: Object.fromEntries(cells.slice(0, 4).map((cell, position) => [position === 0 ? "period" : `field${position}`, cell.address])),
-      kind: null, period: null, modalityName: null, percentage: null, className: null, status: "pending", reason,
+      kind: null, period: null, modalityName: null, percentage: null, reportedPercentage: null,
+      presences: null, capacity: null, startTime: null, endTime: null, className: null, status: "pending", reason,
     });
   };
 
-  const append = (source: SourceSheet, block: Block, rowIndex: number, periodCell: Cell | undefined, modalityCell: Cell | undefined, percentageCell: Cell | undefined, classCell: Cell | undefined, forceMonthly?: boolean, knownYears: number[] = [], yearHintOverride?: number) => {
+  const append = (
+    source: SourceSheet,
+    block: Block,
+    rowIndex: number,
+    periodCell: Cell | undefined,
+    modalityCell: Cell | undefined,
+    percentageCell: Cell | undefined,
+    classCell: Cell | undefined,
+    forceMonthly?: boolean,
+    knownYears: number[] = [],
+    yearHintOverride?: number,
+    measurementCells?: {
+      timeCell?: Cell;
+      startTimeCell?: Cell;
+      endTimeCell?: Cell;
+      presenceCapacityCell?: Cell;
+      presencesCell?: Cell;
+      capacityCell?: Cell;
+    },
+  ) => {
     index += 1;
     if (index > MAX_ROWS) throw new Error("A planilha contém mais de 25 mil registros possíveis. Divida a planilha em arquivos menores.");
+    const hasMeasurementColumns = Boolean(measurementCells && (
+      block.presenceCapacityColumn !== undefined || block.presencesColumn !== undefined || block.capacityColumn !== undefined
+    ));
     const sourceCells: Record<string, string> = {};
     if (periodCell) sourceCells.period = periodCell.address;
     if (modalityCell) sourceCells.modality = modalityCell.address;
     if (percentageCell) sourceCells.percentage = percentageCell.address;
+    if (measurementCells?.timeCell) sourceCells.startTime = measurementCells.timeCell.address;
+    if (measurementCells?.startTimeCell) sourceCells.startTime = measurementCells.startTimeCell.address;
+    if (measurementCells?.endTimeCell && !isBlank(measurementCells.endTimeCell.value)) sourceCells.endTime = measurementCells.endTimeCell.address;
+    if (measurementCells?.presenceCapacityCell) {
+      sourceCells.presences = measurementCells.presenceCapacityCell.address;
+      sourceCells.capacity = measurementCells.presenceCapacityCell.address;
+    }
+    if (measurementCells?.presencesCell) sourceCells.presences = measurementCells.presencesCell.address;
+    if (measurementCells?.capacityCell) sourceCells.capacity = measurementCells.capacityCell.address;
     if (classCell && !isBlank(classCell.value)) sourceCells.class = classCell.address;
     const periodHint = periodCell ? rowYearHint(source, rowIndex, periodCell.column, block.yearColumn) : undefined;
     const yearHint = periodHint ?? yearHintOverride ?? (knownYears.length === 1 ? knownYears[0] : undefined) ?? options.missingYear;
@@ -440,11 +580,53 @@ export async function parseOccupancySpreadsheet(bytes: ArrayBuffer, filename: st
     const modalityError = modalityCell?.formula && isBlank(modalityCell.value)
       ? `Fórmula sem resultado em ${modalityCell.address}.`
       : !rawModality ? (modalityCell ? `Modalidade ausente em ${modalityCell.address}.` : "Modalidade não identificada nesta linha.") : rawModality.length > 120 ? "Modalidade acima de 120 caracteres." : null;
-    const pctResult = finalizePercentage(percentageCell, options.scaleDecisions?.[block.scaleKey] ?? block.inferredScale);
+    const pctResult = finalizePercentage(percentageCell, options.scaleDecisions?.[block.scaleKey] ?? block.inferredScale, hasMeasurementColumns);
+    let presences: number | null = null;
+    let capacity: number | null = null;
+    const countErrors: string[] = [];
+    if (hasMeasurementColumns) {
+      if (measurementCells?.presenceCapacityCell) {
+        const parsedCounts = parsePresenceCapacityCell(measurementCells.presenceCapacityCell);
+        presences = parsedCounts.presences;
+        capacity = parsedCounts.capacity;
+        if (parsedCounts.error) countErrors.push(parsedCounts.error);
+      } else {
+        const parsedPresences = parseCountCell(measurementCells?.presencesCell, "Presenças", true);
+        const parsedCapacity = parseCountCell(measurementCells?.capacityCell, "Vagas", false);
+        presences = parsedPresences.value;
+        capacity = parsedCapacity.value;
+        if (parsedPresences.error) countErrors.push(parsedPresences.error);
+        if (parsedCapacity.error) countErrors.push(parsedCapacity.error);
+      }
+    }
+    const timeResult = measurementCells?.timeCell
+      ? parseTimeCell(measurementCells.timeCell, true)
+      : measurementCells?.startTimeCell
+        ? parseTimeCell(measurementCells.startTimeCell, false)
+        : { startTime: null, endTime: null, error: "Horário inicial ausente." };
+    const endTimeResult = measurementCells?.endTimeCell && !isBlank(measurementCells.endTimeCell.value)
+      ? parseTimeCell(measurementCells.endTimeCell, false)
+      : null;
+    const startTime = timeResult.startTime;
+    const endTime = endTimeResult?.startTime ?? timeResult.endTime;
+    if (measurementCells?.timeCell && timeResult.endTime) sourceCells.endTime = measurementCells.timeCell.address;
     const errors: string[] = [];
     if (periodError) errors.push(periodError);
     if (modalityError) errors.push(modalityError);
     if (pctResult.error) errors.push(pctResult.error);
+    if (hasMeasurementColumns) {
+      errors.push(...countErrors);
+      if (timeResult.error) errors.push(timeResult.error);
+      if (endTimeResult?.error) errors.push(endTimeResult.error);
+      if (resolved?.kind !== "daily") errors.push("Aulas com presenças e vagas precisam de uma data diária, não apenas de mês/ano.");
+    }
+    const computedPercentage = presences !== null && capacity !== null && capacity > 0
+      ? Number((presences / capacity * 100).toFixed(6))
+      : null;
+    if (hasMeasurementColumns && computedPercentage !== null && pctResult.value !== null
+      && Math.abs(computedPercentage - pctResult.value) > 0.5) {
+      errors.push(`Ocupação informada ${pctResult.value}% diverge da calculada ${computedPercentage}% em mais de 0,5 ponto percentual; revise antes de importar.`);
+    }
     const unresolvedYear = resolved?.missingYear === true && !options.missingYear;
     if (unresolvedYear) {
       missingYear = true;
@@ -458,15 +640,27 @@ export async function parseOccupancySpreadsheet(bytes: ArrayBuffer, filename: st
       }
       errors.push("Escala ambígua. Confirme se os números sem símbolo representam 0–100% ou 0–1 antes de importar.");
     }
-    const validSource = Boolean(periodCell && modalityCell && percentageCell);
-    const missing = errors.length > 0 || !resolved?.value || !rawModality || pctResult.value === null || !validSource;
-    const sparseData = [periodCell, modalityCell, percentageCell].filter((cell) => cell && !isBlank(cell.value)).length;
+    const validMeasurements = hasMeasurementColumns
+      ? presences !== null && capacity !== null && capacity > 0 && Boolean(startTime) && resolved?.kind === "daily"
+      : Boolean(percentageCell && pctResult.value !== null);
+    const validSource = Boolean(periodCell && modalityCell && validMeasurements);
+    const missing = errors.length > 0 || !resolved?.value || !rawModality || !validSource;
+    const sparseData = [periodCell, modalityCell, percentageCell, measurementCells?.timeCell,
+      measurementCells?.startTimeCell, measurementCells?.endTimeCell, measurementCells?.presenceCapacityCell,
+      measurementCells?.presencesCell, measurementCells?.capacityCell]
+      .filter((cell) => cell && !isBlank(cell.value)).length;
     const status = missing ? "pending" : "ready";
     entries.push({
       index, sourceSheet: source.name,
-      sourceCell: percentageCell?.address ?? cellAddress(source, rowIndex, block.percentageColumn ?? 0),
+      sourceCell: measurementCells?.presenceCapacityCell?.address
+        ?? measurementCells?.presencesCell?.address
+        ?? percentageCell?.address
+        ?? cellAddress(source, rowIndex, block.percentageColumn ?? block.presenceCapacityColumn ?? block.presencesColumn ?? 0),
       sourceCells, kind: resolved?.kind ?? null, period: resolved?.value ?? null,
-      modalityName: rawModality || null, percentage: pctResult.value,
+      modalityName: rawModality || null,
+      percentage: computedPercentage ?? pctResult.value,
+      reportedPercentage: computedPercentage === null ? null : pctResult.value,
+      presences, capacity, startTime, endTime,
       className: classCell && !isBlank(classCell.value) ? String(classCell.value).trim().replace(/\s+/g, " ") : null,
       status: !validSource && sparseData === 0 ? "ignored" : status,
       reason: !validSource && sparseData === 0 ? "Linha sem dados de ocupação." : errors.join(" ") || "Pronto para conferência.",
@@ -475,6 +669,10 @@ export async function parseOccupancySpreadsheet(bytes: ArrayBuffer, filename: st
   };
 
   for (const source of sourceSheets) {
+    if (isInstructionSheet(source.name)) {
+      ignoredCount += source.rows.size;
+      continue;
+    }
     const knownYears = sheetYears(`${filename} ${source.name}`, source.rows);
     for (const year of knownYears) globalYears.add(year);
     const rowIndices = [...source.rows.keys()].sort((a, b) => a - b);
@@ -531,12 +729,21 @@ export async function parseOccupancySpreadsheet(bytes: ArrayBuffer, filename: st
       if (block.kind === "records") {
         const periodCell = cells.get(block.periodColumn!);
         const modalityCell = cells.get(block.modalityColumn!);
-        const percentageCell = cells.get(block.percentageColumn!);
+        const percentageCell = block.percentageColumn === undefined ? undefined : cells.get(block.percentageColumn);
         const classCell = block.classColumn === undefined ? undefined : cells.get(block.classColumn);
-        if ([periodCell, modalityCell, percentageCell, classCell].every((cell) => !cell || isBlank(cell.value))) continue;
+        const timeCell = block.timeColumn === undefined ? undefined : cells.get(block.timeColumn);
+        const startTimeCell = block.startTimeColumn === undefined ? undefined : cells.get(block.startTimeColumn);
+        const endTimeCell = block.endTimeColumn === undefined ? undefined : cells.get(block.endTimeColumn);
+        const presenceCapacityCell = block.presenceCapacityColumn === undefined ? undefined : cells.get(block.presenceCapacityColumn);
+        const presencesCell = block.presencesColumn === undefined ? undefined : cells.get(block.presencesColumn);
+        const capacityCell = block.capacityColumn === undefined ? undefined : cells.get(block.capacityColumn);
+        if ([periodCell, modalityCell, percentageCell, classCell, timeCell, startTimeCell, endTimeCell,
+          presenceCapacityCell, presencesCell, capacityCell].every((cell) => !cell || isBlank(cell.value))) continue;
         const rowYear = block.yearColumn === undefined ? undefined : asYear(cells.get(block.yearColumn)?.value);
         if (rowYear) globalYears.add(rowYear);
-        append(source, block, rowIndex, periodCell, modalityCell, percentageCell, classCell, block.forceMonthly, rowYear ? [rowYear] : knownYears);
+        append(source, block, rowIndex, periodCell, modalityCell, percentageCell, classCell, block.forceMonthly,
+          rowYear ? [rowYear] : knownYears, undefined,
+          { timeCell, startTimeCell, endTimeCell, presenceCapacityCell, presencesCell, capacityCell });
       } else if (block.kind === "modality-months") {
         const modalityCell = cells.get(block.modalityColumn!);
         if (!modalityCell || isBlank(modalityCell.value)) { ignoredCount += 1; continue; }
@@ -583,7 +790,7 @@ export async function parseOccupancySpreadsheet(bytes: ArrayBuffer, filename: st
     const representations = monthlyAndDaily.get(scope) ?? [];
     representations.push(entry);
     monthlyAndDaily.set(scope, representations);
-    const key = `${normalize(entry.modalityName)}\u0000${entry.kind}\u0000${entry.period}\u0000${normalize(entry.className ?? "")}`;
+    const key = `${normalize(entry.modalityName)}\u0000${entry.kind}\u0000${entry.period}\u0000${normalize(entry.className ?? "")}\u0000${entry.startTime ?? ""}`;
     const prior = seen.get(key);
     if (prior) {
       const overlapKey = `same-scope\u0000${key}`;

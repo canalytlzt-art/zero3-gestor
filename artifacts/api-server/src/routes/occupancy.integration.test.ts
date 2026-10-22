@@ -59,7 +59,7 @@ test("access and strict manual validation preserve zero, decimals and actual cal
   assert.equal((await call("/occupancy", "GET", undefined, await server("anonymous"))).status, 401);
   assert.equal((await call("/occupancy", "GET", undefined, await server("denied"))).status, 403);
   for (const extra of [
-    { percentage: null }, { percentage: "" }, { percentage: -1 }, { percentage: 100.01 },
+    { percentage: null }, { percentage: "" }, { percentage: -1 }, { percentage: undefined },
     { period: "2026-02-30" }, { period: "0000-01-01" }, { modalityName: "   " },
     { kind: "monthly", period: "2026-13" },
   ]) assert.equal((await call("/occupancy", "POST", record(extra))).status, 400);
@@ -76,6 +76,61 @@ test("access and strict manual validation preserve zero, decimals and actual cal
   const raw = await testPool.query("SELECT kind,date,month FROM occupancy_records ORDER BY kind");
   assert.equal(raw.rowCount, 3);
   assert.equal(raw.rows.filter((r) => r.kind === "monthly" && r.date === null).length, 1);
+});
+
+test("manual class entries calculate occupancy from counts, accept overcapacity and distinguish start times", async () => {
+  const measured = await call("/occupancy", "POST", record({
+    period: "2026-01-04", percentage: 50, presences: 21, capacity: 18,
+    startTime: "06:00", endTime: "07:00", className: "Turma A",
+  }));
+  assert.equal(measured.status, 201);
+  assert.equal(measured.body.percentage, 116.666667);
+  assert.equal(measured.body.reportedPercentage, 50);
+  assert.equal(measured.body.presences, 21);
+  assert.equal(measured.body.capacity, 18);
+  assert.equal(measured.body.startTime, "06:00");
+  assert.equal(measured.body.endTime, "07:00");
+
+  const edited = await call(`/occupancy/${measured.body.id}`, "PATCH", {
+    kind: "daily", period: "2026-01-04", modalityId: measured.body.modalityId, modalityName: "Pilates",
+    presences: 9, capacity: 18, startTime: "06:00", endTime: "07:00",
+    reportedPercentage: measured.body.reportedPercentage, className: "Turma A", notes: null,
+    version: measured.body.version,
+  });
+  assert.equal(edited.status, 200);
+  assert.equal(edited.body.percentage, 50);
+  assert.equal(edited.body.reportedPercentage, 50);
+  assert.equal(edited.body.presences, 9);
+
+  const zero = await call("/occupancy", "POST", record({
+    period: "2026-01-05", percentage: undefined, presences: 0, capacity: 18, startTime: "06:00",
+  }));
+  assert.equal(zero.status, 201);
+  assert.equal(zero.body.percentage, 0);
+  assert.equal(zero.body.endTime, null);
+
+  for (const extra of [
+    { percentage: undefined, presences: 2.5, capacity: 18, startTime: "06:00" },
+    { percentage: undefined, presences: 2, capacity: 0, startTime: "06:00" },
+    { percentage: undefined, presences: 2, startTime: "06:00" },
+    { percentage: undefined, presences: 2, capacity: 18 },
+    { percentage: undefined, presences: 2, capacity: 18, startTime: "25:00" },
+    { percentage: undefined, presences: 2, capacity: 18, startTime: "06:00", endTime: "bad" },
+  ]) assert.equal((await call("/occupancy", "POST", record(extra))).status, 400);
+
+  const first = await call("/occupancy", "POST", record({
+    period: "2026-01-06", percentage: undefined, presences: 10, capacity: 18, startTime: "06:00",
+  }));
+  const differentTime = await call("/occupancy", "POST", record({
+    period: "2026-01-06", percentage: undefined, presences: 12, capacity: 18, startTime: "08:00",
+  }));
+  const duplicateTime = await call("/occupancy", "POST", record({
+    period: "2026-01-06", percentage: undefined, presences: 11, capacity: 18, startTime: "08:00",
+  }));
+  assert.equal(first.status, 201);
+  assert.equal(differentTime.status, 201);
+  assert.equal(duplicateTime.status, 409);
+  await testPool.query("DELETE FROM occupancy_records WHERE date BETWEEN DATE '2026-01-04' AND DATE '2026-01-06'");
 });
 
 test("filters include endpoints, selected months and scope without applying full month to partial range", async () => {
@@ -98,6 +153,52 @@ test("filters include endpoints, selected months and scope without applying full
     "?fromDate=2026-01-01", "?fromDate=2026-02-30&toDate=2026-03-01",
     "?months=2026-01&fromDate=2026-01-01&toDate=2026-01-31", "?months=", "?modalityId=invalid",
   ]) assert.equal((await call(`/occupancy${query}`)).status, 400);
+});
+
+test("year, calendar quarter, selected hours and weekdays combine without losing range endpoints", async () => {
+  const created = [];
+  for (const entry of [
+    { period: "2026-07-06", startTime: "06:00", presences: 1, capacity: 2 },
+    { period: "2026-07-07", startTime: "06:00", presences: 9, capacity: 10 },
+    { period: "2026-09-30", startTime: "07:00", presences: 5, capacity: 10 },
+    { period: "2026-10-01", startTime: "06:00", presences: 7, capacity: 10 },
+    { period: "2025-07-07", startTime: "06:00", presences: 4, capacity: 10 },
+  ]) {
+    const response = await call("/occupancy", "POST", record({
+      ...entry, percentage: undefined, modalityName: "Filtros Tarefa 4", className: "Aula de teste",
+    }));
+    assert.equal(response.status, 201);
+    created.push(response.body);
+  }
+  const modalityId = created[0].modalityId;
+  const combined = await call<OccupancyRecord[]>(
+    `/occupancy?year=2026&quarter=3&startTimes=06:00&weekdays=1,2&modalityId=${modalityId}`,
+  );
+  assert.deepEqual(combined.body.map((row) => row.period).sort(), ["2026-07-06", "2026-07-07"]);
+  const selectedHours = await call<OccupancyRecord[]>(
+    `/occupancy?year=2026&quarter=3&startTimes=06:00,07:00&weekdays=1,2,3&modalityId=${modalityId}`,
+  );
+  assert.deepEqual(selectedHours.body.map((row) => row.period).sort(), ["2026-07-06", "2026-07-07", "2026-09-30"]);
+
+  const monthsAndQuarter = await call<OccupancyRecord[]>(
+    `/occupancy?months=2026-07,2026-09,2026-10&year=2026&quarter=3&modalityId=${modalityId}`,
+  );
+  assert.deepEqual(monthsAndQuarter.body.map((row) => row.period).sort(), ["2026-07-06", "2026-07-07", "2026-09-30"]);
+
+  const inclusiveRange = await call<OccupancyRecord[]>(
+    `/occupancy?fromDate=2026-07-06&toDate=2026-07-07&startTimes=06:00&modalityId=${modalityId}`,
+  );
+  assert.deepEqual(inclusiveRange.body.map((row) => row.period).sort(), ["2026-07-06", "2026-07-07"]);
+
+  for (const query of [
+    `?fromDate=2026-07-06&toDate=2026-07-07&year=2026&modalityId=${modalityId}`,
+    `?year=2026&quarter=3&startTimes=25:00&modalityId=${modalityId}`,
+    `?year=2026&weekdays=0&modalityId=${modalityId}`,
+    `?kind=monthly&weekdays=1&modalityId=${modalityId}`,
+  ]) assert.equal((await call(`/occupancy${query}`)).status, 400);
+
+  await testPool.query("DELETE FROM occupancy_records WHERE modality_id = $1", [modalityId]);
+  await testPool.query("DELETE FROM occupancy_modalities WHERE id = $1", [modalityId]);
 });
 
 test("modality rename preserves IDs and links; edit/delete are versioned and audit remains", async () => {
@@ -206,6 +307,81 @@ test("occupancy imports preview without side effects, are idempotent, and requir
   assert.deepEqual(audit.rows.map((row) => row.operation), ["import_create", "import_update", "import_update"]);
   const source = await testPool.query("SELECT source_file_hash,source_sheet,source_cell,source_cells FROM occupancy_records WHERE id=$1", [id]);
   assert.deepEqual(source.rows[0], { source_file_hash: otherHash, source_sheet: "Outra", source_cell: "D9", source_cells: sameScope.sourceCells });
+});
+
+test("imports measured classes, keeps distinct same-time classes only after confirmation, and preserves source idempotency", async () => {
+  const fileHash = "e".repeat(64);
+  const entry = {
+    index: 0, sourceSheet: "Aulas", sourceCell: "D2",
+    sourceCells: { period: "B2", modality: "A2", startTime: "C2", presences: "D2", capacity: "E2", percentage: "F2" },
+    kind: "daily", period: "2026-10-22", modalityName: "Import CrossFit",
+    startTime: "06:00", endTime: "07:00", presences: 10, capacity: 18,
+    percentage: 55.555556, reportedPercentage: 56,
+  };
+  const preview = await call<{ rows: Array<{ status: string }> }>("/occupancy/import/preview", "POST", { fileHash, entries: [entry] });
+  assert.equal(preview.body.rows[0].status, "new");
+  const imported = await call<{ rows: Array<{ status: string; id: string | null }> }>("/occupancy/import", "POST", {
+    fileHash, entries: [{ record: entry }],
+  });
+  assert.equal(imported.body.rows[0].status, "inserted");
+  const id = imported.body.rows[0].id!;
+  const stored = (await call<OccupancyRecord[]>("/occupancy?fromDate=2026-10-22&toDate=2026-10-22")).body[0];
+  assert.equal(stored.presences, 10);
+  assert.equal(stored.capacity, 18);
+  assert.equal(stored.startTime, "06:00");
+  assert.equal(stored.endTime, "07:00");
+  assert.equal(stored.percentage, 55.555556);
+  assert.equal(stored.reportedPercentage, 56);
+
+  const otherHash = "f".repeat(64);
+  const differentClass = {
+    ...entry, index: 1, sourceSheet: "Reposição", sourceCell: "D9",
+    sourceCells: { period: "B9", modality: "A9", startTime: "C9", presences: "D9", capacity: "E9", percentage: "F9" },
+    presences: 12, percentage: 66.666667, reportedPercentage: 67,
+  };
+  const conflict = await call<{ rows: Array<{ status: string; existingRecord: OccupancyRecord }> }>("/occupancy/import/preview", "POST", {
+    fileHash: otherHash, entries: [differentClass],
+  });
+  assert.equal(conflict.body.rows[0].status, "conflict");
+  assert.equal(conflict.body.rows[0].existingRecord.id, id);
+  const refused = await call<{ rows: Array<{ status: string }> }>("/occupancy/import", "POST", {
+    fileHash: otherHash, entries: [{ record: differentClass }],
+  });
+  assert.equal(refused.body.rows[0].status, "conflict");
+  const kept = await call<{ rows: Array<{ status: string; id: string | null }> }>("/occupancy/import", "POST", {
+    fileHash: otherHash,
+    entries: [{
+      record: differentClass, existingRecordId: id,
+      expectedVersion: conflict.body.rows[0].existingRecord.version, keepBothConfirmed: true,
+    }],
+  });
+  assert.equal(kept.body.rows[0].status, "inserted");
+  assert.notEqual(kept.body.rows[0].id, id);
+  const repeated = await call<{ rows: Array<{ status: string; id: string | null }> }>("/occupancy/import", "POST", {
+    fileHash: otherHash, entries: [{ record: differentClass, keepBothConfirmed: true }],
+  });
+  assert.equal(repeated.body.rows[0].status, "already_imported");
+  const records = (await call<OccupancyRecord[]>("/occupancy?fromDate=2026-10-22&toDate=2026-10-22")).body;
+  assert.equal(records.length, 2);
+  assert.deepEqual(records.map((row) => row.presences).sort(), [10, 12]);
+
+  const batchHash = "9".repeat(64);
+  const batchFirst = {
+    ...entry, index: 2, sourceSheet: "Lote", sourceCell: "D20",
+    sourceCells: { period: "B20", modality: "A20", startTime: "C20", presences: "D20", capacity: "E20" },
+    period: "2026-10-23", modalityName: "Import Batch CrossFit", startTime: "07:00",
+    endTime: null, presences: 9, capacity: 18, percentage: undefined, reportedPercentage: undefined,
+  };
+  const batchSecond = {
+    ...batchFirst, index: 3, sourceCell: "D21",
+    sourceCells: { period: "B21", modality: "A21", startTime: "C21", presences: "D21", capacity: "E21" },
+    presences: 10,
+  };
+  const batch = await call<{ rows: Array<{ status: string }> }>("/occupancy/import", "POST", {
+    fileHash: batchHash, entries: [{ record: batchFirst }, { record: batchSecond, keepBothConfirmed: true }],
+  });
+  assert.deepEqual(batch.body.rows.map((row) => row.status), ["inserted", "inserted"]);
+  assert.equal((await call<OccupancyRecord[]>("/occupancy?fromDate=2026-10-23&toDate=2026-10-23")).body.length, 2);
 });
 
 test("occupancy import is safe under simultaneous retries and repeated rows in one batch", async () => {

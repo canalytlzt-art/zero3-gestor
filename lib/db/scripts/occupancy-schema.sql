@@ -16,6 +16,11 @@ CREATE TABLE IF NOT EXISTS occupancy_records (
   date date,
   month text NOT NULL,
   percentage numeric NOT NULL,
+  reported_percentage numeric,
+  presences integer,
+  capacity integer,
+  start_time time,
+  end_time time,
   class_name text,
   scope_key text NOT NULL DEFAULT '',
   notes text,
@@ -29,10 +34,33 @@ CREATE TABLE IF NOT EXISTS occupancy_records (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   deleted_at timestamptz,
-  CONSTRAINT occupancy_percentage_valid CHECK (percentage >= 0 AND percentage <= 100 AND percentage <> 'NaN'::numeric),
+  CONSTRAINT occupancy_percentage_valid CHECK (percentage >= 0 AND percentage <> 'NaN'::numeric),
+  CONSTRAINT occupancy_reported_percentage_valid CHECK (reported_percentage IS NULL OR (reported_percentage >= 0 AND reported_percentage <> 'NaN'::numeric)),
+  CONSTRAINT occupancy_measurements_valid CHECK (
+    ((presences IS NULL AND capacity IS NULL AND start_time IS NULL AND end_time IS NULL)
+      OR (kind = 'daily' AND date IS NOT NULL AND presences IS NOT NULL AND presences >= 0
+        AND capacity IS NOT NULL AND capacity > 0 AND start_time IS NOT NULL))
+    AND (reported_percentage IS NULL OR (presences IS NOT NULL AND capacity IS NOT NULL))
+  ),
   CONSTRAINT occupancy_period_valid CHECK (month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$' AND left(month,4) <> '0000' AND ((kind = 'daily' AND date IS NOT NULL AND month = to_char(date,'YYYY-MM')) OR (kind = 'monthly' AND date IS NULL))),
   CONSTRAINT occupancy_record_version_valid CHECK (version > 0),
   CONSTRAINT occupancy_record_text_valid CHECK (coalesce(length(class_name),0) <= 120 AND coalesce(length(notes),0) <= 1000)
+);
+ALTER TABLE occupancy_records ADD COLUMN IF NOT EXISTS reported_percentage numeric;
+ALTER TABLE occupancy_records ADD COLUMN IF NOT EXISTS presences integer;
+ALTER TABLE occupancy_records ADD COLUMN IF NOT EXISTS capacity integer;
+ALTER TABLE occupancy_records ADD COLUMN IF NOT EXISTS start_time time;
+ALTER TABLE occupancy_records ADD COLUMN IF NOT EXISTS end_time time;
+ALTER TABLE occupancy_records DROP CONSTRAINT IF EXISTS occupancy_percentage_valid;
+ALTER TABLE occupancy_records ADD CONSTRAINT occupancy_percentage_valid CHECK (percentage >= 0 AND percentage <> 'NaN'::numeric);
+ALTER TABLE occupancy_records DROP CONSTRAINT IF EXISTS occupancy_reported_percentage_valid;
+ALTER TABLE occupancy_records ADD CONSTRAINT occupancy_reported_percentage_valid CHECK (reported_percentage IS NULL OR (reported_percentage >= 0 AND reported_percentage <> 'NaN'::numeric));
+ALTER TABLE occupancy_records DROP CONSTRAINT IF EXISTS occupancy_measurements_valid;
+ALTER TABLE occupancy_records ADD CONSTRAINT occupancy_measurements_valid CHECK (
+  ((presences IS NULL AND capacity IS NULL AND start_time IS NULL AND end_time IS NULL)
+    OR (kind = 'daily' AND date IS NOT NULL AND presences IS NOT NULL AND presences >= 0
+      AND capacity IS NOT NULL AND capacity > 0 AND start_time IS NOT NULL))
+  AND (reported_percentage IS NULL OR (presences IS NOT NULL AND capacity IS NOT NULL))
 );
 ALTER TABLE occupancy_records ADD COLUMN IF NOT EXISTS source_file_hash text;
 ALTER TABLE occupancy_records ADD COLUMN IF NOT EXISTS source_sheet text;
@@ -49,7 +77,12 @@ END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS occupancy_records_source_cell_unique
   ON occupancy_records(source_file_hash, source_sheet, source_cell)
   WHERE deleted_at IS NULL AND source_file_hash IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS occupancy_records_scope_unique ON occupancy_records(modality_id,kind,month,coalesce(date,'0001-01-01'::date),scope_key) WHERE deleted_at IS NULL;
+DO $$ BEGIN
+  EXECUTE format('DROP INDEX IF EXISTS %I.occupancy_records_scope_unique', current_schema());
+END $$;
+CREATE UNIQUE INDEX occupancy_records_scope_unique
+  ON occupancy_records(modality_id,kind,month,coalesce(date,'0001-01-01'::date),scope_key,coalesce(start_time,TIME '00:00'))
+  WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS occupancy_records_month_idx ON occupancy_records(month,modality_id);
 CREATE TABLE IF NOT EXISTS occupancy_history (
   id uuid PRIMARY KEY,

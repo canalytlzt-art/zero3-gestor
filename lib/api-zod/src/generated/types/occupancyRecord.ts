@@ -15,11 +15,35 @@ export interface OccupancyRecord {
   month: string;
   modalityId: string;
   modalityName: string;
+  /** @minimum 0 */
+  percentage: number;
   /**
      * @minimum 0
-     * @maximum 100
+     * @nullable
      */
-  percentage: number;
+  reportedPercentage: number | null;
+  /**
+     * @minimum 0
+     * @maximum 2147483647
+     * @nullable
+     */
+  presences: number | null;
+  /**
+     * @minimum 1
+     * @maximum 2147483647
+     * @nullable
+     */
+  capacity: number | null;
+  /**
+     * @nullable
+     * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
+     */
+  startTime: string | null;
+  /**
+     * @nullable
+     * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
+     */
+  endTime: string | null;
   /** @nullable */
   className: string | null;
   /** @nullable */

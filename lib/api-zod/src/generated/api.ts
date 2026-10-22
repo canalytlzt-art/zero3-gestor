@@ -52,6 +52,11 @@ export const UpdateOccupancyModalityResponse = zod.object({
 })
 
 
+export const getOccupancyRecordsQueryYearMin = 1900;
+export const getOccupancyRecordsQueryYearMax = 2100;
+
+export const getOccupancyRecordsQueryQuarterMax = 4;
+
 export const getOccupancyRecordsQueryClassNameMax = 120;
 
 
@@ -60,14 +65,26 @@ export const GetOccupancyRecordsQueryParams = zod.object({
   "fromDate": zod.coerce.string().optional().describe('Data inicial inclusiva AAAA-MM-DD'),
   "toDate": zod.coerce.string().optional().describe('Data final inclusiva AAAA-MM-DD'),
   "months": zod.coerce.string().optional().describe('Meses AAAA-MM separados por vírgula; exclusivo com intervalo'),
+  "year": zod.coerce.number().int().min(getOccupancyRecordsQueryYearMin).max(getOccupancyRecordsQueryYearMax).optional().describe('Ano civil; pode combinar com meses ou trimestre'),
+  "quarter": zod.coerce.number().int().min(1).max(getOccupancyRecordsQueryQuarterMax).optional().describe('Trimestre civil: janeiro-março, abril-junho, julho-setembro ou outubro-dezembro'),
+  "startTimes": zod.coerce.string().optional().describe('Horários iniciais HH:mm separados por vírgula'),
+  "weekdays": zod.coerce.string().optional().describe('Dias da semana ISO 1-7 separados por vírgula, segunda a domingo'),
   "modalityId": zod.coerce.string().uuid().optional(),
   "className": zod.coerce.string().max(getOccupancyRecordsQueryClassNameMax).optional(),
   "kind": zod.enum(['all', 'daily', 'monthly']).optional()
 })
 
 export const getOccupancyRecordsResponsePercentageMin = 0;
-export const getOccupancyRecordsResponsePercentageMax = 100;
 
+export const getOccupancyRecordsResponseReportedPercentageMin = 0;
+
+export const getOccupancyRecordsResponsePresencesMin = 0;
+export const getOccupancyRecordsResponsePresencesMax = 2147483647;
+
+export const getOccupancyRecordsResponseCapacityMax = 2147483647;
+
+export const getOccupancyRecordsResponseStartTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const getOccupancyRecordsResponseEndTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 
 
 export const GetOccupancyRecordsResponseItem = zod.object({
@@ -77,7 +94,12 @@ export const GetOccupancyRecordsResponseItem = zod.object({
   "month": zod.string(),
   "modalityId": zod.string().uuid(),
   "modalityName": zod.string(),
-  "percentage": zod.number().min(getOccupancyRecordsResponsePercentageMin).max(getOccupancyRecordsResponsePercentageMax),
+  "percentage": zod.number().min(getOccupancyRecordsResponsePercentageMin),
+  "reportedPercentage": zod.number().min(getOccupancyRecordsResponseReportedPercentageMin).nullable(),
+  "presences": zod.number().int().min(getOccupancyRecordsResponsePresencesMin).max(getOccupancyRecordsResponsePresencesMax).nullable(),
+  "capacity": zod.number().int().min(1).max(getOccupancyRecordsResponseCapacityMax).nullable(),
+  "startTime": zod.string().regex(getOccupancyRecordsResponseStartTimeRegExp).nullable(),
+  "endTime": zod.string().regex(getOccupancyRecordsResponseEndTimeRegExp).nullable(),
   "className": zod.string().nullable(),
   "notes": zod.string().nullable(),
   "sourceFileHash": zod.string().nullable(),
@@ -97,8 +119,16 @@ export const createOccupancyRecordBodyPeriodMax = 10;
 export const createOccupancyRecordBodyModalityNameMax = 120;
 
 export const createOccupancyRecordBodyPercentageMin = 0;
-export const createOccupancyRecordBodyPercentageMax = 100;
 
+export const createOccupancyRecordBodyReportedPercentageMin = 0;
+
+export const createOccupancyRecordBodyPresencesMin = 0;
+export const createOccupancyRecordBodyPresencesMax = 2147483647;
+
+export const createOccupancyRecordBodyCapacityMax = 2147483647;
+
+export const createOccupancyRecordBodyStartTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const createOccupancyRecordBodyEndTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 export const createOccupancyRecordBodyClassNameMax = 120;
 
 export const createOccupancyRecordBodyNotesMax = 1000;
@@ -110,14 +140,27 @@ export const CreateOccupancyRecordBody = zod.object({
   "period": zod.string().min(createOccupancyRecordBodyPeriodMin).max(createOccupancyRecordBodyPeriodMax).describe('AAAA-MM-DD para diário ou AAAA-MM para mensal'),
   "modalityId": zod.string().uuid().optional(),
   "modalityName": zod.string().min(1).max(createOccupancyRecordBodyModalityNameMax),
-  "percentage": zod.number().min(createOccupancyRecordBodyPercentageMin).max(createOccupancyRecordBodyPercentageMax),
+  "percentage": zod.number().min(createOccupancyRecordBodyPercentageMin).optional().describe('Para registros antigos'),
+  "reportedPercentage": zod.number().min(createOccupancyRecordBodyReportedPercentageMin).optional(),
+  "presences": zod.number().int().min(createOccupancyRecordBodyPresencesMin).max(createOccupancyRecordBodyPresencesMax).optional(),
+  "capacity": zod.number().int().min(1).max(createOccupancyRecordBodyCapacityMax).optional(),
+  "startTime": zod.string().regex(createOccupancyRecordBodyStartTimeRegExp).optional(),
+  "endTime": zod.string().regex(createOccupancyRecordBodyEndTimeRegExp).nullish(),
   "className": zod.string().max(createOccupancyRecordBodyClassNameMax).nullish(),
   "notes": zod.string().max(createOccupancyRecordBodyNotesMax).nullish()
 })
 
 export const createOccupancyRecordResponsePercentageMin = 0;
-export const createOccupancyRecordResponsePercentageMax = 100;
 
+export const createOccupancyRecordResponseReportedPercentageMin = 0;
+
+export const createOccupancyRecordResponsePresencesMin = 0;
+export const createOccupancyRecordResponsePresencesMax = 2147483647;
+
+export const createOccupancyRecordResponseCapacityMax = 2147483647;
+
+export const createOccupancyRecordResponseStartTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const createOccupancyRecordResponseEndTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 
 
 export const CreateOccupancyRecordResponse = zod.object({
@@ -127,7 +170,12 @@ export const CreateOccupancyRecordResponse = zod.object({
   "month": zod.string(),
   "modalityId": zod.string().uuid(),
   "modalityName": zod.string(),
-  "percentage": zod.number().min(createOccupancyRecordResponsePercentageMin).max(createOccupancyRecordResponsePercentageMax),
+  "percentage": zod.number().min(createOccupancyRecordResponsePercentageMin),
+  "reportedPercentage": zod.number().min(createOccupancyRecordResponseReportedPercentageMin).nullable(),
+  "presences": zod.number().int().min(createOccupancyRecordResponsePresencesMin).max(createOccupancyRecordResponsePresencesMax).nullable(),
+  "capacity": zod.number().int().min(1).max(createOccupancyRecordResponseCapacityMax).nullable(),
+  "startTime": zod.string().regex(createOccupancyRecordResponseStartTimeRegExp).nullable(),
+  "endTime": zod.string().regex(createOccupancyRecordResponseEndTimeRegExp).nullable(),
   "className": zod.string().nullable(),
   "notes": zod.string().nullable(),
   "sourceFileHash": zod.string().nullable(),
@@ -150,8 +198,16 @@ export const updateOccupancyRecordBodyOnePeriodMax = 10;
 export const updateOccupancyRecordBodyOneModalityNameMax = 120;
 
 export const updateOccupancyRecordBodyOnePercentageMin = 0;
-export const updateOccupancyRecordBodyOnePercentageMax = 100;
 
+export const updateOccupancyRecordBodyOneReportedPercentageMin = 0;
+
+export const updateOccupancyRecordBodyOnePresencesMin = 0;
+export const updateOccupancyRecordBodyOnePresencesMax = 2147483647;
+
+export const updateOccupancyRecordBodyOneCapacityMax = 2147483647;
+
+export const updateOccupancyRecordBodyOneStartTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const updateOccupancyRecordBodyOneEndTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 export const updateOccupancyRecordBodyOneClassNameMax = 120;
 
 export const updateOccupancyRecordBodyOneNotesMax = 1000;
@@ -164,7 +220,12 @@ export const UpdateOccupancyRecordBody = zod.object({
   "period": zod.string().min(updateOccupancyRecordBodyOnePeriodMin).max(updateOccupancyRecordBodyOnePeriodMax).describe('AAAA-MM-DD para diário ou AAAA-MM para mensal'),
   "modalityId": zod.string().uuid().optional(),
   "modalityName": zod.string().min(1).max(updateOccupancyRecordBodyOneModalityNameMax),
-  "percentage": zod.number().min(updateOccupancyRecordBodyOnePercentageMin).max(updateOccupancyRecordBodyOnePercentageMax),
+  "percentage": zod.number().min(updateOccupancyRecordBodyOnePercentageMin).optional().describe('Para registros antigos'),
+  "reportedPercentage": zod.number().min(updateOccupancyRecordBodyOneReportedPercentageMin).optional(),
+  "presences": zod.number().int().min(updateOccupancyRecordBodyOnePresencesMin).max(updateOccupancyRecordBodyOnePresencesMax).optional(),
+  "capacity": zod.number().int().min(1).max(updateOccupancyRecordBodyOneCapacityMax).optional(),
+  "startTime": zod.string().regex(updateOccupancyRecordBodyOneStartTimeRegExp).optional(),
+  "endTime": zod.string().regex(updateOccupancyRecordBodyOneEndTimeRegExp).nullish(),
   "className": zod.string().max(updateOccupancyRecordBodyOneClassNameMax).nullish(),
   "notes": zod.string().max(updateOccupancyRecordBodyOneNotesMax).nullish()
 }).and(zod.object({
@@ -172,8 +233,16 @@ export const UpdateOccupancyRecordBody = zod.object({
 }))
 
 export const updateOccupancyRecordResponsePercentageMin = 0;
-export const updateOccupancyRecordResponsePercentageMax = 100;
 
+export const updateOccupancyRecordResponseReportedPercentageMin = 0;
+
+export const updateOccupancyRecordResponsePresencesMin = 0;
+export const updateOccupancyRecordResponsePresencesMax = 2147483647;
+
+export const updateOccupancyRecordResponseCapacityMax = 2147483647;
+
+export const updateOccupancyRecordResponseStartTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const updateOccupancyRecordResponseEndTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 
 
 export const UpdateOccupancyRecordResponse = zod.object({
@@ -183,7 +252,12 @@ export const UpdateOccupancyRecordResponse = zod.object({
   "month": zod.string(),
   "modalityId": zod.string().uuid(),
   "modalityName": zod.string(),
-  "percentage": zod.number().min(updateOccupancyRecordResponsePercentageMin).max(updateOccupancyRecordResponsePercentageMax),
+  "percentage": zod.number().min(updateOccupancyRecordResponsePercentageMin),
+  "reportedPercentage": zod.number().min(updateOccupancyRecordResponseReportedPercentageMin).nullable(),
+  "presences": zod.number().int().min(updateOccupancyRecordResponsePresencesMin).max(updateOccupancyRecordResponsePresencesMax).nullable(),
+  "capacity": zod.number().int().min(1).max(updateOccupancyRecordResponseCapacityMax).nullable(),
+  "startTime": zod.string().regex(updateOccupancyRecordResponseStartTimeRegExp).nullable(),
+  "endTime": zod.string().regex(updateOccupancyRecordResponseEndTimeRegExp).nullable(),
   "className": zod.string().nullable(),
   "notes": zod.string().nullable(),
   "sourceFileHash": zod.string().nullable(),
@@ -217,8 +291,16 @@ export const previewOccupancyImportBodyEntriesItemOnePeriodMax = 10;
 export const previewOccupancyImportBodyEntriesItemOneModalityNameMax = 120;
 
 export const previewOccupancyImportBodyEntriesItemOnePercentageMin = 0;
-export const previewOccupancyImportBodyEntriesItemOnePercentageMax = 100;
 
+export const previewOccupancyImportBodyEntriesItemOneReportedPercentageMin = 0;
+
+export const previewOccupancyImportBodyEntriesItemOnePresencesMin = 0;
+export const previewOccupancyImportBodyEntriesItemOnePresencesMax = 2147483647;
+
+export const previewOccupancyImportBodyEntriesItemOneCapacityMax = 2147483647;
+
+export const previewOccupancyImportBodyEntriesItemOneStartTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const previewOccupancyImportBodyEntriesItemOneEndTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 export const previewOccupancyImportBodyEntriesItemOneClassNameMax = 120;
 
 export const previewOccupancyImportBodyEntriesItemOneNotesMax = 1000;
@@ -240,7 +322,12 @@ export const PreviewOccupancyImportBody = zod.object({
   "period": zod.string().min(previewOccupancyImportBodyEntriesItemOnePeriodMin).max(previewOccupancyImportBodyEntriesItemOnePeriodMax).describe('AAAA-MM-DD para diário ou AAAA-MM para mensal'),
   "modalityId": zod.string().uuid().optional(),
   "modalityName": zod.string().min(1).max(previewOccupancyImportBodyEntriesItemOneModalityNameMax),
-  "percentage": zod.number().min(previewOccupancyImportBodyEntriesItemOnePercentageMin).max(previewOccupancyImportBodyEntriesItemOnePercentageMax),
+  "percentage": zod.number().min(previewOccupancyImportBodyEntriesItemOnePercentageMin).optional().describe('Para registros antigos'),
+  "reportedPercentage": zod.number().min(previewOccupancyImportBodyEntriesItemOneReportedPercentageMin).optional(),
+  "presences": zod.number().int().min(previewOccupancyImportBodyEntriesItemOnePresencesMin).max(previewOccupancyImportBodyEntriesItemOnePresencesMax).optional(),
+  "capacity": zod.number().int().min(1).max(previewOccupancyImportBodyEntriesItemOneCapacityMax).optional(),
+  "startTime": zod.string().regex(previewOccupancyImportBodyEntriesItemOneStartTimeRegExp).optional(),
+  "endTime": zod.string().regex(previewOccupancyImportBodyEntriesItemOneEndTimeRegExp).nullish(),
   "className": zod.string().max(previewOccupancyImportBodyEntriesItemOneClassNameMax).nullish(),
   "notes": zod.string().max(previewOccupancyImportBodyEntriesItemOneNotesMax).nullish()
 }).and(zod.object({
@@ -254,8 +341,16 @@ export const PreviewOccupancyImportBody = zod.object({
 export const previewOccupancyImportResponseRowsItemIndexMin = 0;
 
 export const previewOccupancyImportResponseRowsItemExistingRecordOnePercentageMin = 0;
-export const previewOccupancyImportResponseRowsItemExistingRecordOnePercentageMax = 100;
 
+export const previewOccupancyImportResponseRowsItemExistingRecordOneReportedPercentageMin = 0;
+
+export const previewOccupancyImportResponseRowsItemExistingRecordOnePresencesMin = 0;
+export const previewOccupancyImportResponseRowsItemExistingRecordOnePresencesMax = 2147483647;
+
+export const previewOccupancyImportResponseRowsItemExistingRecordOneCapacityMax = 2147483647;
+
+export const previewOccupancyImportResponseRowsItemExistingRecordOneStartTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const previewOccupancyImportResponseRowsItemExistingRecordOneEndTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 
 
 export const PreviewOccupancyImportResponse = zod.object({
@@ -270,7 +365,12 @@ export const PreviewOccupancyImportResponse = zod.object({
   "month": zod.string(),
   "modalityId": zod.string().uuid(),
   "modalityName": zod.string(),
-  "percentage": zod.number().min(previewOccupancyImportResponseRowsItemExistingRecordOnePercentageMin).max(previewOccupancyImportResponseRowsItemExistingRecordOnePercentageMax),
+  "percentage": zod.number().min(previewOccupancyImportResponseRowsItemExistingRecordOnePercentageMin),
+  "reportedPercentage": zod.number().min(previewOccupancyImportResponseRowsItemExistingRecordOneReportedPercentageMin).nullable(),
+  "presences": zod.number().int().min(previewOccupancyImportResponseRowsItemExistingRecordOnePresencesMin).max(previewOccupancyImportResponseRowsItemExistingRecordOnePresencesMax).nullable(),
+  "capacity": zod.number().int().min(1).max(previewOccupancyImportResponseRowsItemExistingRecordOneCapacityMax).nullable(),
+  "startTime": zod.string().regex(previewOccupancyImportResponseRowsItemExistingRecordOneStartTimeRegExp).nullable(),
+  "endTime": zod.string().regex(previewOccupancyImportResponseRowsItemExistingRecordOneEndTimeRegExp).nullable(),
   "className": zod.string().nullable(),
   "notes": zod.string().nullable(),
   "sourceFileHash": zod.string().nullable(),
@@ -292,8 +392,16 @@ export const commitOccupancyImportBodyEntriesItemRecordOnePeriodMax = 10;
 export const commitOccupancyImportBodyEntriesItemRecordOneModalityNameMax = 120;
 
 export const commitOccupancyImportBodyEntriesItemRecordOnePercentageMin = 0;
-export const commitOccupancyImportBodyEntriesItemRecordOnePercentageMax = 100;
 
+export const commitOccupancyImportBodyEntriesItemRecordOneReportedPercentageMin = 0;
+
+export const commitOccupancyImportBodyEntriesItemRecordOnePresencesMin = 0;
+export const commitOccupancyImportBodyEntriesItemRecordOnePresencesMax = 2147483647;
+
+export const commitOccupancyImportBodyEntriesItemRecordOneCapacityMax = 2147483647;
+
+export const commitOccupancyImportBodyEntriesItemRecordOneStartTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const commitOccupancyImportBodyEntriesItemRecordOneEndTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 export const commitOccupancyImportBodyEntriesItemRecordOneClassNameMax = 120;
 
 export const commitOccupancyImportBodyEntriesItemRecordOneNotesMax = 1000;
@@ -317,7 +425,12 @@ export const CommitOccupancyImportBody = zod.object({
   "period": zod.string().min(commitOccupancyImportBodyEntriesItemRecordOnePeriodMin).max(commitOccupancyImportBodyEntriesItemRecordOnePeriodMax).describe('AAAA-MM-DD para diário ou AAAA-MM para mensal'),
   "modalityId": zod.string().uuid().optional(),
   "modalityName": zod.string().min(1).max(commitOccupancyImportBodyEntriesItemRecordOneModalityNameMax),
-  "percentage": zod.number().min(commitOccupancyImportBodyEntriesItemRecordOnePercentageMin).max(commitOccupancyImportBodyEntriesItemRecordOnePercentageMax),
+  "percentage": zod.number().min(commitOccupancyImportBodyEntriesItemRecordOnePercentageMin).optional().describe('Para registros antigos'),
+  "reportedPercentage": zod.number().min(commitOccupancyImportBodyEntriesItemRecordOneReportedPercentageMin).optional(),
+  "presences": zod.number().int().min(commitOccupancyImportBodyEntriesItemRecordOnePresencesMin).max(commitOccupancyImportBodyEntriesItemRecordOnePresencesMax).optional(),
+  "capacity": zod.number().int().min(1).max(commitOccupancyImportBodyEntriesItemRecordOneCapacityMax).optional(),
+  "startTime": zod.string().regex(commitOccupancyImportBodyEntriesItemRecordOneStartTimeRegExp).optional(),
+  "endTime": zod.string().regex(commitOccupancyImportBodyEntriesItemRecordOneEndTimeRegExp).nullish(),
   "className": zod.string().max(commitOccupancyImportBodyEntriesItemRecordOneClassNameMax).nullish(),
   "notes": zod.string().max(commitOccupancyImportBodyEntriesItemRecordOneNotesMax).nullish()
 }).and(zod.object({
@@ -327,7 +440,8 @@ export const CommitOccupancyImportBody = zod.object({
   "sourceCells": zod.record(zod.string(), zod.string().regex(commitOccupancyImportBodyEntriesItemRecordTwoSourceCellsRegExpOne))
 })),
   "existingRecordId": zod.string().uuid().optional(),
-  "expectedVersion": zod.number().int().min(1).optional()
+  "expectedVersion": zod.number().int().min(1).optional(),
+  "keepBothConfirmed": zod.boolean().optional().describe('Confirma que a linha representa uma aula distinta da aula existente')
 })).min(1).max(commitOccupancyImportBodyEntriesMax)
 })
 

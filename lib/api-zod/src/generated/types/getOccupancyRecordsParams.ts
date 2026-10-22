@@ -20,6 +20,26 @@ toDate?: string;
  * Meses AAAA-MM separados por vírgula; exclusivo com intervalo
  */
 months?: string;
+/**
+ * Ano civil; pode combinar com meses ou trimestre
+ * @minimum 1900
+ * @maximum 2100
+ */
+year?: number;
+/**
+ * Trimestre civil: janeiro-março, abril-junho, julho-setembro ou outubro-dezembro
+ * @minimum 1
+ * @maximum 4
+ */
+quarter?: number;
+/**
+ * Horários iniciais HH:mm separados por vírgula
+ */
+startTimes?: string;
+/**
+ * Dias da semana ISO 1-7 separados por vírgula, segunda a domingo
+ */
+weekdays?: string;
 modalityId?: string;
 /**
  * @maxLength 120

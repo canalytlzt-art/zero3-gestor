@@ -22,10 +22,29 @@ export interface OccupancyRecordInput {
      */
   modalityName: string;
   /**
+     * Para registros antigos
      * @minimum 0
-     * @maximum 100
      */
-  percentage: number;
+  percentage?: number;
+  /** @minimum 0 */
+  reportedPercentage?: number;
+  /**
+     * @minimum 0
+     * @maximum 2147483647
+     */
+  presences?: number;
+  /**
+     * @minimum 1
+     * @maximum 2147483647
+     */
+  capacity?: number;
+  /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$ */
+  startTime?: string;
+  /**
+     * @nullable
+     * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
+     */
+  endTime?: string | null;
   /**
      * @maxLength 120
      * @nullable

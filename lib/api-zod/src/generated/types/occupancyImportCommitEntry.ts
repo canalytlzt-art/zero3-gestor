@@ -12,4 +12,6 @@ export interface OccupancyImportCommitEntry {
   existingRecordId?: string;
   /** @minimum 1 */
   expectedVersion?: number;
+  /** Confirma que a linha representa uma aula distinta da aula existente */
+  keepBothConfirmed?: boolean;
 }
