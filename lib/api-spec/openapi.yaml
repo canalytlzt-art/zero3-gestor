@@ -212,11 +212,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+  /sales/import/origins:
+    get:
+      operationId: getSalesImportOrigins
+      tags: [sales]
+      summary: Read previously imported physical source rows
+      parameters:
+        - in: query
+          name: fileHash
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-f0-9]{64}$'
+      responses:
+        "200":
+          description: Persistent source identities, including earlier partial imports
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesImportOriginsResult"
+        "400":
+          description: Invalid file hash
+        "401":
+          description: Authentication required
+        "403":
+          description: Access denied
   /sales/import:
     post:
       operationId: importSales
       tags: [sales]
-      summary: Import validated sales rows as one idempotent batch
+      summary: Import only unseen physical rows of a file, allowing partial reprocessing
       requestBody:
         required: true
         content:
@@ -1185,6 +1210,25 @@ components:
           type: string
           format: date-time
       required: [id, entityType, entityId, operation, actorId, beforeData, afterData, createdAt]
+    SalesImportedOrigin:
+      type: object
+      properties:
+        sourceSheet:
+          type: string
+        sourceRow:
+          type: integer
+        saleId:
+          type: string
+          format: uuid
+      required: [sourceSheet, sourceRow, saleId]
+    SalesImportOriginsResult:
+      type: object
+      properties:
+        origins:
+          type: array
+          items:
+            $ref: "#/components/schemas/SalesImportedOrigin"
+      required: [origins]
     SalesImportRow:
       type: object
       properties:
@@ -1243,11 +1287,14 @@ components:
         importedCount:
           type: integer
           minimum: 0
+        skippedCount:
+          type: integer
+          minimum: 0
         sales:
           type: array
           items:
             $ref: "#/components/schemas/Sale"
-      required: [batchId, fileName, replayed, importedCount, sales]
+      required: [batchId, fileName, replayed, importedCount, skippedCount, sales]
     SalesRefund:
       type: object
       properties:

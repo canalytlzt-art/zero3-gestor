@@ -184,3 +184,46 @@
 - Limites mantidos e informados na interface: XLSX/CSV, 10 MB por arquivo e 500 linhas selecionadas por importação. A proteção por hash é do arquivo inteiro; importar abas adicionais desse mesmo arquivo em outro momento não é um fluxo separado nesta versão.
 - Navegador autenticado: prévia do CSV com cabeçalho na linha 3, total da linha 6 ignorado, cliente/data/valor corretos e produto opcional. Linha inválida manteve seus valores originais e bloqueou confirmação; desmarcá-la, remapear data e selecionar/desmarcar aba atualizaram a disponibilidade corretamente. Em 390 px, botões alcançáveis por rolagem e nenhuma largura extra na página. Nenhuma confirmação foi acionada nem requisição de importação enviada.
 - Após a inspeção visual, ajustado o resumo para mostrar a quantidade selecionada explicitamente e não contar uma linha inválida ainda selecionada como se já estivesse excluída. Essa correção de contagem foi conferida no código e pelo typecheck, sem repetir a sessão do navegador.
+
+## Conferência da planilha original e reprocessamento parcial — 22/10/2026
+
+### Arquivo original examinado
+
+A planilha de clientes individuais foi localizada e lida diretamente: seis abas, cada uma com intervalo utilizado até a linha 1000 e dez colunas. Todas as 6000 linhas físicas foram contabilizadas; 140 têm conteúdo, incluindo seis cabeçalhos. Não se presumiu que as 134 linhas posteriores aos cabeçalhos fossem vendas.
+
+| Aba | Vendas completas | Pendentes | Auxiliares | Linhas auxiliares | Linhas vazias/formatação |
+| --- | ---: | ---: | ---: | --- | --- |
+| JANEIRO | 23 | 1 | 0 | — | 26–1000 |
+| Fevereiro | 9 | 0 | 15 | 11–25 | 26–1000 |
+| Março | 25 | 0 | 6 | 27–32 | 33–1000 |
+| Abril | 2 | 0 | 22 | 4–25 | 26–1000 |
+| Maio | 11 | 0 | 13 | 13–25 | 26–1000 |
+| junho | 7 | 0 | 0 | — | 9–1000 |
+| **Total** | **77** | **1** | **56** | | **5860 linhas** |
+
+- **78 candidatos = 77 prontos + 1 pendente + 0 já importados na base isolada.** As 56 linhas auxiliares e os seis cabeçalhos são contados à parte. A prévia compartilhada também consulta as origens já presentes na base real de desenvolvimento e ajusta prontos/já importados sem gravar nada.
+- Soma das 77 vendas completas: **R$ 54.448,00**, conferida independentemente nas células B/F/H da origem e conciliada com a Scoreboard após gravação isolada.
+- **Março · 29 e Março · 30:** somente D/E (Modalidade/Recorrência) têm conteúdo. B/F/H e as demais colunas não contêm cliente, data ou valor; não foi perda de extração. São linhas auxiliares pré-preenchidas, não vendas.
+- **Pendência real: JANEIRO · 7.** B7 (NOME) não existe/preenche nome; F7 contém o serial 46027 (**05/01/2026**), H7 contém **R$ 1.197,00**. O conteúdo de C7 não foi assumido como nome. Essa linha fica pendente apenas pelo cliente, preservando data e valor, e não entra no total importável.
+- Mapeamento reconhecido automaticamente em todas as abas: B/NOME, F/INICIO, H/VALOR. INICIO tem prioridade sobre A/DATA e G/FIM. O serial **46150 → 08/05/2026** foi testado explicitamente.
+
+### Correções restritas ao importador
+
+- Extração direta das células com tipo, resultado calculado, formato, fórmula, endereço original, linhas/colunas ocultas e filtro salvo. Nenhuma compactação das posições vazias. Filtros e linhas ocultas não removem conteúdo silenciosamente.
+- Cabeçalhos repetidos são auxiliares; blocos com cabeçalhos/posições diferentes têm mapeamento próprio. Uma única data identificável por texto/tipo/formato pode ser usada como recurso final; números comuns não são inferidos como datas. Ambiguidades exigem confirmação da coluna por bloco.
+- Campos reconhecidos são preservados independentemente. Fórmulas sem cache não viram zero: o marcador SheetJS `t:"z", v:0` é tratado como ausência de resultado. Fórmulas com cache válido continuam aceitas.
+- Somente prontos são selecionados automaticamente. Pendentes, auxiliares e já importados ficam desmarcados. A confirmação dos prontos não é bloqueada por pendências separadas. É possível filtrar pendentes e consultar todas as células originais, além das linhas auxiliares/cabeçalhos/totais.
+- O servidor consulta origem persistente (hash original + aba + linha), incluindo histórico legado ligado ao lote. Sob bloqueio transacional por arquivo, grava apenas origens novas. O lote anterior não bloqueia abas/linhas restantes; não há comparação por nome e valor.
+- Depois de gravar, a prévia marca as origens como já importadas e mantém pendências consultáveis. Lançamentos e Scoreboard são relidos.
+- Nenhuma migração ou alteração de esquema foi necessária. Arquivo original, edição manual, dados compartilhados, autenticação e demais funcionalidades foram preservados.
+
+### Verificações executadas
+
+- Geração dos contratos, typecheck da API/app e build passaram; permanecem os avisos preexistentes de sourcemap e tamanho do bundle.
+- Testes do leitor com a origem real: seis abas, contagem de todas as linhas, inspeção direta de Março 29/30, 77 vendas, 56 auxiliares, uma pendência e soma de centavos independente. Testes sintéticos cobrem blocos reposicionados, cabeçalhos repetidos, datas 1900/1904, serial 46150, texto brasileiro/ISO, números não datados, datas ambíguas, cache de fórmulas e linhas ocultas.
+- Integração em esquema PostgreSQL isolado: primeiro 38 vendas da origem, depois dois envios simultâneos das 77. Um inseriu somente as 39 restantes, o outro zero; as 38 anteriores mantiveram seus IDs. Consulta persistente identificou as 77 origens, o lote totalizou 77 e a Scoreboard conciliou **77 / R$ 54.448,00**. Histórico legado sem hash direto também foi reconhecido pelo lote.
+- Regressões de edição sem categoria, metas, estornos e verificador de Excel/backup passaram. Os testes usaram esquema isolado ou tabelas temporárias com rollback, sem gravar essas vendas nas tabelas compartilhadas.
+- Permanecem os limites de 10 MB e 500 linhas selecionadas por envio. A identidade é do arquivo original: versões com bytes alterados são outra origem e não são mescladas automaticamente por semelhança.
+- Nenhuma publicação nem consulta, migração ou gravação em produção.
+- Navegador autenticado com o arquivo original: confirmou seis abas selecionadas, 78 candidatos (77 prontos, uma pendência, zero origens anteriores), 56 auxiliares, 5860 vazias e total selecionado **R$ 54.448,00**. Confirmar permaneceu disponível com a pendência fora da seleção; a lista de pendentes preservou data/valor e apresentou somente falta do cliente em JANEIRO 7.
+- A conferência visual também validou INICIO e exemplos convertidos nas seis abas, fonte F2/F7, auxiliares Março 29/30, seleção por aba e linha recalculando quantidade/valor. Em 390 px, rodapé alcançável e nenhum transbordamento horizontal da página; a tabela mantém rolagem interna. Não houve erros de aplicação. O diálogo foi cancelado, sem clicar Confirmar nem enviar POST de importação.

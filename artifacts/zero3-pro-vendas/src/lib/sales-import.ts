@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx";
+import { isDateCellFormat, readImportSource, type ImportSourceRow } from "./sales-import-source";
 
 export type SalesImportField =
   | "customerName"
@@ -8,10 +8,17 @@ export type SalesImportField =
 
 export type SalesImportMapping = Record<SalesImportField, number | null>;
 
-export type SalesImportSourceRow = {
+export type SalesImportSourceRow = ImportSourceRow & {
   key: string;
-  sourceRow: number;
-  cells: unknown[];
+  blockIndex: number;
+};
+
+export type SalesImportBlock = {
+  headerRow: number | null;
+  columns: Array<{ index: number; label: string }>;
+  mapping: SalesImportMapping;
+  dateInferred: boolean;
+  dateAmbiguous: boolean;
 };
 
 export type SalesImportSheet = {
@@ -25,6 +32,10 @@ export type SalesImportSheet = {
   ignoredBlankRows: number;
   ignoredSummaryRows: number;
   date1904: boolean;
+  blocks: SalesImportBlock[];
+  ignoredRows: Array<{ source: ImportSourceRow; reason: string }>;
+  ignoredHeaderRows: number;
+  filterRange: string | null;
 };
 
 export type SalesImportWorkbook = {
@@ -42,8 +53,11 @@ export type MappedSalesImportRow = {
 };
 
 export type SalesImportRowResult = {
+  kind: "ready" | "pending" | "auxiliary";
   value: MappedSalesImportRow | null;
   errors: string[];
+  reason: string;
+  dateSource: string;
   preview: {
     customerName: string;
     saleDate: string;
@@ -81,8 +95,8 @@ function headerMatch(value: unknown, field: SalesImportField): number {
   }
   if (field === "saleDate") {
     if (/^(data de inicio|data inicio|dt inicio|inicio)$/.test(header)) return 5;
-    if (/^(data da venda|data venda|sale date)$/.test(header)) return 4;
-    if (header === "data") return 2;
+    if (/^(data da venda|data de venda|data venda|sale date)$/.test(header)) return 4;
+    if (/^(data|data principal)$/.test(header)) return 2;
     return 0;
   }
   if (field === "totalAmount") {
@@ -150,101 +164,98 @@ export async function parseSalesSpreadsheet(
     throw new Error("Arquivo vazio ou não recebido.");
   }
 
-  let workbook: XLSX.WorkBook;
+  let sources: ReturnType<typeof readImportSource>;
   try {
-    if (extension === "csv") {
-      let text: string;
-      try {
-        text = new TextDecoder("utf-8", { fatal: true }).decode(fileBytes);
-      } catch {
-        text = new TextDecoder("windows-1252").decode(fileBytes);
-      }
-      workbook = XLSX.read(text, { type: "string", cellDates: false, raw: true });
-    } else {
-      workbook = XLSX.read(fileBytes, { type: "array", cellDates: false, raw: true });
-    }
+    sources = readImportSource(fileBytes, extension);
   } catch {
     throw new Error("Não foi possível ler o arquivo. Verifique se o XLSX ou CSV está íntegro.");
   }
-  if (!workbook.SheetNames.length) {
+  if (!sources.length) {
     throw new Error("O arquivo não contém abas ou linhas de dados.");
   }
 
-  const date1904 = workbook.Workbook?.WBProps?.date1904 === true;
-  const sheets = workbook.SheetNames.map((name, sheetIndex): SalesImportSheet => {
-    const worksheet = workbook.Sheets[name];
-    const grid = worksheet
-      ? XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
-          header: 1,
-          raw: true,
-          defval: "",
-          blankrows: true,
-          range: 0,
-        }) as unknown[][]
-      : [];
-    const headerLimit = grid.length;
-    let headerRow: number | null = null;
-    let bestScore = 0;
-    for (let rowIndex = 0; rowIndex < headerLimit; rowIndex += 1) {
-      const row = grid[rowIndex] ?? [];
-      if (isBlankRow(row)) continue;
-      const score = (["customerName", "saleDate", "totalAmount"] as const)
-        .filter((field) => detectColumn(row, field) !== null).length;
-      if (score > bestScore) {
-        bestScore = score;
-        headerRow = rowIndex;
-      }
-      if (score === 3) break;
-    }
-
-    const width = grid.reduce((maximum, row) => Math.max(maximum, row.length), 0);
-    const rawHeader = headerRow === null ? [] : (grid[headerRow] ?? []);
-    const labels = uniqueColumnLabels(Array.from({ length: width }, (_, index) => {
-      const value = String(rawHeader[index] ?? "").trim();
-      return value || `Coluna ${excelColumnName(index)}`;
-    }));
-    const mapping = headerRow === null ? emptyMapping() : {
-      customerName: detectColumn(rawHeader, "customerName"),
-      saleDate: detectColumn(rawHeader, "saleDate"),
-      totalAmount: detectColumn(rawHeader, "totalAmount"),
-      productName: detectColumn(rawHeader, "productName"),
-    };
-    const dataStart = headerRow === null ? 0 : headerRow + 1;
+  const sheets = sources.map((source): SalesImportSheet => {
+    const { name, date1904 } = source;
+    const makeBlock = (header?: ImportSourceRow): SalesImportBlock => ({
+      headerRow: header?.sourceRow ?? null,
+      columns: uniqueColumnLabels(Array.from({ length: source.width }, (_, index) =>
+        String(header?.cells[index] ?? "").trim() || `Coluna ${excelColumnName(index)}`,
+      )).map((label, index) => ({ index, label })),
+      mapping: header ? {
+        customerName: detectColumn(header.cells, "customerName"),
+        saleDate: detectColumn(header.cells, "saleDate"),
+        totalAmount: detectColumn(header.cells, "totalAmount"),
+        productName: detectColumn(header.cells, "productName"),
+      } : emptyMapping(),
+      dateInferred: false,
+      dateAmbiguous: false,
+    });
+    const isHeader = (row: ImportSourceRow) => (["customerName", "saleDate", "totalAmount"] as const)
+      .filter((field) => row.cells.some((cell) => headerMatch(cell, field) > 0)).length >= 2;
+    const firstHeader = source.rows.find(isHeader);
+    const blocks = [makeBlock(firstHeader)];
+    let blockIndex = 0;
     let ignoredBlankRows = 0;
     let ignoredSummaryRows = 0;
+    let ignoredHeaderRows = 0;
+    const ignoredRows: SalesImportSheet["ignoredRows"] = [];
     const rows: SalesImportSourceRow[] = [];
-    for (let rowIndex = dataStart; rowIndex < grid.length; rowIndex += 1) {
-      const cells = grid[rowIndex] ?? [];
+    for (const raw of source.rows) {
+      const { cells } = raw;
       if (isBlankRow(cells)) {
         ignoredBlankRows += 1;
         continue;
       }
-      if (isSummaryRow(cells, mapping, date1904)) {
+      if (isHeader(raw)) {
+        const next = makeBlock(raw);
+        if (raw.sourceRow !== firstHeader?.sourceRow
+          && (JSON.stringify(next.mapping) !== JSON.stringify(blocks[blockIndex].mapping)
+            || JSON.stringify(next.columns) !== JSON.stringify(blocks[blockIndex].columns))) {
+          blocks.push(next);
+          blockIndex = blocks.length - 1;
+        }
+        ignoredHeaderRows += 1;
+        ignoredRows.push({ source: raw, reason: "Cabeçalho de tabela (original ou repetido)." });
+        continue;
+      }
+      if (firstHeader && raw.sourceRow < firstHeader.sourceRow
+        && cells.filter((cell) => String(cell ?? "").trim()).length === 1) {
+        ignoredRows.push({ source: raw, reason: "Título/texto isolado antes do cabeçalho." });
+        continue;
+      }
+      if (isSummaryRow(cells, blocks[blockIndex].mapping, date1904)) {
         ignoredSummaryRows += 1;
+        ignoredRows.push({ source: raw, reason: "Total/subtotal identificado na estrutura da tabela." });
         continue;
       }
       rows.push({
-        key: `${name}:${rowIndex + 1}`,
-        sourceRow: rowIndex + 1,
-        cells,
+        ...raw, key: `${name}:${raw.sourceRow}`, blockIndex,
       });
     }
-    const hidden = (workbook.Workbook?.Sheets?.[sheetIndex] as { Hidden?: number } | undefined)?.Hidden !== undefined
-      && (workbook.Workbook?.Sheets?.[sheetIndex] as { Hidden?: number }).Hidden !== 0;
-    const requiredMapped = mapping.customerName !== null
-      && mapping.saleDate !== null
-      && mapping.totalAmount !== null;
+    for (const [index, block] of blocks.entries()) {
+      if (block.mapping.saleDate !== null) continue;
+      const explicitDateColumns = block.columns.filter((column) => headerMatch(column.label, "saleDate") > 0);
+      if (explicitDateColumns.length > 1) {
+        block.dateAmbiguous = true;
+        continue; // One block-level confirmation is required.
+      }
+      const dateColumns = new Set(rows.filter((row) => row.blockIndex === index)
+        .flatMap((row) => row.sourceCells.filter((cell) =>
+          cell.column !== block.mapping.customerName && cell.column !== block.mapping.totalAmount
+            && dateEvidence(row, cell.column, block, date1904),
+        ).map((cell) => cell.column)));
+      if (dateColumns.size === 1) {
+        block.mapping.saleDate = [...dateColumns][0];
+        block.dateInferred = true;
+      } else if (dateColumns.size > 1) block.dateAmbiguous = true;
+    }
+    const first = blocks[0];
     return {
-      name,
-      hidden,
-      headerRow: headerRow === null ? null : headerRow + 1,
-      columns: labels.map((label, index) => ({ index, label })),
-      rows,
-      mapping,
-      selected: !hidden && requiredMapped && rows.length > 0,
-      ignoredBlankRows,
-      ignoredSummaryRows,
-      date1904,
+      name, hidden: source.hidden, headerRow: first.headerRow,
+      columns: first.columns, mapping: first.mapping,
+      rows, blocks, ignoredRows, ignoredHeaderRows,
+      selected: !source.hidden && rows.length > 0,
+      ignoredBlankRows, ignoredSummaryRows, date1904, filterRange: source.filterRange,
     };
   });
   return { sheets };
@@ -267,8 +278,10 @@ export function parseImportDate(value: unknown, date1904 = false): string | null
     const date = `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, "0")}-${String(value.getUTCDate()).padStart(2, "0")}`;
     return validCalendarDate(date) ? date : null;
   }
-  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+  if (typeof value === "string" && /^\d{4,7}(?:\.\d+)?$/.test(value.trim())) value = Number(value.trim());
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 2_958_465) {
     let days = Math.floor(value);
+    if (!date1904 && days === 60) return null;
     let epoch = Date.UTC(1899, 11, 31);
     if (date1904) {
       epoch = Date.UTC(1904, 0, 1);
@@ -292,43 +305,92 @@ export function parseImportDate(value: unknown, date1904 = false): string | null
   return null;
 }
 
+function dateEvidence(row: ImportSourceRow, column: number, block: SalesImportBlock, date1904: boolean): boolean {
+  const label = normalizeHeader(block.columns[column]?.label);
+  if (/\b(fim|vencimento|pagamento|cadastro|parcela|valor|taxa|desconto|numero)\b/.test(label)) return false;
+  const value = row.cells[column];
+  const metadata = row.sourceCells.find((cell) => cell.column === column);
+  const identifiable = headerMatch(label, "saleDate") > 0 || metadata?.type === "d"
+    || isDateCellFormat(metadata?.format ?? "")
+    || (typeof value === "string" && /^(?:\d{1,2}[/.]\d{1,2}[/.]\d{4}|\d{4}-\d{2}-\d{2})/.test(value.trim()));
+  return identifiable && parseImportDate(value, date1904) !== null;
+}
+
 export function mapSalesImportRow(
   sheet: SalesImportSheet,
   row: SalesImportSourceRow,
 ): SalesImportRowResult {
+  const block = sheet.blocks[row.blockIndex];
+  const mapping = row.blockIndex === 0 ? sheet.mapping : block.mapping;
+  let dateColumn = mapping.saleDate;
+  let dateFallback = false;
+  if ((dateColumn !== null || !block.dateAmbiguous)
+    && (dateColumn === null || !String(row.cells[dateColumn] ?? "").trim())) {
+    const alternatives = row.sourceCells.filter((cell) => cell.column !== mapping.customerName
+      && cell.column !== mapping.totalAmount && dateEvidence(row, cell.column, block, sheet.date1904));
+    if (alternatives.length === 1) {
+      dateColumn = alternatives[0].column;
+      dateFallback = true;
+    }
+  }
+  const columnFor = (field: SalesImportField) => field === "saleDate" ? dateColumn : mapping[field];
   const cell = (field: SalesImportField) => {
-    const column = sheet.mapping[field];
+    const column = columnFor(field);
     return column === null ? "" : row.cells[column];
   };
   const customerName = String(cell("customerName") ?? "").trim().replace(/\s+/g, " ");
   const saleDate = parseImportDate(cell("saleDate"), sheet.date1904);
   const totalCents = parseImportMoney(cell("totalAmount"));
   const rawProduct = String(cell("productName") ?? "").trim().replace(/\s+/g, " ");
+  const nonempty = row.sourceCells.filter((source) => String(source.value ?? "").trim());
+  const hasCore = (["customerName", "saleDate", "totalAmount"] as const)
+    .some((field) => String(cell(field) ?? "").trim());
+  const optionalOnly = nonempty.length > 0 && nonempty.every((source) =>
+    /^(modalidade|recorrencia|produto|plano|categoria|observacao|observacoes|nota|notas)$/.test(normalizeHeader(block.columns[source.column]?.label)),
+  );
+  const hasOtherEvidence = nonempty.some((source) =>
+    dateEvidence(row, source.column, block, sheet.date1904)
+    || headerMatch(block.columns[source.column]?.label, "totalAmount") > 0,
+  );
+  const auxiliary = !hasCore && !hasOtherEvidence && (optionalOnly || nonempty.length === 0
+    || (nonempty.length === 1 && mapping.customerName !== nonempty[0].column
+      && /^(observacao|nota|relatorio|titulo|resumo)\b/.test(normalizeHeader(nonempty[0].value))));
   const errors: string[] = [];
-  if (!customerName) errors.push("Nome do cliente ausente.");
+  const fieldError = (field: SalesImportField, label: string) => {
+    const column = columnFor(field);
+    const source = row.sourceCells.find((item) => item.column === column);
+    if (source?.formula && !String(source.value ?? "").trim()) {
+      return `${label}: fórmula em ${source.address} sem resultado calculado utilizável.`;
+    }
+    return `${label}${source ? ` (${source.address})` : ""}.`;
+  };
+  if (!customerName) errors.push(fieldError("customerName", "Nome do cliente ausente"));
   else if (customerName.length > 120) errors.push("Nome do cliente acima de 120 caracteres.");
-  if (sheet.mapping.customerName === null) errors.push("Coluna do cliente não identificada.");
-  if (!saleDate) errors.push("Data de início inválida.");
-  if (sheet.mapping.saleDate === null) errors.push("Coluna da data de início não identificada.");
-  if (totalCents === null) errors.push("Valor da venda inválido ou negativo.");
-  if (sheet.mapping.totalAmount === null) errors.push("Coluna do valor da venda não identificada.");
-  if (rawProduct.length > 120) errors.push("Produto acima de 120 caracteres.");
+  if (!saleDate) errors.push(fieldError("saleDate", dateColumn === null
+    ? "Data não identificada com segurança; confirme a coluna uma vez neste bloco"
+    : "Data da venda ausente ou inválida"));
+  if (totalCents === null) errors.push(fieldError("totalAmount", "Valor da venda ausente, inválido ou negativo"));
+  const reason = auxiliary
+    ? `Somente conteúdo auxiliar, sem lançamento nos campos obrigatórios. Células preenchidas: ${nonempty.map((source) => source.address).join(", ") || "nenhuma"}.`
+    : errors.join(" ");
   return {
+    kind: auxiliary ? "auxiliary" : errors.length ? "pending" : "ready",
+    reason,
+    dateSource: dateColumn === null ? "Data não identificada" : `${excelColumnName(dateColumn)}${row.sourceRow} · ${block.columns[dateColumn]?.label ?? ""}${dateFallback || block.dateInferred ? " (única data identificável)" : ""}`,
     preview: {
       customerName,
       saleDate: saleDate ?? String(cell("saleDate") ?? "").trim(),
       totalCents,
       amountText: String(cell("totalAmount") ?? "").trim(),
-      productName: rawProduct || null,
+      productName: rawProduct.length <= 120 ? rawProduct || null : null,
     },
-    value: customerName
+    value: !auxiliary && customerName
       && customerName.length <= 120
       && saleDate
       && totalCents !== null
-      && rawProduct.length <= 120
-      && sheet.mapping.customerName !== null
-      && sheet.mapping.saleDate !== null
-      && sheet.mapping.totalAmount !== null
+      && mapping.customerName !== null
+      && dateColumn !== null
+      && mapping.totalAmount !== null
       ? {
           key: row.key,
           sourceSheet: sheet.name,
@@ -336,10 +398,10 @@ export function mapSalesImportRow(
           customerName,
           saleDate,
           totalCents,
-          productName: rawProduct || null,
+           productName: rawProduct.length <= 120 ? rawProduct || null : null,
         }
       : null,
-    errors,
+    errors: auxiliary ? [] : errors,
   };
 }
 

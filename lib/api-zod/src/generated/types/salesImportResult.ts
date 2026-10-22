@@ -13,5 +13,7 @@ export interface SalesImportResult {
   replayed: boolean;
   /** @minimum 0 */
   importedCount: number;
+  /** @minimum 0 */
+  skippedCount: number;
   sales: Sale[];
 }

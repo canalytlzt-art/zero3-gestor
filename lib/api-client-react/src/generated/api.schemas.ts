@@ -189,6 +189,16 @@ export interface SalesHistoryEntry {
   createdAt: string;
 }
 
+export interface SalesImportedOrigin {
+  sourceSheet: string;
+  sourceRow: number;
+  saleId: string;
+}
+
+export interface SalesImportOriginsResult {
+  origins: SalesImportedOrigin[];
+}
+
 export interface SalesImportRow {
   saleDate: string;
   /**
@@ -241,6 +251,8 @@ export interface SalesImportResult {
   replayed: boolean;
   /** @minimum 0 */
   importedCount: number;
+  /** @minimum 0 */
+  skippedCount: number;
   sales: Sale[];
 }
 
@@ -632,6 +644,13 @@ export interface ApiError {
 export interface AccessStatus {
   authorized: boolean;
 }
+
+export type GetSalesImportOriginsParams = {
+/**
+ * @pattern ^[a-f0-9]{64}$
+ */
+fileHash: string;
+};
 
 export type GetSalesScoreboardParams = {
 fromDate?: string;

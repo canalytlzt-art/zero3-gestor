@@ -204,7 +204,26 @@ export const CreateSaleResponse = zod.object({
 
 
 /**
- * @summary Import validated sales rows as one idempotent batch
+ * @summary Read previously imported physical source rows
+ */
+export const getSalesImportOriginsQueryFileHashRegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const GetSalesImportOriginsQueryParams = zod.object({
+  "fileHash": zod.coerce.string().regex(getSalesImportOriginsQueryFileHashRegExp)
+})
+
+export const GetSalesImportOriginsResponse = zod.object({
+  "origins": zod.array(zod.object({
+  "sourceSheet": zod.string(),
+  "sourceRow": zod.number().int(),
+  "saleId": zod.string().uuid()
+}))
+})
+
+
+/**
+ * @summary Import only unseen physical rows of a file, allowing partial reprocessing
  */
 export const importSalesBodyFileHashRegExp = new RegExp('^[a-f0-9]{64}$');
 export const importSalesBodyFilenameMax = 255;
@@ -241,6 +260,8 @@ export const ImportSalesBody = zod.object({
 
 export const importSalesResponseImportedCountMin = 0;
 
+export const importSalesResponseSkippedCountMin = 0;
+
 export const importSalesResponseSalesItemCustomerNameMax = 120;
 
 
@@ -251,6 +272,7 @@ export const ImportSalesResponse = zod.object({
   "fileName": zod.string(),
   "replayed": zod.boolean(),
   "importedCount": zod.number().int().min(importSalesResponseImportedCountMin),
+  "skippedCount": zod.number().int().min(importSalesResponseSkippedCountMin),
   "sales": zod.array(zod.object({
   "id": zod.string().uuid(),
   "productId": zod.string().uuid().nullable(),

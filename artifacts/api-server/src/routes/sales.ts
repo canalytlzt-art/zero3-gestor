@@ -28,6 +28,8 @@ import {
   GetMonthlySalesBackupResponse,
   ImportSalesBody,
   ImportSalesResponse,
+  GetSalesImportOriginsQueryParams,
+  GetSalesImportOriginsResponse,
   MonthlySalesBackupV1,
   MonthlySalesBackupV2,
   PreviewMonthlySalesBackupRestoreBody,
@@ -73,6 +75,7 @@ import {
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod/v4";
 import { isAuthorizedUser } from "../lib/authorization";
+import { getSalesImportOrigins } from "../lib/sales-import-origins";
 import {
   calculateSaleTotalCents,
   getBusinessMonthKey,
@@ -1736,6 +1739,17 @@ export function createSalesRouter(
     res.json(GetSaleHistoryResponse.parse(history));
   });
 
+  router.get("/sales/import/origins", async (req, res): Promise<void> => {
+    if (!(await requireSalesAccess(req, res))) return;
+    const query = GetSalesImportOriginsQueryParams.safeParse(req.query);
+    if (!query.success) {
+      res.status(400).json({ error: "Hash de arquivo inválido." });
+      return;
+    }
+    const origins = await getSalesImportOrigins(database, query.data.fileHash);
+    res.json(GetSalesImportOriginsResponse.parse({ origins: [...origins.values()] }));
+  });
+
   router.post("/sales/import", async (req, res): Promise<void> => {
     if (!(await requireSalesAccess(req, res))) return;
     if (Array.isArray(req.body?.rows)) {
@@ -1775,13 +1789,13 @@ export function createSalesRouter(
       const customerName =
         row.customerName?.trim().replace(/\s+/g, " ") || "";
       const totalCents = row.totalCents;
-      const sourceSheet = row.sourceSheet.trim().replace(/\s+/g, " ");
+      const sourceSheet = row.sourceSheet;
       if (
         !saleDate ||
         (productName !== null && productName.length > 120) ||
         !customerName ||
         customerName.length > 120 ||
-        !sourceSheet ||
+        !sourceSheet.trim() ||
         sourceSheet.length > 255
       ) {
         res
@@ -1803,26 +1817,28 @@ export function createSalesRouter(
         sourceRow: row.sourceRow,
       });
     }
+    if (new Set(normalizedRows.map((row) => `${row.sourceSheet}:${row.sourceRow}`)).size !== normalizedRows.length) {
+      res.status(400).json({ error: "O envio contém a mesma aba/linha mais de uma vez." });
+      return;
+    }
     const actorId = getUserId(req)!;
     try {
-      const result = await database.transaction(async (tx) =>
-        runIdempotent(
-          tx,
-          {
-            actorId,
-            operation: "sales-import",
-            key: parsed.data.fileHash,
-            request: { rows: normalizedRows },
-          },
-          async () => {
-            const [batch] = await tx
+      const result = await database.transaction(async (tx) => {
+            // Shared sales base: serialize this file across actors/devices, not just one UI.
+            await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${"sales-file:" + parsed.data.fileHash}, 0))`);
+            const origins = await getSalesImportOrigins(tx, parsed.data.fileHash);
+            let [batch] = await tx.select().from(salesImportBatchesTable).where(and(
+              eq(salesImportBatchesTable.source, "sales-file"),
+              eq(salesImportBatchesTable.fileHash, parsed.data.fileHash),
+            )).limit(1);
+            if (!batch) [batch] = await tx
               .insert(salesImportBatchesTable)
               .values({
                 actorId,
                 source: "sales-file",
                 fileHash: parsed.data.fileHash,
                 status: "completed",
-                rowCount: normalizedRows.length,
+                rowCount: 0,
                 completedAt: new Date(),
               })
               .returning();
@@ -1830,6 +1846,7 @@ export function createSalesRouter(
 
             const importedSales = [];
             for (const row of normalizedRows) {
+              if (origins.has(`${row.sourceSheet}:${row.sourceRow}`)) continue;
               const product = row.productName
                 ? await getOrCreateProduct(
                     tx,
@@ -1863,6 +1880,7 @@ export function createSalesRouter(
                 afterData: {
                   ...sale,
                   importBatchId: batch.id,
+                  sourceFileHash: parsed.data.fileHash,
                   sourceFileName: parsed.data.filename,
                   sourceSheet: row.sourceSheet,
                   sourceRow: row.sourceRow,
@@ -1870,20 +1888,29 @@ export function createSalesRouter(
               });
               importedSales.push(sale);
             }
+            await tx.update(salesImportBatchesTable).set({
+              rowCount: origins.size + importedSales.length, status: "completed", completedAt: new Date(),
+            }).where(eq(salesImportBatchesTable.id, batch.id));
+            const previousIds = normalizedRows.flatMap((row) => {
+              const origin = origins.get(`${row.sourceSheet}:${row.sourceRow}`);
+              return origin ? [origin.saleId] : [];
+            });
+            const previousSales = previousIds.length
+              ? await tx.select().from(salesTable).where(inArray(salesTable.id, previousIds))
+              : [];
+            const byId = new Map(previousSales.map((sale) => [sale.id, sale]));
+            const requestedPrevious = previousIds.flatMap((id) => byId.has(id) ? [byId.get(id)!] : []);
             return {
               batchId: batch.id,
               fileName: parsed.data.filename,
               importedCount: importedSales.length,
-              sales: importedSales,
+              skippedCount: previousIds.length,
+              replayed: importedSales.length === 0,
+              sales: [...requestedPrevious, ...importedSales],
             };
-          },
-        ),
-      );
+      });
       res.status(result.replayed ? 200 : 201).json(
-        ImportSalesResponse.parse({
-          ...result.value,
-          replayed: result.replayed,
-        }),
+        ImportSalesResponse.parse(result),
       );
     } catch (error) {
       if (error instanceof IdempotencyConflictError) {

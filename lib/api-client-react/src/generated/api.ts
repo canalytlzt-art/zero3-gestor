@@ -27,6 +27,7 @@ import type {
   CreateSaleInput,
   CreateSalesRefundInput,
   GetMonthlySalesBackupParams,
+  GetSalesImportOriginsParams,
   GetSalesScoreboardParams,
   HealthStatus,
   MonthlySalesBackupInput,
@@ -37,6 +38,7 @@ import type {
   SalesGoalInput,
   SalesHistoryEntry,
   SalesImportInput,
+  SalesImportOriginsResult,
   SalesImportResult,
   SalesRefund,
   SalesRefundCandidate,
@@ -652,6 +654,90 @@ export const useCreateSale = <TError = ErrorType<ApiError>,
       return useMutation(getCreateSaleMutationOptions(options));
     }
 
+export const getGetSalesImportOriginsUrl = (params: GetSalesImportOriginsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/sales/import/origins?${stringifiedParams}` : `/api/sales/import/origins`
+}
+
+/**
+ * @summary Read previously imported physical source rows
+ */
+export const getSalesImportOrigins = async (params: GetSalesImportOriginsParams, options?: Parameters<typeof customFetch>[1]): Promise<SalesImportOriginsResult> => {
+
+  return customFetch<SalesImportOriginsResult>(getGetSalesImportOriginsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSalesImportOriginsQueryKey = (params?: GetSalesImportOriginsParams,) => {
+    return [
+    `/api/sales/import/origins`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetSalesImportOriginsQueryOptions = <TData = Awaited<ReturnType<typeof getSalesImportOrigins>>, TError = ErrorType<void>>(params: GetSalesImportOriginsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSalesImportOrigins>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSalesImportOriginsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSalesImportOrigins>>> = ({ signal }) => getSalesImportOrigins(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSalesImportOrigins>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSalesImportOriginsQueryResult = NonNullable<Awaited<ReturnType<typeof getSalesImportOrigins>>>
+export type GetSalesImportOriginsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Read previously imported physical source rows
+ */
+
+export function useGetSalesImportOrigins<TData = Awaited<ReturnType<typeof getSalesImportOrigins>>, TError = ErrorType<void>>(
+ params: GetSalesImportOriginsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSalesImportOrigins>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSalesImportOriginsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getImportSalesUrl = () => {
 
 
@@ -661,7 +747,7 @@ export const getImportSalesUrl = () => {
 }
 
 /**
- * @summary Import validated sales rows as one idempotent batch
+ * @summary Import only unseen physical rows of a file, allowing partial reprocessing
  */
 export const importSales = async (salesImportInput: SalesImportInput, options?: Parameters<typeof customFetch>[1]): Promise<SalesImportResult> => {
 
@@ -727,7 +813,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ImportSalesMutationVariables = {data: BodyType<SalesImportInput>}
 
     /**
- * @summary Import validated sales rows as one idempotent batch
+ * @summary Import only unseen physical rows of a file, allowing partial reprocessing
  */
 export const useImportSales = <TError = ErrorType<ApiError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importSales>>, TError,ImportSalesMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}

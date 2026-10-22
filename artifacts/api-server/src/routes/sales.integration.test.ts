@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import { after, before, test } from "node:test";
@@ -424,7 +425,7 @@ test("imports customer, date, and exact total without creating a product or dedu
     assert.equal(replay.status, 200);
     const replayed = (await replay.json()) as typeof imported;
     assert.equal(replayed.replayed, true);
-    assert.equal(replayed.importedCount, 2);
+    assert.equal(replayed.importedCount, 0);
     assert.deepEqual(
       replayed.sales.map(({ id }) => id),
       imported.sales.map(({ id }) => id),
@@ -500,6 +501,69 @@ test("imports customer, date, and exact total without creating a product or dedu
     (await testPool!.query("SELECT count(*)::text AS count FROM products")).rows[0]?.count ?? 0,
   );
   assert.equal(productCountAfter, productCountBefore);
+});
+
+const originalImportFile = new URL("../../../../attached_assets/0_Clientes_Individuais_1792690299275.xlsx", import.meta.url);
+test("partial original-file imports resume across concurrent requests and reconcile all 77 sales", {
+  skip: !existsSync(originalImportFile),
+}, async () => {
+  const bytes = readFileSync(originalImportFile);
+  const fileHash = createHash("sha256").update(bytes).digest("hex");
+  // Runtime-only test bridge: the web parser is not part of the API's production rootDir.
+  const parserUrl = new URL("../../../zero3-pro-vendas/src/lib/sales-import.ts", import.meta.url).href;
+  const { parseSalesSpreadsheet, mapSalesImportRow } = await import(parserUrl) as {
+    parseSalesSpreadsheet: (bytes: ArrayBuffer, name: string) => Promise<{ sheets: Array<{ rows: unknown[] }> }>;
+    mapSalesImportRow: (sheet: unknown, row: unknown) => {
+      value: { customerName: string; saleDate: string; totalCents: number; sourceSheet: string; sourceRow: number } | null;
+    };
+  };
+  const workbook = await parseSalesSpreadsheet(
+    bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), "original.xlsx",
+  );
+  const rows = workbook.sheets.flatMap((sheet) => sheet.rows.flatMap((source) => {
+    const result = mapSalesImportRow(sheet, source);
+    return result.value ? [result.value] : [];
+  }));
+  assert.equal(rows.length, 77);
+  const totalCents = rows.reduce((sum, row) => sum + row.totalCents, 0);
+  type ImportResult = { importedCount: number; skippedCount: number; replayed: boolean; sales: Array<{ id: string }> };
+  await withSalesApi(getTestDatabase(), async (baseUrl) => {
+    const body = { fileHash, filename: "original.xlsx", rows: rows.slice(0, 38) };
+    const firstResponse = await apiRequest(baseUrl, "/sales/import", { method: "POST", body });
+    assert.equal(firstResponse.status, 201);
+    const first = await firstResponse.json() as ImportResult;
+    assert.equal(first.importedCount, 38);
+    createdSaleIds.push(...first.sales.map((sale) => sale.id));
+    // Emulate earlier importer history: no direct file hash, only a persistent batch ID.
+    await testPool!.query("UPDATE sales_history SET after_data = after_data - 'sourceFileHash' WHERE after_data->>'sourceFileHash' = $1", [fileHash]);
+    const inspectResponse = await apiRequest(baseUrl, `/sales/import/origins?fileHash=${fileHash}`);
+    assert.equal(inspectResponse.status, 200);
+    assert.equal(((await inspectResponse.json()) as { origins: unknown[] }).origins.length, 38);
+
+    const concurrent = await Promise.all([0, 1].map(() =>
+      apiRequest(baseUrl, "/sales/import", { method: "POST", body: { ...body, rows } }),
+    ));
+    assert.deepEqual(concurrent.map((response) => response.status).sort(), [200, 201]);
+    const results = await Promise.all(concurrent.map((response) => response.json() as Promise<ImportResult>));
+    assert.deepEqual(results.map((result) => result.importedCount).sort((a, b) => a - b), [0, 39]);
+    const completed = results.find((result) => result.importedCount === 39)!;
+    assert.equal(completed.skippedCount, 38);
+    assert.equal(new Set(completed.sales.map((sale) => sale.id)).size, 77);
+    createdSaleIds.push(...completed.sales.map((sale) => sale.id));
+    for (const sale of first.sales) assert.ok(completed.sales.some((item) => item.id === sale.id));
+    const finalInspect = await apiRequest(baseUrl, `/sales/import/origins?fileHash=${fileHash}`);
+    assert.equal(((await finalInspect.json()) as { origins: unknown[] }).origins.length, 77);
+    const dates = rows.map((row) => row.saleDate).sort();
+    const reportResponse = await apiRequest(baseUrl, `/sales/scoreboard?fromDate=${dates[0]}&toDate=${dates.at(-1)}`);
+    assert.equal(reportResponse.status, 200);
+    const report = await reportResponse.json() as { totals: { quantity: number; salesCents: number; netCents: number } };
+    assert.equal(report.totals.quantity, 77);
+    assert.equal(report.totals.salesCents, totalCents);
+    assert.equal(report.totals.netCents, totalCents);
+    assert.equal(totalCents, 5444800);
+    const batch = await testPool!.query("SELECT row_count FROM sales_import_batches WHERE file_hash = $1", [fileHash]);
+    assert.equal(batch.rows[0].row_count, 77);
+  });
 });
 
 test("monthly goals persist by month and plan, enforce access, and don't block sales", async () => {
