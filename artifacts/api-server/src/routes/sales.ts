@@ -1611,7 +1611,7 @@ export function createSalesRouter(
 
   router.get("/sales/refund-candidates", async (req, res): Promise<void> => {
     if (!(await requireSalesAccess(req, res))) return;
-    const rows = await db
+    const rows = await database
       .select({
         sale: salesTable,
         refundedCents: sql<string>`coalesce(sum(${salesRefundsTable.amountCents}), 0)::text`,
@@ -1659,7 +1659,7 @@ export function createSalesRouter(
 
   router.get("/sales/refunds", async (req, res): Promise<void> => {
     if (!(await requireSalesAccess(req, res))) return;
-    const rows = await db
+    const rows = await database
       .select({
         refund: salesRefundsTable,
         sale: salesTable,
@@ -1691,7 +1691,7 @@ export function createSalesRouter(
       res.status(400).json({ error: params.error.message });
       return;
     }
-    const [refund] = await db
+    const [refund] = await database
       .select({ id: salesRefundsTable.id })
       .from(salesRefundsTable)
       .where(eq(salesRefundsTable.id, params.data.id))
@@ -1700,7 +1700,7 @@ export function createSalesRouter(
       res.status(404).json({ error: "Refund not found" });
       return;
     }
-    const history = await db
+    const history = await database
       .select()
       .from(salesHistoryTable)
       .where(
@@ -2826,7 +2826,9 @@ export function createSalesRouter(
       res.status(400).json({ error: parsed.error.message });
       return;
     }
-    const refundDate = parseSaleDate(parsed.data.refundDate);
+    const refundDate = parseSaleDate(
+      (req.body as { refundDate?: unknown }).refundDate,
+    );
     const reason = parsed.data.reason.trim().replace(/\s+/g, " ");
     if (
       !refundDate ||
@@ -2841,9 +2843,9 @@ export function createSalesRouter(
       return;
     }
 
-    const actorId = getAuth(req).userId!;
+    const actorId = getUserId(req)!;
     try {
-      const result = await db.transaction(async (tx) =>
+      const result = await database.transaction(async (tx) =>
         runIdempotent(
           tx,
           {
@@ -2928,7 +2930,9 @@ export function createSalesRouter(
       res.status(400).json({ error: parsed.error.message });
       return;
     }
-    const refundDate = parseSaleDate(parsed.data.refundDate);
+    const refundDate = parseSaleDate(
+      (req.body as { refundDate?: unknown }).refundDate,
+    );
     const reason = parsed.data.reason.trim().replace(/\s+/g, " ");
     if (
       !refundDate ||
@@ -2943,9 +2947,9 @@ export function createSalesRouter(
       return;
     }
 
-    const actorId = getAuth(req).userId!;
+    const actorId = getUserId(req)!;
     try {
-      const result = await db.transaction(async (tx) =>
+      const result = await database.transaction(async (tx) =>
         runIdempotent(
           tx,
           {
@@ -3062,9 +3066,9 @@ export function createSalesRouter(
       return;
     }
 
-    const actorId = getAuth(req).userId!;
+    const actorId = getUserId(req)!;
     try {
-      const result = await db.transaction(async (tx) =>
+      const result = await database.transaction(async (tx) =>
         runIdempotent(
           tx,
           {

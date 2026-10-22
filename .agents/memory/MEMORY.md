@@ -1,3 +1,4 @@
 - [Vite React dependency cache](vite-react-cache.md) — after React version changes, inspect and refresh Vite's optimized dependencies if the runtime still reports mismatched versions.
 - [Backup JSON dates](backup-json-dates.md) — generated API validators coerce dates; validate the serialized backup contract before that coercion.
+- [API date and database boundaries](refund-api-boundaries.md) — validate calendar dates from raw JSON and keep routed DB reads and writes on the injected connection.
 - [Importação de planilhas](spreadsheet-import.md) — origem pode ter só cliente, Data de início e valor; CSV com acentos exige decodificação explícita.

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ChangeEvent, type InputHTMLAttributes } from 'react';
+import { useMemo, useRef, useState, type ChangeEvent, type FormEvent, type InputHTMLAttributes } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -10,18 +10,21 @@ import {
   getGetSalesHistoryQueryKey,
   getGetSalesGoalsQueryKey,
   getGetSalesQueryKey,
+  getGetSalesRefundCandidatesQueryKey,
   getGetSalesRefundsQueryKey,
   getGetSalesScoreboardQueryKey,
   getMonthlySalesBackup,
   previewMonthlySalesBackupRestore,
   useCancelSale,
   useCreateProduct,
+  useCreateSalesRefund,
   useCreateSale,
   useGetProducts,
   useGetSaleHistory,
   useGetSales,
   useGetSalesHistory,
   useGetSalesGoals,
+  useGetSalesRefundCandidates,
   useGetSalesRefunds,
   useImportSales,
   useRestoreMonthlySalesBackup,
@@ -104,7 +107,8 @@ function parseBrlCents(value: string): number | null {
 }
 
 function formatDate(value: string, options: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short', year: 'numeric' }) {
-  return new Date(`${value}T12:00:00`).toLocaleDateString('pt-BR', options);
+  const calendarDate = value.slice(0, 10);
+  return new Date(`${calendarDate}T12:00:00`).toLocaleDateString('pt-BR', options);
 }
 
 function formatCentsInput(value: number) {
@@ -203,15 +207,35 @@ export default function SalesManagement() {
   const createSale = useCreateSale();
   const updateSale = useUpdateSale();
   const cancelSale = useCancelSale();
+  const createSalesRefund = useCreateSalesRefund();
   const createProduct = useCreateProduct();
   const updateProduct = useUpdateProduct();
   const importSales = useImportSales();
   const restoreBackup = useRestoreMonthlySalesBackup();
-  const { data: refunds, refetch: refetchRefunds } = useGetSalesRefunds({
+  const {
+    data: refunds,
+    isLoading: isRefundsLoading,
+    isError: isRefundsError,
+    refetch: refetchRefunds,
+  } = useGetSalesRefunds({
     query: { queryKey: getGetSalesRefundsQueryKey(), refetchOnMount: 'always' },
+  });
+  const {
+    data: refundCandidates,
+    isLoading: isRefundCandidatesLoading,
+    isError: isRefundCandidatesError,
+    refetch: refetchRefundCandidates,
+  } = useGetSalesRefundCandidates({
+    query: { queryKey: getGetSalesRefundCandidatesQueryKey(), refetchOnMount: 'always' },
   });
   const [editing, setEditing] = useState<Sale | null>(null);
   const [cancelling, setCancelling] = useState<Sale | null>(null);
+  const [refundDialogOpen, setRefundDialogOpen] = useState(false);
+  const [refundSaleId, setRefundSaleId] = useState('');
+  const [refundDate, setRefundDate] = useState(todayLocal());
+  const [refundAmount, setRefundAmount] = useState('');
+  const [refundReason, setRefundReason] = useState('');
+  const [refundError, setRefundError] = useState('');
   const [historySale, setHistorySale] = useState<Sale | null>(null);
   const [cancellationReason, setCancellationReason] = useState('');
   const [cancellationError, setCancellationError] = useState('');
@@ -221,7 +245,6 @@ export default function SalesManagement() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'cancelled'>('all');
-  const [historyHint, setHistoryHint] = useState('');
   const [productsOpen, setProductsOpen] = useState(false);
   const [productSearch, setProductSearch] = useState('');
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -247,11 +270,13 @@ export default function SalesManagement() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const exportMenuRef = useRef<HTMLDetailsElement>(null);
   const busy = createSale.isPending || updateSale.isPending || cancelSale.isPending
-    || createProduct.isPending || updateProduct.isPending || importSales.isPending;
+    || createProduct.isPending || updateProduct.isPending || importSales.isPending
+    || createSalesRefund.isPending;
   const operationLock = useRef(false);
   const pendingSaleKey = useRef<{ fingerprint: string; key: string } | null>(null);
   const pendingProductKey = useRef<{ fingerprint: string; key: string } | null>(null);
   const pendingCancellationKey = useRef<{ fingerprint: string; key: string } | null>(null);
+  const pendingRefundKey = useRef<{ fingerprint: string; key: string } | null>(null);
   const completedImportHashes = useRef(new Set<string>());
 
   const products = useMemo(() => (productRecords ?? [])
@@ -282,6 +307,17 @@ export default function SalesManagement() {
     () => (refunds ?? []).filter((refund) => refund.refundDate.slice(0, 7) === backupMonth),
     [refunds, backupMonth],
   );
+  const activeRefundTotalsBySale = useMemo(() => {
+    const totals = new Map<string, bigint>();
+    for (const refund of refunds ?? []) {
+      if (refund.status === 'active') {
+        totals.set(refund.saleId, (totals.get(refund.saleId) ?? 0n) + BigInt(refund.amountCents));
+      }
+    }
+    return totals;
+  }, [refunds]);
+  const selectedRefundCandidate = refundCandidates?.find(({ saleId }) => saleId === refundSaleId);
+  const refundAmountCents = parseBrlCents(refundAmount);
   const backupMonthGoals = useMemo(
     () => (salesGoals ?? []).filter((goal) => goal.month === backupMonth),
     [salesGoals, backupMonth],
@@ -336,10 +372,72 @@ export default function SalesManagement() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: getGetSalesQueryKey() }),
       queryClient.invalidateQueries({ queryKey: getGetSalesHistoryQueryKey() }),
+      queryClient.invalidateQueries({ queryKey: getGetSalesRefundCandidatesQueryKey() }),
+      queryClient.invalidateQueries({ queryKey: getGetSalesRefundsQueryKey() }),
       queryClient.invalidateQueries({ queryKey: getGetProductsQueryKey() }),
       queryClient.invalidateQueries({ queryKey: getGetSalesGoalsQueryKey() }),
       queryClient.invalidateQueries({ queryKey: getGetSalesScoreboardQueryKey() }),
     ]);
+  }
+
+  async function openRefundDialog() {
+    setRefundError('');
+    setRefundDate(todayLocal());
+    setRefundAmount('');
+    setRefundReason('');
+    const result = await refetchRefundCandidates();
+    const candidates = result.data ?? refundCandidates ?? [];
+    setRefundSaleId(candidates[0]?.saleId ?? '');
+    setRefundDialogOpen(true);
+  }
+
+  async function submitRefund(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (createSalesRefund.isPending) return;
+    const candidate = refundCandidates?.find(({ saleId }) => saleId === refundSaleId);
+    const amountCents = parseBrlCents(refundAmount);
+    const reason = refundReason.trim().replace(/\s+/g, ' ');
+    if (!candidate) {
+      setRefundError('Selecione uma venda ativa com saldo disponível.');
+      return;
+    }
+    if (!isValidCalendarDate(refundDate) || refundDate < candidate.saleDate.slice(0, 10)) {
+      setRefundError('Informe uma data válida, igual ou posterior à data da venda.');
+      return;
+    }
+    if (amountCents === null || amountCents <= 0 || amountCents > candidate.remainingCents) {
+      setRefundError(`Informe um valor positivo de até ${formatCents(candidate.remainingCents)}.`);
+      return;
+    }
+    if (!reason || reason.length > 500) {
+      setRefundError('Informe um motivo com até 500 caracteres.');
+      return;
+    }
+    const fingerprint = `${candidate.saleId}:${refundDate}:${amountCents}:${reason}`;
+    if (pendingRefundKey.current?.fingerprint !== fingerprint) {
+      pendingRefundKey.current = { fingerprint, key: crypto.randomUUID() };
+    }
+    setRefundError('');
+    try {
+      await createSalesRefund.mutateAsync({
+        id: candidate.saleId,
+        data: {
+          refundDate,
+          amountCents,
+          reason,
+          idempotencyKey: pendingRefundKey.current.key,
+        },
+      });
+      await invalidateSalesRelated();
+      pendingRefundKey.current = null;
+      setRefundDialogOpen(false);
+      setFeedback({ type: 'success', message: 'Estorno registrado e vinculado à venda original.' });
+    } catch (error) {
+      setRefundError(errorMessage(error));
+      if (error && typeof error === 'object' && 'status' in error && error.status === 409) {
+        void invalidateSalesRelated();
+      }
+    }
   }
 
   function openProductManager() {
@@ -712,7 +810,7 @@ export default function SalesManagement() {
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={openProductManager} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-[#ded7e7] bg-white px-4 text-sm font-bold text-[#5d4a78] transition hover:bg-[#f7f4fa]" data-testid="button-manage-products"><Search size={15} /> Produtos</button>
           <button type="button" onClick={() => { resetForm(); document.getElementById('sale-entry-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); document.querySelector<HTMLInputElement>('[data-testid="input-sale-date"]')?.focus(); }} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#d7f500] px-4 text-sm font-extrabold text-[#262b15] transition hover:bg-[#c9e600] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6d28d9] focus-visible:ring-offset-2" data-testid="button-new-sale"><Plus size={16} /> Nova venda</button>
-          <button type="button" onClick={() => { setFromDate(''); setToDate(''); setFilterProduct(''); setFilterStatus('active'); setHistoryHint('Escolha uma venda ativa no histórico para iniciar o cancelamento.'); document.getElementById('sales-history-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-[#e9d9d5] bg-[#fffaf8] px-4 text-sm font-bold text-[#8e554e] transition hover:bg-[#fff0ed]" data-testid="button-new-cancellation"><RotateCcw size={15} /> Novo estorno</button>
+          <button type="button" onClick={() => void openRefundDialog()} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-[#e9d9d5] bg-[#fffaf8] px-4 text-sm font-bold text-[#8e554e] transition hover:bg-[#fff0ed]" data-testid="button-new-cancellation"><RotateCcw size={15} /> Novo estorno</button>
           <button type="button" onClick={() => importFileRef.current?.click()} disabled={isHistoryLoading || isHistoryError} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-[#ded7e7] bg-white px-4 text-sm font-bold text-[#5d4a78] transition hover:bg-[#f7f4fa] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-import-sales"><Upload size={15} /> Importar planilha</button>
         </div>
       </div>
@@ -806,7 +904,6 @@ export default function SalesManagement() {
             <div><p className="eyebrow text-[9px] font-bold text-[#8b8494]">histórico</p><h2 className="mt-1 text-lg font-bold tracking-[-.035em]">Histórico de vendas</h2></div>
             <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#f1edf7] text-[#7656b8]"><ClipboardList size={17} /></span>
           </div>
-          {historyHint && <p className="mb-3 rounded-xl bg-[#fcf8ed] px-3.5 py-2.5 text-xs font-semibold text-[#725d2d]" role="status" data-testid="status-cancellation-hint">{historyHint}</p>}
           <div className="mb-4 rounded-[17px] bg-[#f8f7f9] p-3.5">
             <div className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[.1em] text-[#81798b]"><Filter size={12} /> Filtrar lançamentos</div>
             <div className="grid grid-cols-2 gap-2.5">
@@ -841,6 +938,34 @@ export default function SalesManagement() {
               <p className="px-1 pt-2 text-[10px] font-medium text-[#938c99]" data-testid="text-sales-count">{filteredSales.length} {filteredSales.length === 1 ? 'lançamento' : 'lançamentos'} exibidos</p>
             </div> : <div className="grid min-h-[220px] place-items-center rounded-2xl border border-dashed border-[#e6e1ea] bg-[#fbfafc] p-6 text-center" data-testid="status-sales-empty"><div><div className="mx-auto grid h-12 w-12 place-items-center rounded-[17px] bg-[#f0ebf7] text-[#7656b8]"><ClipboardList size={21} /></div><h3 className="mt-4 font-bold tracking-[-.02em]">{(historySales?.length ?? 0) ? 'Nenhuma venda neste filtro' : 'Seu histórico começa aqui'}</h3><p className="mx-auto mt-1.5 max-w-[270px] text-xs leading-5 text-[#85808e]">{(historySales?.length ?? 0) ? 'Ajuste as datas, o produto ou a situação para encontrar lançamentos.' : 'Registre a primeira venda para acompanhar tudo por aqui.'}</p></div></div>}
         </div>
+      </section>
+      <section className="mt-5 rounded-[24px] border border-[#e9e4ec] bg-white p-5 shadow-[0_7px_28px_rgba(47,38,63,.035)] md:p-6" aria-labelledby="refund-history-title" data-testid="panel-refund-history">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div><p className="eyebrow text-[9px] font-bold text-[#8b8494]">movimentações financeiras</p><h2 id="refund-history-title" className="mt-1 text-lg font-bold tracking-[-.035em]">Histórico de estornos</h2></div>
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#fff1ed] text-[#a84940]"><RotateCcw size={16} /></span>
+        </div>
+        {isRefundsLoading ? <div className="space-y-2" aria-label="Carregando estornos" data-testid="status-refunds-loading"><div className="skeleton h-16 rounded-xl" /><div className="skeleton h-16 rounded-xl" /></div>
+          : isRefundsError ? <div className="rounded-xl border border-dashed border-[#ded7e7] p-4 text-center text-xs text-[#817b89]" role="alert" data-testid="status-refunds-error"><p>Não foi possível carregar o histórico de estornos.</p><button type="button" onClick={() => void refetchRefunds()} className="mt-2 font-bold text-[#6848a9] underline" data-testid="button-retry-refunds">Tentar novamente</button></div>
+            : refunds?.length ? <ol className="space-y-2" data-testid="list-refunds">
+              {refunds.map((refund) => {
+                const totalRefunded = activeRefundTotalsBySale.get(refund.saleId) ?? 0n;
+                const refundType = refund.status === 'voided'
+                  ? 'Estorno anulado'
+                  : totalRefunded === BigInt(refund.totalCents) ? 'Estorno total' : 'Estorno parcial';
+                return <li key={refund.id} className="grid gap-2 rounded-xl border border-[#f0edf2] px-3.5 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start" data-testid={`row-refund-${refund.id}`}>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate text-sm font-bold text-[#353044]">{refund.productName}</p>
+                      <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold ${refund.status === 'voided' ? 'bg-[#f2eff1] text-[#79727d]' : refundType === 'Estorno total' ? 'bg-[#fff0ed] text-[#9c483f]' : 'bg-[#fff8e8] text-[#846829]'}`} data-testid={`text-refund-status-${refund.id}`}>{refundType}</span>
+                    </div>
+                    <p className="mt-1 text-[10px] text-[#817b89]">Venda de {formatDate(refund.saleDate)} · original {formatCents(refund.totalCents)} · estorno em {formatDate(refund.refundDate)}</p>
+                    <p className="mt-1 text-[11px] leading-5 text-[#625a6d]">Motivo: {refund.reason}</p>
+                    {refund.status === 'voided' && refund.voidReason && <p className="mt-1 text-[10px] text-[#9a625b]">Anulação: {refund.voidReason}</p>}
+                  </div>
+                  <strong className={`text-sm tabular-nums sm:text-right ${refund.status === 'voided' ? 'text-[#817b89] line-through' : 'text-[#9c483f]'}`} data-testid={`text-refund-amount-${refund.id}`}>{formatCents(refund.amountCents)}</strong>
+                </li>;
+              })}
+            </ol> : <p className="rounded-xl border border-dashed border-[#ded7e7] px-3.5 py-5 text-center text-xs text-[#817b89]" data-testid="status-refunds-empty">Ainda não há estornos registrados.</p>}
       </section>
       <div className="mt-5 flex items-center gap-3 rounded-2xl border border-[#e7e3e8] bg-[#f1eef3] px-4 py-3.5 text-xs text-[#746d7b]">
         <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-white text-[#7656b8]"><CalendarDays size={15} /></span>
@@ -1119,6 +1244,51 @@ export default function SalesManagement() {
               {importSales.isPending ? 'Importando…' : <><Check size={14} /> Confirmar importação</>}
             </button>}
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={refundDialogOpen} onOpenChange={(open) => { if (!createSalesRefund.isPending) setRefundDialogOpen(open); }}>
+        <DialogContent className="max-w-lg border-[#e7e1e9] bg-[#fffefc] p-6 sm:rounded-[24px]">
+          <DialogHeader className="text-left">
+            <DialogTitle className="text-lg font-extrabold tracking-[-.035em] text-[#332d40]">Registrar estorno</DialogTitle>
+            <DialogDescription className="text-xs leading-5 text-[#827b8b]">Escolha uma venda ativa. O valor registrado não pode ultrapassar o saldo disponível e ficará vinculado ao histórico original.</DialogDescription>
+          </DialogHeader>
+          {isRefundCandidatesLoading ? <div className="skeleton h-14 rounded-xl" aria-label="Carregando vendas com saldo" data-testid="status-refund-candidates-loading" />
+            : isRefundCandidatesError ? <div className="rounded-xl border border-dashed border-[#ded7e7] p-4 text-center text-xs text-[#817b89]" role="alert" data-testid="status-refund-candidates-error"><p>Não foi possível buscar vendas com saldo disponível.</p><button type="button" onClick={() => void refetchRefundCandidates()} className="mt-2 font-bold text-[#6848a9] underline" data-testid="button-retry-refund-candidates">Tentar novamente</button></div>
+              : !refundCandidates?.length ? <p className="rounded-xl border border-dashed border-[#ded7e7] px-3.5 py-5 text-center text-xs text-[#817b89]" data-testid="status-refund-candidates-empty">Não há vendas ativas com saldo disponível para estorno.</p>
+                : <form onSubmit={(event) => void submitRefund(event)} className="space-y-3.5" data-testid="form-create-refund">
+                  <label className="block text-[10px] font-bold text-[#665f70]">Venda original
+                    <select value={refundSaleId} onChange={(event) => { setRefundSaleId(event.target.value); setRefundError(''); }} required data-testid="select-refund-sale" className="mt-1.5 h-11 w-full rounded-xl border border-[#e7e2ea] bg-[#fcfbfd] px-3 text-sm font-medium text-[#342d43] outline-none focus:border-[#9477bf]">
+                      <option value="" disabled>Selecione uma venda</option>
+                      {refundCandidates.map((candidate) => <option key={candidate.saleId} value={candidate.saleId}>{formatDate(candidate.saleDate)} · {candidate.productName} · disponível {formatCents(candidate.remainingCents)}</option>)}
+                    </select>
+                  </label>
+                  {selectedRefundCandidate && <div className="grid grid-cols-3 gap-2 rounded-xl bg-[#f8f6fa] px-3.5 py-3" data-testid="panel-refund-sale-balance">
+                    <div><p className="text-[9px] font-bold uppercase tracking-[.08em] text-[#81798b]">Original</p><p className="mt-1 text-xs font-extrabold tabular-nums text-[#40374e]" data-testid="text-refund-sale-total">{formatCents(selectedRefundCandidate.totalCents)}</p></div>
+                    <div><p className="text-[9px] font-bold uppercase tracking-[.08em] text-[#81798b]">Já estornado</p><p className="mt-1 text-xs font-extrabold tabular-nums text-[#40374e]" data-testid="text-refund-sale-refunded">{formatCents(selectedRefundCandidate.refundedCents)}</p></div>
+                    <div><p className="text-[9px] font-bold uppercase tracking-[.08em] text-[#81798b]">Disponível</p><p className="mt-1 text-xs font-extrabold tabular-nums text-[#55772c]" data-testid="text-refund-sale-remaining">{formatCents(selectedRefundCandidate.remainingCents)}</p></div>
+                  </div>}
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="block text-[10px] font-bold text-[#665f70]">Data do estorno
+                      <input type="date" value={refundDate} min={selectedRefundCandidate?.saleDate.slice(0, 10)} onChange={(event) => { setRefundDate(event.target.value); setRefundError(''); }} required data-testid="input-refund-date" className="mt-1.5 h-11 w-full rounded-xl border border-[#e7e2ea] bg-[#fcfbfd] px-3 text-sm font-medium text-[#342d43] outline-none focus:border-[#9477bf]" />
+                    </label>
+                    <label className="block text-[10px] font-bold text-[#665f70]">Valor
+                      <input type="text" inputMode="decimal" value={refundAmount} onChange={(event) => { setRefundAmount(event.target.value); setRefundError(''); }} required placeholder="0,00" data-testid="input-refund-amount" className="mt-1.5 h-11 w-full rounded-xl border border-[#e7e2ea] bg-[#fcfbfd] px-3 text-sm font-medium text-[#342d43] outline-none focus:border-[#9477bf]" />
+                    </label>
+                  </div>
+                  {refundAmountCents !== null && selectedRefundCandidate && refundAmountCents > selectedRefundCandidate.remainingCents && <p className="text-[10px] font-semibold text-[#9c483f]" data-testid="status-refund-amount-limit">O valor não pode passar do saldo disponível de {formatCents(selectedRefundCandidate.remainingCents)}.</p>}
+                  <label className="block text-[10px] font-bold text-[#665f70]">Motivo
+                    <textarea value={refundReason} onChange={(event) => { setRefundReason(event.target.value); setRefundError(''); }} maxLength={500} rows={3} required placeholder="Descreva o motivo do estorno" data-testid="input-refund-reason" className="mt-1.5 w-full rounded-xl border border-[#e7e2ea] bg-[#fcfbfd] px-3.5 py-3 text-sm font-normal text-[#342d43] outline-none focus:border-[#9477bf]" />
+                  </label>
+                  <p className="text-[10px] text-[#8a8491]">{refundReason.trim().length}/500 caracteres. Data, valor e motivo são registrados no histórico.</p>
+                  {refundError && <p className="rounded-xl bg-[#fff0ed] px-3.5 py-2.5 text-xs font-semibold text-[#9c483f]" role="alert" data-testid="status-refund-error">{refundError}</p>}
+                  <DialogFooter className="gap-2">
+                    <button type="button" onClick={() => setRefundDialogOpen(false)} disabled={createSalesRefund.isPending} className="h-10 rounded-xl border border-[#e3dfe7] px-4 text-sm font-bold text-[#716a79] hover:bg-[#f8f6fa]" data-testid="button-cancel-refund">Cancelar</button>
+                    <button type="submit" disabled={!selectedRefundCandidate || createSalesRefund.isPending} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#a84940] px-4 text-sm font-bold text-white hover:bg-[#963c35] disabled:opacity-55" data-testid="button-submit-refund">
+                      {createSalesRefund.isPending ? 'Salvando…' : <><RotateCcw size={14} /> Confirmar estorno</>}
+                    </button>
+                  </DialogFooter>
+                </form>}
         </DialogContent>
       </Dialog>
 

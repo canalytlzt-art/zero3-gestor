@@ -14,12 +14,14 @@ import {
   productsTable,
   salesGoalsTable,
   salesHistoryTable,
+  salesRefundsTable,
   salesTable,
 } from "@workspace/db";
 import { createSalesRouter } from "./sales";
 
 const createdGoalIds: string[] = [];
 const createdSaleIds: string[] = [];
+const createdRefundIds: string[] = [];
 const createdProductIds: string[] = [];
 const createdIdempotencyKeys: string[] = [];
 const testSchemaName = `zero3_goal_test_${randomUUID().replaceAll("-", "")}`;
@@ -131,16 +133,21 @@ after(async () => {
     await pool.end();
     return;
   }
-  const entityIds = [...createdGoalIds, ...createdSaleIds];
+  const entityIds = [...createdGoalIds, ...createdSaleIds, ...createdRefundIds];
   if (entityIds.length) {
     await testDatabase
       .delete(salesHistoryTable)
       .where(
         and(
           inArray(salesHistoryTable.entityId, entityIds),
-          inArray(salesHistoryTable.entityType, ["goal", "sale"]),
+          inArray(salesHistoryTable.entityType, ["goal", "sale", "refund"]),
         ),
       );
+  }
+  if (createdRefundIds.length) {
+    await testDatabase
+      .delete(salesRefundsTable)
+      .where(inArray(salesRefundsTable.id, createdRefundIds));
   }
   if (createdGoalIds.length) {
     await testDatabase
@@ -623,4 +630,158 @@ test("monthly goals persist by month and plan, enforce access, and don't block s
       assert.ok(saleId, "sale creation still succeeds when goal lookup fails");
     },
   );
+});
+
+test("refunds validate input, replay idempotently, and serialize concurrent balance checks", async () => {
+  await withSalesApi(getTestDatabase(), async (baseUrl) => {
+    const saleId = await recordSale(baseUrl, `Plano estorno ${randomUUID()}`, "2099-11-05");
+    const invalidCases = [
+      { refundDate: "2099-11-05", reason: "Devolução", idempotencyKey: randomUUID() },
+      { refundDate: "2099-11-05", amountCents: 100, reason: "   ", idempotencyKey: randomUUID() },
+      { refundDate: "2099-02-31", amountCents: 100, reason: "Devolução", idempotencyKey: randomUUID() },
+      { refundDate: "2099-11-05", amountCents: 0, reason: "Devolução", idempotencyKey: randomUUID() },
+    ];
+    for (const body of invalidCases) {
+      createdIdempotencyKeys.push(body.idempotencyKey);
+      const invalid = await apiRequest(baseUrl, `/sales/${saleId}/refunds`, {
+        method: "POST",
+        body,
+      });
+      assert.equal(invalid.status, 400, "missing or invalid refund fields are rejected by the server");
+    }
+
+    const firstKey = randomUUID();
+    createdIdempotencyKeys.push(firstKey);
+    const firstBody = {
+      refundDate: "2099-11-05",
+      amountCents: 3500,
+      reason: "Devolução parcial",
+      idempotencyKey: firstKey,
+    };
+    const firstResponse = await apiRequest(baseUrl, `/sales/${saleId}/refunds`, {
+      method: "POST",
+      body: firstBody,
+    });
+    assert.equal(firstResponse.status, 201);
+    const firstRefund = await firstResponse.json() as { id: string; amountCents: number };
+    createdRefundIds.push(firstRefund.id);
+    assert.equal(firstRefund.amountCents, 3500);
+
+    const replayResponse = await apiRequest(baseUrl, `/sales/${saleId}/refunds`, {
+      method: "POST",
+      body: firstBody,
+    });
+    assert.equal(replayResponse.status, 200, "retry returns the existing refund");
+    assert.equal((await replayResponse.json() as { id: string }).id, firstRefund.id);
+
+    const candidatesResponse = await apiRequest(baseUrl, "/sales/refund-candidates");
+    assert.equal(candidatesResponse.status, 200);
+    const candidates = await candidatesResponse.json() as Array<{
+      saleId: string;
+      productId: string | null;
+      productName: string;
+      saleDate: string;
+      quantity: number;
+      totalCents: number;
+      refundedCents: number;
+      remainingCents: number;
+      version: number;
+    }>;
+    const partiallyRefundedSale = candidates.find(({ saleId: id }) => id === saleId);
+    assert.equal(partiallyRefundedSale?.saleDate.slice(0, 10), "2099-11-05");
+    assert.deepEqual(partiallyRefundedSale && {
+      saleId,
+      productId: partiallyRefundedSale.productId,
+      productName: partiallyRefundedSale.productName,
+      quantity: partiallyRefundedSale.quantity,
+      totalCents: partiallyRefundedSale.totalCents,
+      refundedCents: partiallyRefundedSale.refundedCents,
+      remainingCents: partiallyRefundedSale.remainingCents,
+      version: partiallyRefundedSale.version,
+    }, {
+      saleId,
+      productId: partiallyRefundedSale?.productId,
+      productName: partiallyRefundedSale?.productName,
+      quantity: 1,
+      totalCents: 5000,
+      refundedCents: 3500,
+      remainingCents: 1500,
+      version: 1,
+    });
+
+    const concurrentRequests = await Promise.all([0, 1].map(async () => {
+      const idempotencyKey = randomUUID();
+      createdIdempotencyKeys.push(idempotencyKey);
+      return apiRequest(baseUrl, `/sales/${saleId}/refunds`, {
+        method: "POST",
+        body: {
+          refundDate: "2099-11-05",
+          amountCents: 1200,
+          reason: "Devolução concorrente",
+          idempotencyKey,
+        },
+      });
+    }));
+    assert.deepEqual(
+      concurrentRequests.map(({ status }) => status).sort(),
+      [201, 409],
+      "only one competing refund may consume the remaining balance",
+    );
+    const winningRefund = await concurrentRequests.find(({ status }) => status === 201)!.json() as { id: string };
+    createdRefundIds.push(winningRefund.id);
+
+    const finalKey = randomUUID();
+    createdIdempotencyKeys.push(finalKey);
+    const finalResponse = await apiRequest(baseUrl, `/sales/${saleId}/refunds`, {
+      method: "POST",
+      body: {
+        refundDate: "2099-11-05",
+        amountCents: 300,
+        reason: "Devolução final",
+        idempotencyKey: finalKey,
+      },
+    });
+    assert.equal(finalResponse.status, 201);
+    const finalRefund = await finalResponse.json() as { id: string };
+    createdRefundIds.push(finalRefund.id);
+
+    const exhaustedCandidates = await apiRequest(baseUrl, "/sales/refund-candidates");
+    assert.equal(exhaustedCandidates.status, 200);
+    const remainingSales = await exhaustedCandidates.json() as Array<{ saleId: string }>;
+    assert.equal(remainingSales.some(({ saleId: id }) => id === saleId), false);
+
+    const refundHistoryResponse = await apiRequest(baseUrl, "/sales/refunds");
+    assert.equal(refundHistoryResponse.status, 200);
+    const refundHistory = await refundHistoryResponse.json() as Array<{
+      id: string;
+      saleId: string;
+      amountCents: number;
+      status: string;
+    }>;
+    const saleRefunds = refundHistory.filter(({ saleId: id }) => id === saleId);
+    assert.equal(saleRefunds.length, 3, "the history contains each unique refund, not the idempotent replay");
+    assert.equal(saleRefunds.reduce((sum, refund) => sum + refund.amountCents, 0), 5000);
+    assert.ok(saleRefunds.every(({ status }) => status === "active"));
+
+    const auditResponse = await apiRequest(baseUrl, `/sales/refunds/${firstRefund.id}/history`);
+    assert.equal(auditResponse.status, 200);
+    const audit = await auditResponse.json() as Array<{ operation: string; afterData: Record<string, unknown> | null }>;
+    assert.equal(audit[0]?.operation, "create");
+    assert.equal(audit[0]?.afterData?.saleId, saleId);
+
+    const scoreboardResponse = await apiRequest(
+      baseUrl,
+      "/sales/scoreboard?fromDate=2099-11-05&toDate=2099-11-05",
+    );
+    assert.equal(scoreboardResponse.status, 200);
+    const scoreboard = await scoreboardResponse.json() as {
+      totals: { quantity: number; salesCents: number; refundCents: number; netCents: number };
+    };
+    assert.deepEqual(scoreboard.totals, {
+      quantity: 1,
+      salesCents: 5000,
+      refundCents: 5000,
+      netCents: 0,
+    });
+  });
 });
