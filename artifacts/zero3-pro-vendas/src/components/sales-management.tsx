@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArchiveRestore, CalendarDays, Check, CircleHelp, ClipboardList, Download, Edit3, FileSpreadsheet, Filter, History, PackagePlus, Plus, RefreshCw, RotateCcw, Save, Search, Upload, X } from 'lucide-react';
+import { ArchiveRestore, CalendarDays, Check, ChevronDown, CircleHelp, ClipboardList, Download, Edit3, FileSpreadsheet, Filter, History, PackagePlus, Plus, RefreshCw, RotateCcw, Save, Search, Upload, X } from 'lucide-react';
 import {
   getGetProductsQueryKey,
   getGetSaleHistoryQueryKey,
@@ -898,11 +898,18 @@ export default function SalesManagement() {
           </Form>
         </div>
 
-        <div id="sales-history-panel" className="min-w-0 rounded-[24px] border border-[#e9e4ec] bg-white p-5 shadow-[0_7px_28px_rgba(47,38,63,.035)] md:p-6">
-          <div className="mb-5 flex items-center justify-between gap-3">
+        <details id="sales-history-panel" className="group min-w-0 rounded-[24px] border border-[#e9e4ec] bg-white p-5 shadow-[0_7px_28px_rgba(47,38,63,.035)] md:p-6" data-testid="panel-sales-history">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[#7656b8]/40 [&::-webkit-details-marker]:hidden">
             <div><p className="eyebrow text-[9px] font-bold text-[#8b8494]">histórico</p><h2 className="mt-1 text-lg font-bold tracking-[-.035em]">Histórico de vendas</h2></div>
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#f1edf7] text-[#7656b8]"><ClipboardList size={17} /></span>
-          </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#f1edf7] text-[#7656b8]"><ClipboardList size={17} /></span>
+              <span className="inline-flex items-center gap-1.5 rounded-xl border border-[#e9e4ec] px-3 py-2 text-xs font-bold text-[#6848a9]">
+                <span className="group-open:hidden">Ver detalhes</span><span className="hidden group-open:inline">Ocultar detalhes</span>
+                <ChevronDown size={14} className="transition-transform group-open:rotate-180" />
+              </span>
+            </div>
+          </summary>
+          <div className="mt-5">
           <div className="mb-4 rounded-[17px] bg-[#f8f7f9] p-3.5">
             <div className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[.1em] text-[#81798b]"><Filter size={12} /> Filtrar lançamentos</div>
             <div className="grid grid-cols-2 gap-2.5">
@@ -936,7 +943,8 @@ export default function SalesManagement() {
               {filteredSales.map((sale) => <SaleRow key={sale.id} sale={sale} onEdit={() => startEditing(sale)} onHistory={() => setHistorySale(sale)} onCancel={() => { setFeedback(null); setCancellationError(''); setCancellationConflict(false); setCancellationReason(''); setCancelling(sale); }} busy={busy} />)}
               <p className="px-1 pt-2 text-[10px] font-medium text-[#938c99]" data-testid="text-sales-count">{filteredSales.length} {filteredSales.length === 1 ? 'lançamento' : 'lançamentos'} exibidos</p>
             </div> : <div className="grid min-h-[220px] place-items-center rounded-2xl border border-dashed border-[#e6e1ea] bg-[#fbfafc] p-6 text-center" data-testid="status-sales-empty"><div><div className="mx-auto grid h-12 w-12 place-items-center rounded-[17px] bg-[#f0ebf7] text-[#7656b8]"><ClipboardList size={21} /></div><h3 className="mt-4 font-bold tracking-[-.02em]">{(historySales?.length ?? 0) ? 'Nenhuma venda neste filtro' : 'Seu histórico começa aqui'}</h3><p className="mx-auto mt-1.5 max-w-[270px] text-xs leading-5 text-[#85808e]">{(historySales?.length ?? 0) ? 'Ajuste as datas, o produto ou a situação para encontrar lançamentos.' : 'Registre a primeira venda para acompanhar tudo por aqui.'}</p></div></div>}
-        </div>
+          </div>
+        </details>
       </section>
       <section className="mt-5 rounded-[24px] border border-[#e9e4ec] bg-white p-5 shadow-[0_7px_28px_rgba(47,38,63,.035)] md:p-6" aria-labelledby="refund-history-title" data-testid="panel-refund-history">
         <div className="mb-4 flex items-center justify-between gap-3">
