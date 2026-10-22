@@ -1,13 +1,14 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { ClerkProvider, Show, SignIn, SignUp, useClerk, useUser } from '@clerk/react';
 import { publishableKeyFromHost } from '@clerk/react/internal';
+import { ptBR } from '@clerk/localizations';
 import { shadcn } from '@clerk/themes';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { ArrowDownRight, ArrowRight, BarChart3, CalendarDays, Check, CircleHelp, ClipboardList, LockKeyhole, LogOut, Plus, RefreshCw, Sparkles, Trophy } from 'lucide-react';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { getGetSalesQueryKey, useGetSales } from '@workspace/api-client-react';
+import { getGetAccessStatusQueryKey, getGetSalesQueryKey, useGetAccessStatus, useGetSales } from '@workspace/api-client-react';
 import type { Sale } from '@workspace/api-client-react';
 import NotFound from '@/pages/not-found';
 import { Link, Redirect, Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
@@ -324,7 +325,43 @@ function Workspace() {
 function HomeRedirect() {
   const { isLoaded } = useUser();
   if (!isLoaded) return <AuthLoading />;
-  return <><Show when="signed-in"><Workspace /></Show><Show when="signed-out"><Landing /></Show></>;
+  return <><Show when="signed-in"><AccessGate /></Show><Show when="signed-out"><Landing /></Show></>;
+}
+
+function AccessGate() {
+  const { data, isLoading, isError, refetch } = useGetAccessStatus({
+    query: { queryKey: getGetAccessStatusQueryKey() },
+  });
+
+  if (isLoading) return <AuthLoading />;
+  if (isError) {
+    return (
+      <main className="grid min-h-[100dvh] place-items-center bg-[#f7f5f1] px-5">
+        <div className="max-w-sm rounded-[24px] border border-[#e9e4ec] bg-white p-7 text-center shadow-sm">
+          <CircleHelp className="mx-auto text-[#ad6254]" size={26} />
+          <h1 className="mt-4 text-lg font-bold text-[#302842]">Não foi possível validar seu acesso</h1>
+          <p className="mt-2 text-sm leading-6 text-[#827b8b]">Confira sua conexão e tente novamente.</p>
+          <button onClick={() => void refetch()} className="mt-5 rounded-full bg-[#7656b8] px-5 py-2.5 text-sm font-bold text-white" data-testid="button-retry-access">Tentar novamente</button>
+        </div>
+      </main>
+    );
+  }
+  if (!data?.authorized) return <AccessDenied />;
+  return <Workspace />;
+}
+
+function AccessDenied() {
+  const { signOut } = useClerk();
+  return (
+    <main className="grid min-h-[100dvh] place-items-center bg-[#f7f5f1] px-5">
+      <div className="max-w-sm rounded-[24px] border border-[#e9e4ec] bg-white p-7 text-center shadow-sm" data-testid="status-access-denied">
+        <LockKeyhole className="mx-auto text-[#7656b8]" size={27} />
+        <h1 className="mt-4 text-lg font-bold text-[#302842]">Acesso não autorizado</h1>
+        <p className="mt-2 text-sm leading-6 text-[#827b8b]">Esta conta não está na lista de acesso do Zero3 PRO. Fale com o responsável pelo aplicativo.</p>
+        <button onClick={() => void signOut({ redirectUrl: basePath || '/' })} className="mt-5 rounded-full border border-[#ded8e5] px-5 py-2.5 text-sm font-bold text-[#5c506f] hover:bg-[#f8f6fa]" data-testid="button-sign-out-unauthorized">Sair da conta</button>
+      </div>
+    </main>
+  );
 }
 
 function AuthLoading() {
@@ -373,7 +410,7 @@ function Router() {
 function ProtectedWorkspace() {
   const { isLoaded } = useUser();
   if (!isLoaded) return <AuthLoading />;
-  return <><Show when="signed-in"><Workspace /></Show><Show when="signed-out"><Redirect to="/" /></Show></>;
+  return <><Show when="signed-in"><AccessGate /></Show><Show when="signed-out"><Redirect to="/" /></Show></>;
 }
 
 function RoutedErrorBoundary({ children }: { children: ReactNode }) {
@@ -390,8 +427,9 @@ function ClerkProviderWithRoutes() {
     signInUrl={`${basePath}/sign-in`}
     signUpUrl={`${basePath}/sign-up`}
     localization={{
-      signIn: { start: { title: 'Bem-vindo de volta', subtitle: 'Entre para acessar seu espaço de vendas.' } },
-      signUp: { start: { title: 'Acesso à equipe', subtitle: 'Crie sua conta para entrar no Zero3 PRO.' } },
+      ...ptBR,
+      signIn: { ...ptBR.signIn, start: { ...ptBR.signIn?.start, title: 'Bem-vindo de volta', subtitle: 'Entre para acessar seu espaço de vendas.' } },
+      signUp: { ...ptBR.signUp, start: { ...ptBR.signUp?.start, title: 'Acesso à equipe', subtitle: 'Crie sua conta para entrar no Zero3 PRO.' } },
     }}
     routerPush={(to) => setLocation(stripBase(to))}
     routerReplace={(to) => setLocation(stripBase(to), { replace: true })}

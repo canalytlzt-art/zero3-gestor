@@ -26,6 +26,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /access-status:
+    get:
+      operationId: getAccessStatus
+      tags: [sales]
+      summary: Check whether the signed-in user is allowed into the sales app
+      responses:
+        "200":
+          description: Authorization status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessStatus"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /sales:
     get:
       operationId: getSales
@@ -43,6 +61,12 @@ paths:
                   $ref: "#/components/schemas/Sale"
         "401":
           description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Authenticated user is not on the authorized email list
           content:
             application/json:
               schema:
@@ -92,4 +116,11 @@ components:
           type: string
       required:
         - error
+    AccessStatus:
+      type: object
+      properties:
+        authorized:
+          type: boolean
+      required:
+        - authorized
 

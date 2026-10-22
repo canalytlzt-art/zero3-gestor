@@ -18,6 +18,14 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * @summary Check whether the signed-in user is allowed into the sales app
+ */
+export const GetAccessStatusResponse = zod.object({
+  "authorized": zod.boolean()
+})
+
+
+/**
  * Returns the persisted sales records visible to the signed-in user.
  * @summary List sales for the current workspace
  */

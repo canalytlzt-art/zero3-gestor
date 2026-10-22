@@ -25,3 +25,7 @@ export interface ApiError {
   error: string;
 }
 
+export interface AccessStatus {
+  authorized: boolean;
+}
+

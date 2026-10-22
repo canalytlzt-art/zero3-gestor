@@ -16,6 +16,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AccessStatus,
   ApiError,
   HealthStatus,
   Sale
@@ -114,6 +115,83 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getHealthCheckQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAccessStatusUrl = () => {
+
+
+
+
+  return `/api/access-status`
+}
+
+/**
+ * @summary Check whether the signed-in user is allowed into the sales app
+ */
+export const getAccessStatus = async ( options?: Parameters<typeof customFetch>[1]): Promise<AccessStatus> => {
+
+  return customFetch<AccessStatus>(getGetAccessStatusUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAccessStatusQueryKey = () => {
+    return [
+    `/api/access-status`
+    ] as const;
+    }
+
+
+export const getGetAccessStatusQueryOptions = <TData = Awaited<ReturnType<typeof getAccessStatus>>, TError = ErrorType<ApiError>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAccessStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAccessStatusQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAccessStatus>>> = ({ signal }) => getAccessStatus({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAccessStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAccessStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getAccessStatus>>>
+export type GetAccessStatusQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Check whether the signed-in user is allowed into the sales app
+ */
+
+export function useGetAccessStatus<TData = Awaited<ReturnType<typeof getAccessStatus>>, TError = ErrorType<ApiError>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAccessStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAccessStatusQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
