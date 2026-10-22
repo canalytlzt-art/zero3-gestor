@@ -21,6 +21,154 @@ export interface Sale {
   createdAt: string;
 }
 
+export interface SaleInput {
+  saleDate: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  productName: string;
+  /**
+     * @minimum 1
+     * @maximum 2147483647
+     */
+  quantity: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  unitAmountCents: number;
+  /**
+     * @maxLength 1000
+     * @nullable
+     */
+  notes: string | null;
+}
+
+export interface SalesGoal {
+  id: string;
+  /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
+  month: string;
+  /** @nullable */
+  productName: string | null;
+  /**
+     * @minimum 1
+     * @maximum 9007199254740991
+     */
+  targetCents: number;
+  updatedAt: string;
+}
+
+export interface SalesGoalInput {
+  /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
+  month: string;
+  /**
+     * @maxLength 120
+     * @nullable
+     */
+  productName: string | null;
+  /**
+     * @minimum 1
+     * @maximum 9007199254740991
+     */
+  targetCents: number;
+}
+
+export interface SalesBackupRecord {
+  id: string;
+  saleDate: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  productName: string;
+  /**
+     * @minimum 1
+     * @maximum 2147483647
+     */
+  quantity: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  unitAmountCents: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  totalCents: number;
+  /**
+     * @maxLength 1000
+     * @nullable
+     */
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface SalesGoalBackupRecord {
+  id: string;
+  /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
+  month: string;
+  /**
+     * @maxLength 120
+     * @nullable
+     */
+  productName: string | null;
+  /**
+     * @minimum 1
+     * @maximum 9007199254740991
+     */
+  targetCents: number;
+  updatedAt: string;
+}
+
+export type MonthlySalesBackupInputFormat = typeof MonthlySalesBackupInputFormat[keyof typeof MonthlySalesBackupInputFormat];
+
+
+export const MonthlySalesBackupInputFormat = {
+  'zero3-pro-monthly-backup': 'zero3-pro-monthly-backup',
+} as const;
+
+export type MonthlySalesBackupInputVersion = typeof MonthlySalesBackupInputVersion[keyof typeof MonthlySalesBackupInputVersion];
+
+
+export const MonthlySalesBackupInputVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export interface MonthlySalesBackupInput {
+  format: MonthlySalesBackupInputFormat;
+  version: MonthlySalesBackupInputVersion;
+  /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
+  month: string;
+  generatedAt: string;
+  /**
+     * @minimum 0
+     * @maximum 10000
+     */
+  recordCount: number;
+  /**
+     * @minimum 0
+     * @maximum 500
+     */
+  goalCount: number;
+  /** @maxItems 10000 */
+  sales: SalesBackupRecord[];
+  /** @maxItems 500 */
+  goals: SalesGoalBackupRecord[];
+}
+
+export interface SalesRestoreResult {
+  /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
+  month: string;
+  /** @minimum 0 */
+  insertedSales: number;
+  /** @minimum 0 */
+  skippedSales: number;
+  /** @minimum 0 */
+  restoredGoals: number;
+}
+
 export interface ApiError {
   error: string;
 }

@@ -71,6 +71,218 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+    post:
+      operationId: createSale
+      tags: [sales]
+      summary: Record a sale
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaleInput"
+      responses:
+        "201":
+          description: Sale created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Sale"
+        "400":
+          description: Invalid sale data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Authenticated user is not on the authorized email list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /sales-goals:
+    get:
+      operationId: getSalesGoals
+      tags: [sales]
+      summary: List monthly sales goals
+      responses:
+        "200":
+          description: Monthly sales goals
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SalesGoal"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Authenticated user is not on the authorized email list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    put:
+      operationId: upsertSalesGoal
+      tags: [sales]
+      summary: Create or update a monthly sales goal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SalesGoalInput"
+      responses:
+        "200":
+          description: Monthly sales goal saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesGoal"
+        "400":
+          description: Invalid monthly sales goal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Authenticated user is not on the authorized email list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /sales/restore:
+    post:
+      operationId: restoreMonthlySalesBackup
+      tags: [sales]
+      summary: Restore a monthly sales backup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MonthlySalesBackupInput"
+      responses:
+        "200":
+          description: Backup restored without duplicating sales
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesRestoreResult"
+        "400":
+          description: Invalid backup file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Authenticated user is not on the authorized email list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /sales/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      operationId: updateSale
+      tags: [sales]
+      summary: Edit a sale
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaleInput"
+      responses:
+        "200":
+          description: Sale updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Sale"
+        "400":
+          description: Invalid sale data or identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Authenticated user is not on the authorized email list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Sale not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    delete:
+      operationId: deleteSale
+      tags: [sales]
+      summary: Delete a sale
+      responses:
+        "204":
+          description: Sale deleted
+        "400":
+          description: Invalid sale identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Authenticated user is not on the authorized email list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Sale not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 components:
   schemas:
     HealthStatus:
@@ -109,6 +321,201 @@ components:
         - totalCents
         - notes
         - createdAt
+    SaleInput:
+      type: object
+      properties:
+        saleDate:
+          type: string
+          format: date
+        productName:
+          type: string
+          minLength: 1
+          maxLength: 120
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+        unitAmountCents:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        notes:
+          type: ["string", "null"]
+          maxLength: 1000
+      required:
+        - saleDate
+        - productName
+        - quantity
+        - unitAmountCents
+        - notes
+    SalesGoal:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        month:
+          type: string
+          pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+        productName:
+          type: ["string", "null"]
+        targetCents:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - month
+        - productName
+        - targetCents
+        - updatedAt
+    SalesGoalInput:
+      type: object
+      properties:
+        month:
+          type: string
+          pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+        productName:
+          type: ["string", "null"]
+          maxLength: 120
+        targetCents:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+      required:
+        - month
+        - productName
+        - targetCents
+    SalesBackupRecord:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        saleDate:
+          type: string
+          format: date
+        productName:
+          type: string
+          minLength: 1
+          maxLength: 120
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+        unitAmountCents:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        totalCents:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        notes:
+          type: ["string", "null"]
+          maxLength: 1000
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - saleDate
+        - productName
+        - quantity
+        - unitAmountCents
+        - totalCents
+        - notes
+        - createdAt
+    SalesGoalBackupRecord:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        month:
+          type: string
+          pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+        productName:
+          type: ["string", "null"]
+          maxLength: 120
+        targetCents:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - month
+        - productName
+        - targetCents
+        - updatedAt
+    MonthlySalesBackupInput:
+      type: object
+      properties:
+        format:
+          type: string
+          enum: [zero3-pro-monthly-backup]
+        version:
+          type: integer
+          enum: [1]
+        month:
+          type: string
+          pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+        generatedAt:
+          type: string
+          format: date-time
+        recordCount:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        goalCount:
+          type: integer
+          minimum: 0
+          maximum: 500
+        sales:
+          type: array
+          maxItems: 10000
+          items:
+            $ref: "#/components/schemas/SalesBackupRecord"
+        goals:
+          type: array
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/SalesGoalBackupRecord"
+      required:
+        - format
+        - version
+        - month
+        - generatedAt
+        - recordCount
+        - goalCount
+        - sales
+        - goals
+    SalesRestoreResult:
+      type: object
+      properties:
+        month:
+          type: string
+          pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+        insertedSales:
+          type: integer
+          minimum: 0
+        skippedSales:
+          type: integer
+          minimum: 0
+        restoredGoals:
+          type: integer
+          minimum: 0
+      required:
+        - month
+        - insertedSales
+        - skippedSales
+        - restoredGoals
     ApiError:
       type: object
       properties:

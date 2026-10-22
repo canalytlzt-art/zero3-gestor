@@ -6,11 +6,15 @@
  * OpenAPI spec version: 0.1.0
  */
 import {
+  useMutation,
   useQuery
 } from '@tanstack/react-query';
 import type {
+  MutationFunction,
   QueryFunction,
   QueryKey,
+  UseMutationOptions,
+  UseMutationResult,
   UseQueryOptions,
   UseQueryResult
 } from '@tanstack/react-query';
@@ -19,11 +23,16 @@ import type {
   AccessStatus,
   ApiError,
   HealthStatus,
-  Sale
+  MonthlySalesBackupInput,
+  Sale,
+  SaleInput,
+  SalesGoal,
+  SalesGoalInput,
+  SalesRestoreResult
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
-import type { ErrorType } from '../custom-fetch';
+import type { ErrorType , BodyType } from '../custom-fetch';
 
 type AwaitedInput<T> = PromiseLike<T> | T;
 
@@ -281,4 +290,508 @@ export function useGetSales<TData = Awaited<ReturnType<typeof getSales>>, TError
 
 
 
+
+export const getCreateSaleUrl = () => {
+
+
+
+
+  return `/api/sales`
+}
+
+/**
+ * @summary Record a sale
+ */
+export const createSale = async (saleInput: SaleInput, options?: Parameters<typeof customFetch>[1]): Promise<Sale> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<Sale>(getCreateSaleUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(saleInput)
+  }
+);}
+
+
+
+
+
+export const getCreateSaleMutationKey = () => ['createSale'] as const;
+
+export const getCreateSaleMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSale>>, TError,CreateSaleMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createSale>>, TError,CreateSaleMutationVariables, TContext> => {
+
+const mutationKey = getCreateSaleMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createSale>>, CreateSaleMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createSale(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateSaleMutationResult = NonNullable<Awaited<ReturnType<typeof createSale>>>
+    export type CreateSaleMutationBody = BodyType<SaleInput>
+    export type CreateSaleMutationError = ErrorType<ApiError>
+    export type CreateSaleMutationVariables = {data: BodyType<SaleInput>}
+
+    /**
+ * @summary Record a sale
+ */
+export const useCreateSale = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSale>>, TError,CreateSaleMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createSale>>,
+        TError,
+        CreateSaleMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateSaleMutationOptions(options));
+    }
+
+export const getGetSalesGoalsUrl = () => {
+
+
+
+
+  return `/api/sales-goals`
+}
+
+/**
+ * @summary List monthly sales goals
+ */
+export const getSalesGoals = async ( options?: Parameters<typeof customFetch>[1]): Promise<SalesGoal[]> => {
+
+  return customFetch<SalesGoal[]>(getGetSalesGoalsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSalesGoalsQueryKey = () => {
+    return [
+    `/api/sales-goals`
+    ] as const;
+    }
+
+
+export const getGetSalesGoalsQueryOptions = <TData = Awaited<ReturnType<typeof getSalesGoals>>, TError = ErrorType<ApiError>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSalesGoals>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSalesGoalsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSalesGoals>>> = ({ signal }) => getSalesGoals({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSalesGoals>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSalesGoalsQueryResult = NonNullable<Awaited<ReturnType<typeof getSalesGoals>>>
+export type GetSalesGoalsQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary List monthly sales goals
+ */
+
+export function useGetSalesGoals<TData = Awaited<ReturnType<typeof getSalesGoals>>, TError = ErrorType<ApiError>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSalesGoals>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSalesGoalsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpsertSalesGoalUrl = () => {
+
+
+
+
+  return `/api/sales-goals`
+}
+
+/**
+ * @summary Create or update a monthly sales goal
+ */
+export const upsertSalesGoal = async (salesGoalInput: SalesGoalInput, options?: Parameters<typeof customFetch>[1]): Promise<SalesGoal> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<SalesGoal>(getUpsertSalesGoalUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(salesGoalInput)
+  }
+);}
+
+
+
+
+
+export const getUpsertSalesGoalMutationKey = () => ['upsertSalesGoal'] as const;
+
+export const getUpsertSalesGoalMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertSalesGoal>>, TError,UpsertSalesGoalMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof upsertSalesGoal>>, TError,UpsertSalesGoalMutationVariables, TContext> => {
+
+const mutationKey = getUpsertSalesGoalMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof upsertSalesGoal>>, UpsertSalesGoalMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  upsertSalesGoal(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpsertSalesGoalMutationResult = NonNullable<Awaited<ReturnType<typeof upsertSalesGoal>>>
+    export type UpsertSalesGoalMutationBody = BodyType<SalesGoalInput>
+    export type UpsertSalesGoalMutationError = ErrorType<ApiError>
+    export type UpsertSalesGoalMutationVariables = {data: BodyType<SalesGoalInput>}
+
+    /**
+ * @summary Create or update a monthly sales goal
+ */
+export const useUpsertSalesGoal = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertSalesGoal>>, TError,UpsertSalesGoalMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof upsertSalesGoal>>,
+        TError,
+        UpsertSalesGoalMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpsertSalesGoalMutationOptions(options));
+    }
+
+export const getRestoreMonthlySalesBackupUrl = () => {
+
+
+
+
+  return `/api/sales/restore`
+}
+
+/**
+ * @summary Restore a monthly sales backup
+ */
+export const restoreMonthlySalesBackup = async (monthlySalesBackupInput: MonthlySalesBackupInput, options?: Parameters<typeof customFetch>[1]): Promise<SalesRestoreResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<SalesRestoreResult>(getRestoreMonthlySalesBackupUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(monthlySalesBackupInput)
+  }
+);}
+
+
+
+
+
+export const getRestoreMonthlySalesBackupMutationKey = () => ['restoreMonthlySalesBackup'] as const;
+
+export const getRestoreMonthlySalesBackupMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restoreMonthlySalesBackup>>, TError,RestoreMonthlySalesBackupMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof restoreMonthlySalesBackup>>, TError,RestoreMonthlySalesBackupMutationVariables, TContext> => {
+
+const mutationKey = getRestoreMonthlySalesBackupMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof restoreMonthlySalesBackup>>, RestoreMonthlySalesBackupMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  restoreMonthlySalesBackup(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RestoreMonthlySalesBackupMutationResult = NonNullable<Awaited<ReturnType<typeof restoreMonthlySalesBackup>>>
+    export type RestoreMonthlySalesBackupMutationBody = BodyType<MonthlySalesBackupInput>
+    export type RestoreMonthlySalesBackupMutationError = ErrorType<ApiError>
+    export type RestoreMonthlySalesBackupMutationVariables = {data: BodyType<MonthlySalesBackupInput>}
+
+    /**
+ * @summary Restore a monthly sales backup
+ */
+export const useRestoreMonthlySalesBackup = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restoreMonthlySalesBackup>>, TError,RestoreMonthlySalesBackupMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof restoreMonthlySalesBackup>>,
+        TError,
+        RestoreMonthlySalesBackupMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRestoreMonthlySalesBackupMutationOptions(options));
+    }
+
+export const getUpdateSaleUrl = (id: string,) => {
+
+
+
+
+  return `/api/sales/${id}`
+}
+
+/**
+ * @summary Edit a sale
+ */
+export const updateSale = async (id: string,
+    saleInput: SaleInput, options?: Parameters<typeof customFetch>[1]): Promise<Sale> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<Sale>(getUpdateSaleUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(saleInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateSaleMutationKey = () => ['updateSale'] as const;
+
+export const getUpdateSaleMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSale>>, TError,UpdateSaleMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateSale>>, TError,UpdateSaleMutationVariables, TContext> => {
+
+const mutationKey = getUpdateSaleMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateSale>>, UpdateSaleMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateSale(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateSaleMutationResult = NonNullable<Awaited<ReturnType<typeof updateSale>>>
+    export type UpdateSaleMutationBody = BodyType<SaleInput>
+    export type UpdateSaleMutationError = ErrorType<ApiError>
+    export type UpdateSaleMutationVariables = {id: string;data: BodyType<SaleInput>}
+
+    /**
+ * @summary Edit a sale
+ */
+export const useUpdateSale = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSale>>, TError,UpdateSaleMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateSale>>,
+        TError,
+        UpdateSaleMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateSaleMutationOptions(options));
+    }
+
+export const getDeleteSaleUrl = (id: string,) => {
+
+
+
+
+  return `/api/sales/${id}`
+}
+
+/**
+ * @summary Delete a sale
+ */
+export const deleteSale = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getDeleteSaleUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteSaleMutationKey = () => ['deleteSale'] as const;
+
+export const getDeleteSaleMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSale>>, TError,DeleteSaleMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteSale>>, TError,DeleteSaleMutationVariables, TContext> => {
+
+const mutationKey = getDeleteSaleMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteSale>>, DeleteSaleMutationVariables> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteSale(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteSaleMutationResult = NonNullable<Awaited<ReturnType<typeof deleteSale>>>
+
+    export type DeleteSaleMutationError = ErrorType<ApiError>
+    export type DeleteSaleMutationVariables = {id: string}
+
+    /**
+ * @summary Delete a sale
+ */
+export const useDeleteSale = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSale>>, TError,DeleteSaleMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteSale>>,
+        TError,
+        DeleteSaleMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteSaleMutationOptions(options));
+    }
 
