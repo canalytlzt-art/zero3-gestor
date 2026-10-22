@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ClerkProvider, Show, SignIn, SignUp, useClerk, useUser } from '@clerk/react';
 import { publishableKeyFromHost } from '@clerk/react/internal';
 import { ptBR } from '@clerk/localizations';
@@ -27,6 +27,7 @@ import OccupancyManagement from '@/components/occupancy-management';
 import { formatCents, formatMonthKey, getSaoPauloMonthKey, isCompleteCalendarMonthRange, monthKeysBetween, productNameKey } from '@/lib/sales-utils';
 
 const queryClient = new QueryClient();
+const OccupancyChartsPage = lazy(() => import('@/components/occupancy-charts-page'));
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
 const clerkPubKey = publishableKeyFromHost(window.location.hostname, import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
@@ -514,7 +515,13 @@ function ScoreboardContent() {
 
 function Workspace() {
   const [location, setLocation] = useLocation();
-  const tab: 'sales' | 'scoreboard' | 'occupancy' = location.endsWith('/scoreboard') ? 'scoreboard' : location.endsWith('/ocupacao') ? 'occupancy' : 'sales';
+  const tab: 'sales' | 'scoreboard' | 'occupancy' | 'charts' = location.endsWith('/scoreboard')
+    ? 'scoreboard'
+    : location.endsWith('/ocupacao')
+      ? 'occupancy'
+      : location.endsWith('/graficos')
+        ? 'charts'
+        : 'sales';
   const { user } = useUser();
   const { signOut } = useClerk();
   const name = user?.firstName || 'Equipe';
@@ -523,6 +530,7 @@ function Workspace() {
     { id: 'sales', label: 'Lançamentos', path: '/', testId: 'tab-lancamentos', eyebrow: 'rotina comercial' },
     { id: 'scoreboard', label: 'Scoreboard', path: '/scoreboard', testId: 'tab-scoreboard', eyebrow: 'visão do time' },
     { id: 'occupancy', label: 'Ocupação', path: '/ocupacao', testId: 'tab-ocupacao', eyebrow: 'aulas e modalidades' },
+    { id: 'charts', label: 'Gráficos', path: '/graficos', testId: 'tab-graficos', eyebrow: 'análise de ocupação' },
   ] as const;
   const activeTab = tabs.find((item) => item.id === tab) ?? tabs[0];
 
@@ -555,7 +563,13 @@ function Workspace() {
             </div>
             <div className="flex items-center gap-2 text-xs font-medium text-[#7f7987]"><CalendarDays size={15} className="text-[#8c73b4]" /> Acompanhe o ritmo do time</div>
           </div>
-          {tab === 'scoreboard' ? <ScoreboardContent /> : tab === 'occupancy' ? <OccupancyManagement /> : <SalesManagement />}
+          {tab === 'scoreboard'
+            ? <ScoreboardContent />
+            : tab === 'occupancy'
+              ? <OccupancyManagement />
+              : tab === 'charts'
+                ? <Suspense fallback={<div className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] px-5 py-8 text-sm font-semibold text-[#766d83]" role="status">Carregando gráficos de ocupação…</div>}><OccupancyChartsPage /></Suspense>
+                : <SalesManagement />}
         </div>
       </main>
     </div>
@@ -642,6 +656,7 @@ function Router() {
     <Route path="/" component={HomeRedirect} />
     <Route path="/scoreboard"><ProtectedWorkspace /></Route>
     <Route path="/ocupacao"><ProtectedWorkspace /></Route>
+    <Route path="/graficos"><ProtectedWorkspace /></Route>
     <Route path="/sign-in/*?" component={SignInPage} />
     <Route path="/sign-up/*?" component={SignUpPage} />
     <Route component={NotFound} />

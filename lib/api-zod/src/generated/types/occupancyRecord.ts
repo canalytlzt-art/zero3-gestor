@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { OccupancyRecordKind } from './occupancyRecordKind';
+import type { OccupancyRecordSourceCells } from './occupancyRecordSourceCells';
 
 export interface OccupancyRecord {
   id: string;
@@ -23,6 +24,13 @@ export interface OccupancyRecord {
   className: string | null;
   /** @nullable */
   notes: string | null;
+  /** @nullable */
+  sourceFileHash: string | null;
+  /** @nullable */
+  sourceSheet: string | null;
+  /** @nullable */
+  sourceCell: string | null;
+  sourceCells: OccupancyRecordSourceCells;
   version: number;
   createdAt: string;
   updatedAt: string;

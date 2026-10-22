@@ -14,6 +14,8 @@ tags:
     description: Private sales data
   - name: products
     description: Product names derived from sales
+  - name: occupancy
+    description: Registros e importações de ocupação
 paths:
   /occupancy/modalities:
     get:
@@ -120,6 +122,38 @@ paths:
             schema: { $ref: "#/components/schemas/OccupancyRemovalInput" }
       responses:
         "204": { description: Registro excluído do histórico ativo; auditoria preservada }
+        default: { $ref: "#/components/responses/OccupancyFailure" }
+  /occupancy/import/preview:
+    post:
+      operationId: previewOccupancyImport
+      tags: [occupancy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OccupancyImportPreviewInput" }
+      responses:
+        "200":
+          description: Prévia com novos registros, reimportações e conflitos atuais
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OccupancyImportPreviewResponse" }
+        default: { $ref: "#/components/responses/OccupancyFailure" }
+  /occupancy/import:
+    post:
+      operationId: commitOccupancyImport
+      tags: [occupancy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OccupancyImportCommitInput" }
+      responses:
+        "200":
+          description: Importação sem duplicar; conflitos concorrentes permanecem pendentes
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OccupancyImportCommitResponse" }
         default: { $ref: "#/components/responses/OccupancyFailure" }
   /healthz:
     get:
@@ -446,6 +480,12 @@ paths:
               type: string
               pattern: '^\d{4}-(0[1-9]|1[0-2])$'
         - name: productId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: modalityId
           in: query
           required: false
           schema:
@@ -1067,7 +1107,7 @@ components:
         version: { type: integer, minimum: 1 }
     OccupancyRecord:
       type: object
-      required: [id, kind, period, month, modalityId, modalityName, percentage, className, notes, version, createdAt, updatedAt]
+      required: [id, kind, period, month, modalityId, modalityName, percentage, className, notes, sourceFileHash, sourceSheet, sourceCell, sourceCells, version, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid }
         kind: { type: string, enum: [daily, monthly] }
@@ -1078,6 +1118,14 @@ components:
         percentage: { type: number, minimum: 0, maximum: 100 }
         className: { type: [string, "null"] }
         notes: { type: [string, "null"] }
+        sourceFileHash: { type: [string, "null"] }
+        sourceSheet: { type: [string, "null"] }
+        sourceCell: { type: [string, "null"] }
+        sourceCells:
+          anyOf:
+            - type: object
+              additionalProperties: { type: string }
+            - type: "null"
         version: { type: integer }
         createdAt: { type: string }
         updatedAt: { type: string }
@@ -1104,6 +1152,87 @@ components:
       required: [version]
       properties:
         version: { type: integer, minimum: 1 }
+    OccupancyImportSourceCells:
+      type: object
+      minProperties: 2
+      maxProperties: 4
+      additionalProperties:
+        type: string
+        pattern: '^[A-Z]{1,4}[1-9][0-9]*$'
+    OccupancyImportRowInput:
+      allOf:
+        - $ref: "#/components/schemas/OccupancyRecordInput"
+        - type: object
+          required: [index, sourceSheet, sourceCell, sourceCells]
+          properties:
+            index: { type: integer, minimum: 0 }
+            sourceSheet: { type: string, minLength: 1, maxLength: 120 }
+            sourceCell: { type: string, pattern: '^[A-Z]{1,4}[1-9][0-9]*$' }
+            sourceCells: { $ref: "#/components/schemas/OccupancyImportSourceCells" }
+    OccupancyImportPreviewInput:
+      type: object
+      required: [fileHash, entries]
+      properties:
+        fileHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+        entries:
+          type: array
+          minItems: 1
+          maxItems: 250
+          items: { $ref: "#/components/schemas/OccupancyImportRowInput" }
+    OccupancyImportPreviewRow:
+      type: object
+      required: [index, status, message, existingRecord]
+      properties:
+        index: { type: integer, minimum: 0 }
+        status: { type: string, enum: [new, already_imported, conflict, duplicate_in_file] }
+        message: { type: string }
+        existingRecord:
+          anyOf:
+            - $ref: "#/components/schemas/OccupancyRecord"
+            - type: "null"
+    OccupancyImportPreviewResponse:
+      type: object
+      required: [rows]
+      properties:
+        rows:
+          type: array
+          items: { $ref: "#/components/schemas/OccupancyImportPreviewRow" }
+    OccupancyImportCommitEntry:
+      type: object
+      required: [record]
+      properties:
+        record: { $ref: "#/components/schemas/OccupancyImportRowInput" }
+        existingRecordId: { type: string, format: uuid }
+        expectedVersion: { type: integer, minimum: 1 }
+    OccupancyImportCommitInput:
+      type: object
+      required: [fileHash, entries]
+      properties:
+        fileHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+        entries:
+          type: array
+          minItems: 1
+          maxItems: 250
+          items: { $ref: "#/components/schemas/OccupancyImportCommitEntry" }
+    OccupancyImportCommitRow:
+      type: object
+      required: [index, status, id, message]
+      properties:
+        index: { type: integer, minimum: 0 }
+        status: { type: string, enum: [inserted, updated, already_imported, conflict, duplicate_in_batch] }
+        id: { type: [string, "null"], format: uuid }
+        message: { type: string }
+    OccupancyImportCommitResponse:
+      type: object
+      required: [rows, inserted, updated, alreadyImported, conflicts]
+      properties:
+        rows:
+          type: array
+          items: { $ref: "#/components/schemas/OccupancyImportCommitRow" }
+        inserted: { type: integer, minimum: 0 }
+        updated: { type: integer, minimum: 0 }
+        alreadyImported: { type: integer, minimum: 0 }
+        conflicts: { type: integer, minimum: 0 }
     HealthStatus:
       type: object
       properties:
@@ -1287,6 +1416,9 @@ components:
           maximum: 9007199254740991
         isActive:
           type: boolean
+        modalityId:
+          type: ["string", "null"]
+          format: uuid
         version:
           type: integer
           minimum: 1
@@ -1302,6 +1434,7 @@ components:
         - normalizedName
         - suggestedPriceCents
         - isActive
+        - modalityId
         - version
         - createdAt
         - updatedAt
@@ -1318,6 +1451,9 @@ components:
           maximum: 9007199254740991
         isActive:
           type: boolean
+        modalityId:
+          type: ["string", "null"]
+          format: uuid
       required: [name, suggestedPriceCents, isActive]
     CreateProductInput:
       allOf:
@@ -1598,7 +1734,12 @@ components:
               format: uuid
             productName:
               type: string
-          required: [productId, productName]
+            modalityId:
+              type: ["string", "null"]
+              format: uuid
+            modalityName:
+              type: ["string", "null"]
+          required: [productId, productName, modalityId, modalityName]
     SalesScoreboardMonth:
       allOf:
         - $ref: "#/components/schemas/SalesScoreboardTotals"

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
-import { check, date, index, integer, numeric, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { check, date, index, integer, jsonb, numeric, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { occupancyModalitiesTable } from "./occupancy-modalities";
 
 export const occupancyRecordsTable = pgTable("occupancy_records", {
@@ -14,6 +14,10 @@ export const occupancyRecordsTable = pgTable("occupancy_records", {
   className: text("class_name"),
   scopeKey: text("scope_key").notNull().default(""),
   notes: text("notes"),
+  sourceFileHash: text("source_file_hash"),
+  sourceSheet: text("source_sheet"),
+  sourceCell: text("source_cell"),
+  sourceCells: jsonb("source_cells").$type<Record<string, string> | null>(),
   version: integer("version").notNull().default(1),
   createdBy: text("created_by").notNull(),
   updatedBy: text("updated_by").notNull(),
@@ -22,11 +26,13 @@ export const occupancyRecordsTable = pgTable("occupancy_records", {
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
 }, (t) => [
   uniqueIndex("occupancy_records_scope_unique").on(t.modalityId, t.kind, t.month, sql`coalesce(${t.date}, '0001-01-01'::date)`, t.scopeKey).where(sql`${t.deletedAt} is null`),
+  uniqueIndex("occupancy_records_source_cell_unique").on(t.sourceFileHash, t.sourceSheet, t.sourceCell).where(sql`${t.deletedAt} is null and ${t.sourceFileHash} is not null`),
   index("occupancy_records_month_idx").on(t.month, t.modalityId),
   check("occupancy_percentage_valid", sql`${t.percentage} >= 0 and ${t.percentage} <= 100 and ${t.percentage} <> 'NaN'::numeric`),
   check("occupancy_period_valid", sql`${t.month} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$' and left(${t.month}, 4) <> '0000' and ((${t.kind} = 'daily' and ${t.date} is not null and ${t.month} = to_char(${t.date}, 'YYYY-MM')) or (${t.kind} = 'monthly' and ${t.date} is null))`),
   check("occupancy_record_version_valid", sql`${t.version} > 0`),
   check("occupancy_record_text_valid", sql`coalesce(length(${t.className}), 0) <= 120 and coalesce(length(${t.notes}), 0) <= 1000`),
+  check("occupancy_record_source_valid", sql`(${t.sourceFileHash} is null and ${t.sourceSheet} is null and ${t.sourceCell} is null and ${t.sourceCells} is null) or (${t.sourceFileHash} ~ '^[a-f0-9]{64}$' and length(btrim(${t.sourceSheet})) between 1 and 120 and ${t.sourceCell} ~ '^[A-Z]{1,4}[1-9][0-9]*$' and jsonb_typeof(${t.sourceCells}) = 'object')`),
 ]);
 export const insertOccupancyRecordSchema = createInsertSchema(occupancyRecordsTable).omit({ id: true, createdAt: true, updatedAt: true });
 export type OccupancyRecordRow = typeof occupancyRecordsTable.$inferSelect;

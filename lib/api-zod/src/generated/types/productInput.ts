@@ -18,4 +18,6 @@ export interface ProductInput {
      */
   suggestedPriceCents: number;
   isActive: boolean;
+  /** @nullable */
+  modalityId?: string | null;
 }

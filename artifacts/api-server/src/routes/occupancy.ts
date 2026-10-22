@@ -9,6 +9,9 @@ import {
   CreateOccupancyRecordBody, CreateOccupancyRecordResponse,
   UpdateOccupancyRecordBody, UpdateOccupancyRecordParams, UpdateOccupancyRecordResponse,
   DeleteOccupancyRecordBody, DeleteOccupancyRecordParams,
+  PreviewOccupancyImportBody, PreviewOccupancyImportResponse,
+  CommitOccupancyImportBody, CommitOccupancyImportResponse,
+  type OccupancyImportRowInput,
 } from "@workspace/api-zod";
 import { isAuthorizedUser } from "../lib/authorization";
 import {
@@ -26,6 +29,13 @@ function parse<T>(schema: { safeParse: (value: unknown) => { success: true; data
   if (!result.success) throw new OccupancyError(400, "Revise os campos obrigatórios, o percentual (0% a 100%) e os formatos informados.");
   return result.data;
 }
+function validateImportOrigin(row: OccupancyImportRowInput) {
+  const cells = row.sourceCells;
+  if (!row.sourceSheet.trim() || Object.keys(cells).length < 2 || Object.keys(cells).length > 4
+    || !cells.period || !cells.modality || !cells.percentage || cells.percentage !== row.sourceCell) {
+    throw new OccupancyError(400, "A origem deve informar aba, células de período/modalidade/percentual e a célula percentual identificada.");
+  }
+}
 
 export function createOccupancyRouter(dependencies: Dependencies = {}): IRouter {
   const router: IRouter = Router();
@@ -37,6 +47,236 @@ export function createOccupancyRouter(dependencies: Dependencies = {}): IRouter 
       res.status(403).json({ error: "Acesso restrito à equipe autorizada." }); return;
     }
     next();
+  });
+  router.post("/occupancy/import/preview", async (req, res): Promise<void> => {
+    const input = parse(PreviewOccupancyImportBody, req.body);
+    const seen = new Set<string>();
+    const rows = [];
+    for (const entry of input.entries) {
+      validateImportOrigin(entry);
+      const values = occupancyValues(entry);
+      const sourceKey = `${entry.sourceSheet}\u0000${entry.sourceCell}`;
+      const naturalKey = `${occupancyKey(entry.modalityName)}\u0000${entry.kind}\u0000${values.month}\u0000${values.date ?? ""}\u0000${values.scopeKey}`;
+      if (seen.has(sourceKey) || seen.has(naturalKey)) {
+        rows.push({ index: entry.index, status: "duplicate_in_file" as const, message: "Esta célula ou escopo já aparece na prévia deste lote.", existingRecord: null });
+        continue;
+      }
+      seen.add(sourceKey);
+      seen.add(naturalKey);
+
+      const [sourceMatch] = await database.select({ record: occupancyRecordsTable, name: occupancyModalitiesTable.name })
+        .from(occupancyRecordsTable).innerJoin(occupancyModalitiesTable, eq(occupancyModalitiesTable.id, occupancyRecordsTable.modalityId))
+        .where(and(
+          eq(occupancyRecordsTable.sourceFileHash, input.fileHash),
+          eq(occupancyRecordsTable.sourceSheet, entry.sourceSheet),
+          eq(occupancyRecordsTable.sourceCell, entry.sourceCell),
+          isNull(occupancyRecordsTable.deletedAt),
+        )).limit(1);
+      if (sourceMatch) {
+        const existing = serializeOccupancy(sourceMatch.record, sourceMatch.name);
+        const same = existing.kind === entry.kind && existing.period === entry.period
+          && occupancyKey(existing.modalityName) === occupancyKey(entry.modalityName)
+          && existing.percentage === entry.percentage
+          && occupancyKey(existing.className ?? "") === occupancyKey(entry.className ?? "");
+        rows.push({
+          index: entry.index, status: same ? "already_imported" as const : "conflict" as const,
+          message: same ? "Esta célula deste arquivo já foi importada e não será duplicada." : "Esta célula já existe, mas os dados mudaram desde a importação anterior.",
+          existingRecord: existing,
+        });
+        continue;
+      }
+
+      const [modality] = await database.select().from(occupancyModalitiesTable)
+        .where(eq(occupancyModalitiesTable.normalizedName, occupancyKey(entry.modalityName))).limit(1);
+      const [scopeMatch] = modality ? await database.select({ record: occupancyRecordsTable, name: occupancyModalitiesTable.name })
+        .from(occupancyRecordsTable).innerJoin(occupancyModalitiesTable, eq(occupancyModalitiesTable.id, occupancyRecordsTable.modalityId))
+        .where(and(
+          eq(occupancyRecordsTable.modalityId, modality.id),
+          eq(occupancyRecordsTable.kind, entry.kind),
+          eq(occupancyRecordsTable.month, values.month),
+          eq(occupancyRecordsTable.scopeKey, values.scopeKey),
+          entry.kind === "daily" ? eq(occupancyRecordsTable.date, values.date!) : isNull(occupancyRecordsTable.date),
+          isNull(occupancyRecordsTable.deletedAt),
+        )).limit(1) : [];
+      if (scopeMatch) {
+        rows.push({ index: entry.index, status: "conflict" as const, message: "Já existe um registro para esta modalidade, período e turma/horário. Confira a versão atual antes de autorizar a atualização.", existingRecord: serializeOccupancy(scopeMatch.record, scopeMatch.name) });
+      } else {
+        rows.push({ index: entry.index, status: "new" as const, message: "Novo registro. Ainda não foi gravado.", existingRecord: null });
+      }
+    }
+    res.json(PreviewOccupancyImportResponse.parse({ rows }));
+  });
+  router.post("/occupancy/import", async (req, res): Promise<void> => {
+    const input = parse(CommitOccupancyImportBody, req.body);
+    const rows = await database.transaction(async (tx) => {
+      const output: Array<{ index: number; status: "inserted" | "updated" | "already_imported" | "conflict" | "duplicate_in_batch"; id: string | null; message: string }> = [];
+      const seen = new Set<string>();
+      let inserted = 0;
+      let updated = 0;
+      let alreadyImported = 0;
+      let conflicts = 0;
+      for (let i = 0; i < input.entries.length; i += 1) {
+        const item = input.entries[i];
+        const entry = item.record;
+        validateImportOrigin(entry);
+        const values = occupancyValues(entry);
+        const sourceKey = `${entry.sourceSheet}\u0000${entry.sourceCell}`;
+        const naturalKey = `${occupancyKey(entry.modalityName)}\u0000${entry.kind}\u0000${values.month}\u0000${values.date ?? ""}\u0000${values.scopeKey}`;
+        if (seen.has(sourceKey) || seen.has(naturalKey)) {
+          output.push({ index: entry.index, status: "duplicate_in_batch", id: null, message: "Escopo ou célula repetidos neste lote; nenhum dado foi somado." });
+          conflicts += 1;
+          continue;
+        }
+        seen.add(sourceKey);
+        seen.add(naturalKey);
+
+        const savepoint = `occupancy_import_row_${i}`;
+        await tx.execute(sql.raw(`SAVEPOINT ${savepoint}`));
+        try {
+          const [sourceMatch] = await tx.select({ record: occupancyRecordsTable, name: occupancyModalitiesTable.name })
+            .from(occupancyRecordsTable).innerJoin(occupancyModalitiesTable, eq(occupancyModalitiesTable.id, occupancyRecordsTable.modalityId))
+            .where(and(
+              eq(occupancyRecordsTable.sourceFileHash, input.fileHash),
+              eq(occupancyRecordsTable.sourceSheet, entry.sourceSheet),
+              eq(occupancyRecordsTable.sourceCell, entry.sourceCell),
+              isNull(occupancyRecordsTable.deletedAt),
+            )).limit(1);
+          if (sourceMatch) {
+            const existing = serializeOccupancy(sourceMatch.record, sourceMatch.name);
+            const same = existing.kind === entry.kind && existing.period === entry.period
+              && occupancyKey(existing.modalityName) === occupancyKey(entry.modalityName)
+              && existing.percentage === entry.percentage
+              && occupancyKey(existing.className ?? "") === occupancyKey(entry.className ?? "");
+            if (same) {
+              output.push({ index: entry.index, status: "already_imported", id: existing.id, message: "Já importado; mantido sem duplicação." });
+              alreadyImported += 1;
+              await tx.execute(sql.raw(`RELEASE SAVEPOINT ${savepoint}`));
+              continue;
+            }
+            if (item.existingRecordId !== existing.id || item.expectedVersion !== sourceMatch.record.version) {
+              output.push({ index: entry.index, status: "conflict", id: existing.id, message: "A origem já existe com dados diferentes. Autorize explicitamente a atualização desta versão." });
+              conflicts += 1;
+              await tx.execute(sql.raw(`RELEASE SAVEPOINT ${savepoint}`));
+              continue;
+            }
+          }
+
+          if (item.existingRecordId || item.expectedVersion !== undefined) {
+            if (!item.existingRecordId || item.expectedVersion === undefined) {
+              output.push({ index: entry.index, status: "conflict", id: null, message: "A atualização explícita exige o registro e a versão que foram exibidos na prévia." });
+              conflicts += 1;
+              await tx.execute(sql.raw(`RELEASE SAVEPOINT ${savepoint}`));
+              continue;
+            }
+            const [target] = await tx.select({ record: occupancyRecordsTable, name: occupancyModalitiesTable.name })
+              .from(occupancyRecordsTable).innerJoin(occupancyModalitiesTable, eq(occupancyModalitiesTable.id, occupancyRecordsTable.modalityId))
+              .where(and(eq(occupancyRecordsTable.id, item.existingRecordId), isNull(occupancyRecordsTable.deletedAt))).for("update");
+            const before = target?.record;
+            const sameNaturalScope = Boolean(target && occupancyKey(target.name) === occupancyKey(entry.modalityName)
+              && before!.kind === entry.kind && before!.month === values.month && before!.date === values.date
+              && before!.scopeKey === values.scopeKey);
+            const sameSourceCell = Boolean(before && before.sourceFileHash === input.fileHash
+              && before.sourceSheet === entry.sourceSheet && before.sourceCell === entry.sourceCell);
+            if (!before || before.version !== item.expectedVersion || (!sameNaturalScope && !sameSourceCell)) {
+              output.push({ index: entry.index, status: "conflict", id: before?.id ?? null, message: "O registro mudou desde a prévia ou não corresponde a este conflito. Atualize a conferência." });
+              conflicts += 1;
+              await tx.execute(sql.raw(`RELEASE SAVEPOINT ${savepoint}`));
+              continue;
+            }
+            const modality = await resolveOccupancyModality(tx, entry, getUserId(req)!);
+            const [changed] = await tx.update(occupancyRecordsTable).set({
+              ...values, modalityId: modality.id,
+              sourceFileHash: input.fileHash, sourceSheet: entry.sourceSheet, sourceCell: entry.sourceCell, sourceCells: entry.sourceCells,
+              version: before.version + 1, updatedBy: getUserId(req)!, updatedAt: new Date(),
+            }).where(and(eq(occupancyRecordsTable.id, before.id), eq(occupancyRecordsTable.version, item.expectedVersion), isNull(occupancyRecordsTable.deletedAt))).returning();
+            if (!changed) {
+              output.push({ index: entry.index, status: "conflict", id: before.id, message: "O registro mudou durante a atualização. Nenhuma alteração foi aplicada." });
+              conflicts += 1;
+              await tx.execute(sql.raw(`RELEASE SAVEPOINT ${savepoint}`));
+              continue;
+            }
+            await tx.insert(occupancyHistoryTable).values({ entityType: "record", entityId: changed.id, operation: "import_update", actorId: getUserId(req)!, beforeData: before, afterData: changed });
+            output.push({ index: entry.index, status: "updated", id: changed.id, message: "Registro atualizado com a versão conferida." });
+            updated += 1;
+            await tx.execute(sql.raw(`RELEASE SAVEPOINT ${savepoint}`));
+            continue;
+          }
+
+          const [existingModality] = await tx.select().from(occupancyModalitiesTable)
+            .where(eq(occupancyModalitiesTable.normalizedName, occupancyKey(entry.modalityName))).limit(1);
+          const [scopeMatch] = existingModality ? await tx.select().from(occupancyRecordsTable).where(and(
+            eq(occupancyRecordsTable.modalityId, existingModality.id),
+            eq(occupancyRecordsTable.kind, entry.kind),
+            eq(occupancyRecordsTable.month, values.month),
+            eq(occupancyRecordsTable.scopeKey, values.scopeKey),
+            entry.kind === "daily" ? eq(occupancyRecordsTable.date, values.date!) : isNull(occupancyRecordsTable.date),
+            isNull(occupancyRecordsTable.deletedAt),
+          )).for("update").limit(1) : [];
+          if (scopeMatch) {
+            const [scopeModality] = await tx.select().from(occupancyModalitiesTable).where(eq(occupancyModalitiesTable.id, scopeMatch.modalityId)).limit(1);
+            const sameSource = scopeMatch.sourceFileHash === input.fileHash
+              && scopeMatch.sourceSheet === entry.sourceSheet && scopeMatch.sourceCell === entry.sourceCell;
+            const samePayload = scopeMatch.kind === entry.kind && scopeMatch.month === values.month
+              && scopeMatch.date === values.date && occupancyKey(scopeModality?.name ?? "") === occupancyKey(entry.modalityName)
+              && Number(scopeMatch.percentage) === entry.percentage && scopeMatch.scopeKey === values.scopeKey;
+            const alreadyExists = sameSource && samePayload;
+            output.push({
+              index: entry.index, status: alreadyExists ? "already_imported" : "conflict", id: scopeMatch.id,
+              message: alreadyExists ? "Importação simultânea concluída; mantido sem duplicação." : "O escopo já foi preenchido após a prévia. Atualize a conferência; nada foi sobrescrito.",
+            });
+            if (alreadyExists) alreadyImported += 1; else conflicts += 1;
+            await tx.execute(sql.raw(`RELEASE SAVEPOINT ${savepoint}`));
+            continue;
+          }
+          const modality = await resolveOccupancyModality(tx, entry, getUserId(req)!);
+          const [created] = await tx.insert(occupancyRecordsTable).values({
+            ...values, modalityId: modality.id, createdBy: getUserId(req)!, updatedBy: getUserId(req)!,
+            sourceFileHash: input.fileHash, sourceSheet: entry.sourceSheet, sourceCell: entry.sourceCell, sourceCells: entry.sourceCells,
+          }).onConflictDoNothing().returning();
+          if (!created) {
+            const [raced] = await tx.select({ record: occupancyRecordsTable, name: occupancyModalitiesTable.name })
+              .from(occupancyRecordsTable).innerJoin(occupancyModalitiesTable, eq(occupancyModalitiesTable.id, occupancyRecordsTable.modalityId))
+              .where(and(
+                eq(occupancyRecordsTable.sourceFileHash, input.fileHash),
+                eq(occupancyRecordsTable.sourceSheet, entry.sourceSheet),
+                eq(occupancyRecordsTable.sourceCell, entry.sourceCell),
+                isNull(occupancyRecordsTable.deletedAt),
+              )).limit(1);
+            if (raced) {
+              const existing = serializeOccupancy(raced.record, raced.name);
+              const same = existing.kind === entry.kind && existing.period === entry.period
+                && occupancyKey(existing.modalityName) === occupancyKey(entry.modalityName)
+                && existing.percentage === entry.percentage
+                && occupancyKey(existing.className ?? "") === occupancyKey(entry.className ?? "");
+              output.push({
+                index: entry.index, status: same ? "already_imported" : "conflict", id: existing.id,
+                message: same ? "Importação simultânea concluída; mantido sem duplicação." : "A origem foi gravada com dados diferentes.",
+              });
+              if (same) alreadyImported += 1; else conflicts += 1;
+            } else {
+              output.push({ index: entry.index, status: "conflict", id: null, message: "O escopo foi gravado em paralelo. Atualize a prévia antes de continuar." });
+              conflicts += 1;
+            }
+            await tx.execute(sql.raw(`RELEASE SAVEPOINT ${savepoint}`));
+            continue;
+          }
+          await tx.insert(occupancyHistoryTable).values({ entityType: "record", entityId: created.id, operation: "import_create", actorId: getUserId(req)!, afterData: created });
+          output.push({ index: entry.index, status: "inserted", id: created.id, message: "Registro importado." });
+          inserted += 1;
+          await tx.execute(sql.raw(`RELEASE SAVEPOINT ${savepoint}`));
+        } catch (error) {
+          await tx.execute(sql.raw(`ROLLBACK TO SAVEPOINT ${savepoint}`));
+          await tx.execute(sql.raw(`RELEASE SAVEPOINT ${savepoint}`));
+          const cause = error as { code?: string; cause?: { code?: string } };
+          if (cause.code === "23505" || cause.cause?.code === "23505") {
+            output.push({ index: entry.index, status: "conflict", id: null, message: "Registro em conflito com uma gravação simultânea. Nenhum valor foi somado." });
+            conflicts += 1;
+          } else throw error;
+        }
+      }
+      return { rows: output, inserted, updated, alreadyImported, conflicts };
+    });
+    res.json(CommitOccupancyImportResponse.parse(rows));
   });
   router.get("/occupancy/modalities", async (_req, res): Promise<void> => {
     const rows = await database.select().from(occupancyModalitiesTable).orderBy(asc(occupancyModalitiesTable.normalizedName));

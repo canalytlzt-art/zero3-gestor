@@ -6,6 +6,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ArchiveRestore, CalendarDays, Check, ChevronDown, CircleHelp, ClipboardList, Download, Edit3, FileSpreadsheet, Filter, History, PackagePlus, Plus, RefreshCw, RotateCcw, Save, Search, Upload, X } from 'lucide-react';
 import {
   getGetProductsQueryKey,
+  getGetOccupancyModalitiesQueryKey,
   getGetSaleHistoryQueryKey,
   getGetSalesHistoryQueryKey,
   getGetSalesGoalsQueryKey,
@@ -21,6 +22,7 @@ import {
   useCreateSalesRefund,
   useCreateSale,
   useGetProducts,
+  useGetOccupancyModalities,
   useGetSaleHistory,
   useGetSales,
   useGetSalesHistory,
@@ -62,6 +64,7 @@ type SaleFormValues = z.infer<typeof saleFormSchema>;
 const productFormSchema = z.object({
   name: z.string().trim().min(1, 'Informe o nome do produto.').max(120, 'Use até 120 caracteres.'),
   suggestedPrice: z.string().min(1, 'Informe o preço sugerido.').refine((value) => parseBrlCents(value) !== null, 'Informe um valor em reais válido.'),
+  modalityId: z.string(),
   isActive: z.boolean(),
 });
 type ProductFormValues = z.infer<typeof productFormSchema>;
@@ -198,6 +201,9 @@ export default function SalesManagement() {
   const { data: productRecords, isLoading: isProductsLoading, isError: isProductsError, refetch: refetchProducts } = useGetProducts({
     query: { queryKey: getGetProductsQueryKey(), refetchOnMount: 'always' },
   });
+  const { data: occupancyModalities, isLoading: areModalitiesLoading, isError: areModalitiesError, refetch: refetchModalities } = useGetOccupancyModalities({
+    query: { queryKey: getGetOccupancyModalitiesQueryKey(), refetchOnMount: 'always' },
+  });
   const {
     data: salesGoals,
     isLoading: isGoalsLoading,
@@ -328,7 +334,7 @@ export default function SalesManagement() {
 
   const productForm = useForm<ProductFormValues>({
     resolver: zodResolver(productFormSchema),
-    defaultValues: { name: '', suggestedPrice: '', isActive: true },
+    defaultValues: { name: '', suggestedPrice: '', modalityId: '', isActive: true },
   });
   const importedLines = useMemo(() => (importWorkspace?.sheets ?? []).flatMap((sheet) =>
     sheet.rows.map((source) => ({
@@ -451,7 +457,7 @@ export default function SalesManagement() {
     setProductFeedback(null);
     setEditingProduct(null);
     setProductSearch('');
-    productForm.reset({ name: '', suggestedPrice: '', isActive: true });
+    productForm.reset({ name: '', suggestedPrice: '', modalityId: '', isActive: true });
     setProductsOpen(true);
   }
 
@@ -461,6 +467,7 @@ export default function SalesManagement() {
     productForm.reset({
       name: product.name,
       suggestedPrice: `${Math.floor(product.suggestedPriceCents / 100)},${String(product.suggestedPriceCents % 100).padStart(2, '0')}`,
+      modalityId: product.modalityId ?? '',
       isActive: product.isActive,
     });
   }
@@ -473,7 +480,7 @@ export default function SalesManagement() {
       setProductFeedback({ type: 'error', message: 'Confira o preço sugerido antes de salvar.' });
       return;
     }
-    const fingerprint = `${editingProduct?.id ?? 'novo'}:${editingProduct?.version ?? ''}:${name}:${suggestedPriceCents}:${values.isActive}`;
+    const fingerprint = `${editingProduct?.id ?? 'novo'}:${editingProduct?.version ?? ''}:${name}:${suggestedPriceCents}:${values.modalityId}:${values.isActive}`;
     if (pendingProductKey.current?.fingerprint !== fingerprint) {
       pendingProductKey.current = { fingerprint, key: crypto.randomUUID() };
     }
@@ -484,16 +491,18 @@ export default function SalesManagement() {
         const data: UpdateProductInput = {
           name,
           suggestedPriceCents,
+          modalityId: values.modalityId || null,
           isActive: values.isActive,
           expectedVersion: editingProduct.version,
           idempotencyKey: pendingProductKey.current.key,
         };
         await updateProduct.mutateAsync({ id: editingProduct.id, data });
-        setProductFeedback({ type: 'success', message: 'Produto atualizado. Os lançamentos anteriores mantêm seus dados originais.' });
+        setProductFeedback({ type: 'success', message: 'Produto atualizado. O vínculo de modalidade também classifica as vendas anteriores; valores e datas permanecem iguais.' });
       } else {
         const data: CreateProductInput = {
           name,
           suggestedPriceCents,
+          modalityId: values.modalityId || null,
           isActive: values.isActive,
           idempotencyKey: pendingProductKey.current.key,
         };
@@ -503,7 +512,7 @@ export default function SalesManagement() {
       await invalidateSalesRelated();
       setEditingProduct(null);
       pendingProductKey.current = null;
-      productForm.reset({ name: '', suggestedPrice: '', isActive: true });
+      productForm.reset({ name: '', suggestedPrice: '', modalityId: '', isActive: true });
     } catch (error) {
       setProductFeedback({ type: 'error', message: conflictAwareMessage(error, 'produto') });
       if (error && typeof error === 'object' && 'status' in error && error.status === 409) void invalidateSalesRelated();
@@ -1084,7 +1093,7 @@ export default function SalesManagement() {
         <DialogContent className="max-w-3xl border-[#e7e1e9] bg-[#fffefc] p-5 sm:rounded-[24px] md:p-6">
           <DialogHeader className="text-left">
             <DialogTitle className="text-lg font-extrabold tracking-[-.035em] text-[#332d40]">Produtos</DialogTitle>
-            <DialogDescription className="text-xs leading-5 text-[#827b8b]">Gerencie nomes e preços sugeridos. Alterações não modificam os dados de vendas anteriores.</DialogDescription>
+            <DialogDescription className="text-xs leading-5 text-[#827b8b]">Nome e preço sugerido não alteram vendas já registradas. O vínculo de modalidade também classifica o histórico financeiro deste produto.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-5 md:grid-cols-[1fr_1fr]">
             <section className="min-w-0">
@@ -1101,7 +1110,7 @@ export default function SalesManagement() {
                       <span className={`h-2 w-2 shrink-0 rounded-full ${product.isActive ? 'bg-[#8ab83f]' : 'bg-[#aaa4af]'}`} aria-label={product.isActive ? 'Ativo' : 'Inativo'} />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-bold text-[#40374e]" data-testid={`text-product-name-${product.id}`}>{product.name}</p>
-                        <p className="mt-0.5 text-[10px] text-[#8a8491]">{formatCents(product.suggestedPriceCents)} · {product.isActive ? 'Ativo' : 'Inativo'}</p>
+                        <p className="mt-0.5 text-[10px] text-[#8a8491]">{formatCents(product.suggestedPriceCents)} · {product.isActive ? 'Ativo' : 'Inativo'} · {product.modalityId ? occupancyModalities?.find((modality) => modality.id === product.modalityId)?.name ?? 'Modalidade não encontrada' : 'Não classificado'}</p>
                       </div>
                       <button type="button" onClick={() => editProduct(product)} aria-label={`Editar produto ${product.name}`} className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-[#776b88] hover:bg-[#f1edf7] hover:text-[#6848a9]" data-testid={`button-edit-product-${product.id}`}><Edit3 size={15} /></button>
                     </article>) : <div className="rounded-xl border border-dashed border-[#ded7e7] p-5 text-center text-xs text-[#817b89]" data-testid="status-products-empty">{products.length ? 'Nenhum produto encontrado.' : 'Nenhum produto cadastrado ainda.'}</div>}
@@ -1113,10 +1122,11 @@ export default function SalesManagement() {
                 <form onSubmit={productForm.handleSubmit(saveProduct)} className="mt-3 space-y-3">
                   <FormField name="name" render={({ field }) => <FormItem className="space-y-1.5"><FormLabel className="text-[11px] font-bold text-[#665f70]">Nome do produto</FormLabel><FormControl><input {...field} maxLength={120} placeholder="Ex.: Plano Essencial" data-testid="input-product-name" className="h-11 w-full rounded-xl border border-[#e7e2ea] bg-white px-3.5 text-sm text-[#342d43] outline-none focus:border-[#9477bf]" /></FormControl><FormMessage className="text-[11px]" /></FormItem>} />
                   <FormField name="suggestedPrice" render={({ field }) => <FormItem className="space-y-1.5"><FormLabel className="text-[11px] font-bold text-[#665f70]">Preço sugerido</FormLabel><FormControl><input {...field} inputMode="decimal" placeholder="0,00" data-testid="input-product-suggested-price" className="h-11 w-full rounded-xl border border-[#e7e2ea] bg-white px-3.5 text-sm text-[#342d43] outline-none focus:border-[#9477bf]" /></FormControl><FormMessage className="text-[11px]" /></FormItem>} />
+                  <FormField name="modalityId" render={({ field }) => <FormItem className="space-y-1.5"><FormLabel className="text-[11px] font-bold text-[#665f70]">Modalidade associada (opcional)</FormLabel><FormControl><select {...field} data-testid="select-product-modality" className="h-11 w-full rounded-xl border border-[#e7e2ea] bg-white px-3.5 text-sm text-[#342d43] outline-none focus:border-[#9477bf]"><option value="">Sem vínculo · Não classificado</option>{(occupancyModalities ?? []).map((modality) => <option key={modality.id} value={modality.id}>{modality.name}</option>)}</select></FormControl><p className="text-[10px] leading-4 text-[#8a8491]">A modalidade é vinculada manualmente; o sistema não a deduz pelo nome do produto.</p>{areModalitiesError && <p role="alert" className="text-[10px] text-[#9c483f]">Não foi possível carregar as modalidades. <button type="button" onClick={() => void refetchModalities()} className="font-bold underline" data-testid="button-retry-product-modalities">Tentar novamente</button></p>}{areModalitiesLoading && <p className="text-[10px] text-[#8a8491]">Carregando modalidades…</p>}</FormItem>} />
                   <FormField name="isActive" render={({ field }) => <FormItem className="flex items-center justify-between rounded-xl border border-[#e9e4ec] bg-white px-3.5 py-3"><div><FormLabel className="text-xs font-bold text-[#4b4356]">Produto ativo</FormLabel><p className="mt-0.5 text-[10px] text-[#8a8491]">Produtos inativos não aparecem em novas vendas.</p></div><FormControl><input type="checkbox" checked={field.value} onChange={field.onChange} data-testid="input-product-active" className="h-5 w-5 accent-[#7656b8]" /></FormControl></FormItem>} />
                   {productFeedback && <p role={productFeedback.type === 'error' ? 'alert' : 'status'} className={`rounded-xl px-3 py-2.5 text-[11px] font-semibold ${productFeedback.type === 'error' ? 'bg-[#fff0ed] text-[#9c483f]' : 'bg-[#eff6e5] text-[#55772c]'}`} data-testid={`status-product-${productFeedback.type}`}>{productFeedback.message}</p>}
                   <div className="flex gap-2">
-                    {editingProduct && <button type="button" onClick={() => { setEditingProduct(null); pendingProductKey.current = null; productForm.reset({ name: '', suggestedPrice: '', isActive: true }); }} className="h-10 rounded-xl border border-[#e3dfe7] px-3 text-xs font-bold text-[#716a79]" data-testid="button-cancel-product-edit">Cancelar edição</button>}
+                    {editingProduct && <button type="button" onClick={() => { setEditingProduct(null); pendingProductKey.current = null; productForm.reset({ name: '', suggestedPrice: '', modalityId: '', isActive: true }); }} className="h-10 rounded-xl border border-[#e3dfe7] px-3 text-xs font-bold text-[#716a79]" data-testid="button-cancel-product-edit">Cancelar edição</button>}
                     <button type="submit" disabled={busy} className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-[#7656b8] px-3 text-xs font-bold text-white transition hover:bg-[#6848a9] disabled:opacity-60" data-testid="button-save-product">
                       {createProduct.isPending || updateProduct.isPending ? 'Salvando…' : editingProduct ? 'Salvar alterações' : <><PackagePlus size={14} /> Cadastrar produto</>}
                     </button>

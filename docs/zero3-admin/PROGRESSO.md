@@ -239,8 +239,73 @@ A planilha de clientes individuais foi localizada e lida diretamente: seis abas,
 - Contratos acrescentados em OpenAPI e clientes/validadores regenerados. API separada em `routes/occupancy.ts`, sem refatorar as consultas financeiras existentes.
 - Verificação concluída antes do navegador: typechecks API/app, build e 13 testes isolados passaram (quatro de ocupação; regressões do leitor original e das rotas de vendas, metas e estornos). Cobertura de ocupação: acesso, 0/100/decimais, calendário real, filtros inclusivos/múltiplos meses, escopos, renomeação/vínculos, opcionais nulos, conflitos de edição/exclusão, auditoria e duplicidade concorrente.
 - A verificação de navegador usa a API real em esquema PostgreSQL privado através de `scripts/serve-occupancy-isolated.ts`; chamadas de ocupação são redirecionadas somente no navegador de teste. Não há alteração de autenticação ou roteamento na aplicação real.
+
+## Importação de ocupação — etapa 3 de 6
+
+- Incluído **Importar ocupação** dentro de Ocupação, com leitura local de XLSX/CSV, seleção de abas, prévia com célula de origem, modalidade, período, tipo, percentual e situação. O arquivo não é enviado nem guardado no navegador.
+- O leitor reconhece linhas por dia/mês e as duas matrizes (modalidades×meses e datas×modalidades). Trata cabeçalhos repetidos, totais, células vazias, abas ocultas, datas civis/seriais Excel 1900/1904, CSV legado CP1252 e fórmulas com/sem resultado em cache.
+- Valores com formato percentual e textos com `%` são convertidos explicitamente. Números gerais entre 0 e 1 exigem confirmação da escala; números maiores no mesmo bloco identificam a escala 0–100. Competências sem ano ficam pendentes até o operador informar um ano; nenhum ano atual é presumido.
+- Linhas com cabeçalho não reconhecido, fórmula sem resultado/erro, percentual inválido ou ano/escala ambíguos permanecem pendentes e não chegam à gravação. Prévia e gravação mostram origem e contagens; importações em lotes de até 250 registros.
+- A origem persistida é identificada por hash do arquivo, aba e célula do percentual. Reenvio não duplica; conflito de escopo pede revisão; atualização de conflito exige consentimento explícito por linha e versão atual. Escritas concorrentes não somam percentuais. Alterações geram histórico.
+- A prévia não cria modalidades nem registros. A gravação usa somente as tabelas de ocupação. Migração aditiva aplicada somente no banco de desenvolvimento; `occupancy_records` ficou com as colunas de origem e 0 registros após a migração. Nenhuma tabela financeira foi alterada, nenhum dado de teste foi inserido na base compartilhada e produção não foi migrada/publicada.
+- Não foram iniciados gráficos de ocupação nem financeiros desta etapa.
+
+### Verificações
+
+- 10 testes unitários do leitor passaram; cobrem os formatos, escala e ano explícitos, datas Excel 1900/1904, fórmulas, cabeçalhos/totais, abas e CSV.
+- 6 testes de integração da ocupação passaram em esquema PostgreSQL privado; incluem prévia sem efeitos colaterais, idempotência, conflito e atualização versionada, histórico, repetição no lote e reenvio simultâneo.
+- 4 testes de regressão de vendas/metas/estornos passaram. `typecheck:libs`, typecheck da API e do app passaram; build Vite passou, mantendo avisos já conhecidos de sourcemap e tamanho de bundle.
+- Workflows da API e do app reiniciaram sem erros de compilação. A captura pública mostrou a página de entrada; a interface autenticada não foi conferida visualmente porque o navegador de validação não possui sessão. A funcionalidade protegida foi verificada por testes de integração isolados.
 - Não foram implementadas importação de ocupação, consolidações, gráficos, vínculo financeiro de modalidades ou ampliação dos backups financeiros nesta etapa. Não houve publicação nem alteração em produção.
 - Navegador desktop e 390×844: cadastro de diário 0%, mensal 75,125% e diário 100%, duplo clique sem duplicar, recarga, edição para 60,5% limpando opcionais, renomeação com edição aberta preservando o mesmo vínculo e novo salvamento a 80%, exclusão cancelada/confirmada, filtros de tipos/múltiplos meses/turma, intervalo parcial sem mensal, intervalo completo com mensal e mês vazio sem zero fictício passaram. Navegação financeira de leitura e “Ver detalhes” do histórico recolhido permaneceram corretos.
 - A primeira configuração de interceptação do teste não cobriu um PATCH por ID: retornou 404 sem gravar, pois o UUID só existia na base privada. Corrigida a configuração do mesmo testador, sem alterar a aplicação; uma versão deliberadamente divergente retornou 409 no servidor privado antes de retomar somente os fluxos restantes. Foram confirmados zero registros/modalidades de teste na base compartilhada.
+
+## Gráficos de ocupação — etapa 4 de 6
+
+- Acrescentada a área protegida `/graficos` à navegação, com a opção Ocupação ativa. Faturamento aparece desabilitado e identificado como etapa 5/6; nenhum gráfico financeiro foi iniciado.
+- Os filtros desta área são independentes dos filtros do histórico: dia, intervalo inclusivo ou meses escolhidos, modalidade e turma/horário. As consultas usam os registros persistidos da API; modalidades não são filtradas na consulta para preservar a comparação entre todas.
+- Implementados gráfico de rosca de uma modalidade (ocupação e complemento até 100%), colunas de comparação de modalidades com escala fixa de 0 a 100% e evolução em colunas por dia ou mês. A tabela de apoio informa período, modalidade, turma/horário, percentual e se a origem é percentual informado ou média dos percentuais informados.
+- Consolidação mensal respeita o consolidado informado por modalidade e turma/horário; sem ele, usa média aritmética simples dos diários. Intervalos parciais usam somente diários. Vários períodos usam média simples, com cobertura parcial explícita; lacunas permanecem nulas, nunca barras de 0%. Percentuais não são somados nem ponderados por capacidade.
+- Atualização manual, busca ao abrir/retornar à janela, carregamento, erro e vazio estão cobertos. A página de gráficos é carregada sob demanda; nenhuma migração, rota ou gravação financeira foi adicionada.
+
+### Verificações
+
+- 6 testes de consolidação dos gráficos passaram, cobrindo comparação por modalidade, precedência mensal por escopo, intervalos parciais, média de períodos, cobertura incompleta e dias ausentes sem zero.
+- 16 testes do importador e 7 testes das metas/utilitários financeiros passaram como regressões; typecheck do app passou.
+- Build Vite passou. A página de gráficos ficou em chunk separado de 441 kB; o chunk de entrada mantém o aviso preexistente de tamanho. Permanecem os avisos de sourcemap das peças de tooltip/label.
+- Workflow web reiniciado sem erros de inicialização. A captura do caminho `/graficos` sem sessão mostrou a página pública de entrada; a interface autenticada dos gráficos não pôde ser conferida visualmente pelo navegador de validação. A área preserva a autenticação existente.
+- Nenhum dado de teste foi gravado na base compartilhada; não houve migração ou publicação em produção.
 - Durante preenchimento nativo de datas ocorreram leituras transitórias 400 para entradas intermediárias; os intervalos finais retornaram 200 e resultados corretos. Sem transbordamento horizontal no celular; controles e janela de modalidades utilizáveis.
 - A limpeza dos testes não depende apenas de sinal ao processo: após parar o servidor, `node lib/db/scripts/cleanup-occupancy-test.mjs` valida o nome e remove exclusivamente o esquema privado caso a finalização assíncrona não o tenha removido.
+
+## Gráficos financeiros — etapa 5 de 6
+
+- A área **Faturamento** em `/graficos` agora usa a mesma API agregadora da Scoreboard e aceita mês atual, mês específico, vários meses, intervalo inclusivo e histórico completo, além dos filtros de produto e modalidade.
+- Incluídos gráficos de vendas brutas por modalidade e produto, evolução mensal de vendas/estornos/líquido, participação em rosca usando somente vendas positivas e quantidade de unidades por produto. Os agrupamentos e os meses são conferidos contra os totais oficiais; vendas sem vínculo permanecem como **Não classificado**.
+- Produtos agora podem receber um vínculo opcional e explícito com uma modalidade na edição de Produtos. O nome do plano não é usado para inferir a modalidade. Alterar o vínculo reclassifica as vendas históricas nos gráficos, sem alterar datas, quantidades ou valores registrados.
+- A Scoreboard passa a devolver o vínculo de modalidade por produto e aceita `modalityId` em seu filtro, preservando a agregação separada de vendas e estornos por data, inclusive valores líquidos negativos.
+- Comparação de metas usa o líquido oficial apenas para escopos cadastrados (geral ou produto), sinaliza cobertura mensal parcial e não compara metas em intervalos parciais. Um filtro somente por modalidade não recebe meta inventada.
+
+### Verificações
+
+- 4 testes de agregação dos gráficos financeiros passaram; 6 testes de consolidação de ocupação e 7 testes de metas/utilitários passaram como regressão.
+- Os 5 testes de integração da API de vendas passaram em esquema PostgreSQL isolado, incluindo modalidade explícita, filtro, vendas não classificadas e conciliação de venda/estorno/líquido. A consulta posterior confirmou zero registros de teste correspondentes na base compartilhada.
+- Typecheck do monorepo e build Vite passaram. O chunk de gráficos ficou em 463 kB; permanecem os avisos preexistentes de sourcemap e tamanho do bundle principal.
+- A coluna e o índice de modalidade foram aplicados somente ao banco de desenvolvimento; não houve alteração ou publicação em produção.
+- Os workflows web e API reiniciaram sem erros. A captura de `/graficos` sem sessão mostrou a página pública de entrada; a interface autenticada dos gráficos não pôde ser conferida visualmente pelo navegador de validação. A autenticação existente foi mantida.
+
+## Relatórios, backup e aceite — etapa 6 de 6
+
+- Os endpoints HTTP de exportação e restauração de backup agora usam a conexão injetada pelo router, inclusive na prévia e nas restaurações V1/V2. A geração do backup lê os dados em uma transação repeatable-read.
+- Foi acrescentado um teste HTTP isolado que confirma bloqueio para usuários anônimos e não autorizados, exportação a partir do esquema injetado, prévia sem inserções e repetição da restauração sem duplicar registros.
+- O cenário fictício de outubro/novembro foi conferido pela API e pela planilha: vendas R$ 2.560,00; estornos R$ 960,00; líquido R$ 1.600,00; quantidade 12; produtos e meses conciliados. Também foram verificados filtro de produto em novembro (líquido -R$ 440,00), estorno no dia 15 sem venda no dia (líquido -R$ 660,00) e metas gerais com 61%, 38%, 53,33% e falta de R$ 1.400,00.
+- O verificador gera e reabre um arquivo XLSX real, confirma abas, valores numéricos, textos literais e resumos. Também valida backup mensal com dependências, prévia, restauração em tabelas temporárias, reenvio idempotente, conflitos, payload inválido, rollback e mês vazio.
+
+### Verificações
+
+- `pnpm --filter @workspace/api-server run verify-sales-backup`: 11 verificações aprovadas usando tabelas temporárias em uma transação revertida; a contagem e a soma da tabela pública de vendas permaneceram iguais.
+- `pnpm --filter @workspace/api-server run test:integration`: 7/7 testes passaram, incluindo autorização dos três endpoints de backup e uso do banco isolado.
+- `pnpm -w run typecheck`: passou.
+- Workflow da API recompilado e iniciado sem erros após a correção das rotas; nenhum schema de produção foi alterado.
+- O build Vite e os testes de utilitários do frontend passaram na etapa anterior e não houve alteração de código do frontend nesta etapa.
+- Limitação: a interface autenticada não foi visualmente validada porque o navegador de preview não possui sessão; nenhuma autenticação foi removida ou contornada. Não houve gravação de massa fictícia na base compartilhada nem publicação em produção.

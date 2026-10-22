@@ -37,6 +37,8 @@ export const OccupancyRecordKind = {
   monthly: 'monthly',
 } as const;
 
+export type OccupancyRecordSourceCells = {[key: string]: string} | null;
+
 export interface OccupancyRecord {
   id: string;
   kind: OccupancyRecordKind;
@@ -53,6 +55,13 @@ export interface OccupancyRecord {
   className: string | null;
   /** @nullable */
   notes: string | null;
+  /** @nullable */
+  sourceFileHash: string | null;
+  /** @nullable */
+  sourceSheet: string | null;
+  /** @nullable */
+  sourceCell: string | null;
+  sourceCells: OccupancyRecordSourceCells;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -105,6 +114,102 @@ export type OccupancyRecordUpdate = OccupancyRecordInput & {
 export interface OccupancyRemovalInput {
   /** @minimum 1 */
   version: number;
+}
+
+export interface OccupancyImportSourceCells {[key: string]: string}
+
+export type OccupancyImportRowInput = OccupancyRecordInput & {
+  /** @minimum 0 */
+  index: number;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  sourceSheet: string;
+  /** @pattern ^[A-Z]{1,4}[1-9][0-9]*$ */
+  sourceCell: string;
+  sourceCells: OccupancyImportSourceCells;
+};
+
+export interface OccupancyImportPreviewInput {
+  /** @pattern ^[a-f0-9]{64}$ */
+  fileHash: string;
+  /**
+     * @minItems 1
+     * @maxItems 250
+     */
+  entries: OccupancyImportRowInput[];
+}
+
+export type OccupancyImportPreviewRowStatus = typeof OccupancyImportPreviewRowStatus[keyof typeof OccupancyImportPreviewRowStatus];
+
+
+export const OccupancyImportPreviewRowStatus = {
+  new: 'new',
+  already_imported: 'already_imported',
+  conflict: 'conflict',
+  duplicate_in_file: 'duplicate_in_file',
+} as const;
+
+export interface OccupancyImportPreviewRow {
+  /** @minimum 0 */
+  index: number;
+  status: OccupancyImportPreviewRowStatus;
+  message: string;
+  existingRecord: OccupancyRecord | null;
+}
+
+export interface OccupancyImportPreviewResponse {
+  rows: OccupancyImportPreviewRow[];
+}
+
+export interface OccupancyImportCommitEntry {
+  record: OccupancyImportRowInput;
+  existingRecordId?: string;
+  /** @minimum 1 */
+  expectedVersion?: number;
+}
+
+export interface OccupancyImportCommitInput {
+  /** @pattern ^[a-f0-9]{64}$ */
+  fileHash: string;
+  /**
+     * @minItems 1
+     * @maxItems 250
+     */
+  entries: OccupancyImportCommitEntry[];
+}
+
+export type OccupancyImportCommitRowStatus = typeof OccupancyImportCommitRowStatus[keyof typeof OccupancyImportCommitRowStatus];
+
+
+export const OccupancyImportCommitRowStatus = {
+  inserted: 'inserted',
+  updated: 'updated',
+  already_imported: 'already_imported',
+  conflict: 'conflict',
+  duplicate_in_batch: 'duplicate_in_batch',
+} as const;
+
+export interface OccupancyImportCommitRow {
+  /** @minimum 0 */
+  index: number;
+  status: OccupancyImportCommitRowStatus;
+  /** @nullable */
+  id: string | null;
+  message: string;
+}
+
+export interface OccupancyImportCommitResponse {
+  rows: OccupancyImportCommitRow[];
+  /** @minimum 0 */
+  inserted: number;
+  /** @minimum 0 */
+  updated: number;
+  /** @minimum 0 */
+  alreadyImported: number;
+  /** @minimum 0 */
+  conflicts: number;
 }
 
 export interface HealthStatus {
@@ -227,6 +332,8 @@ export interface Product {
      */
   suggestedPriceCents: number;
   isActive: boolean;
+  /** @nullable */
+  modalityId: string | null;
   /** @minimum 1 */
   version: number;
   createdAt: string;
@@ -245,6 +352,8 @@ export interface ProductInput {
      */
   suggestedPriceCents: number;
   isActive: boolean;
+  /** @nullable */
+  modalityId?: string | null;
 }
 
 export type CreateProductInput = ProductInput & {
@@ -467,6 +576,10 @@ export type SalesScoreboardProduct = SalesScoreboardTotals & ({
   /** @nullable */
   productId: string | null;
   productName: string;
+  /** @nullable */
+  modalityId: string | null;
+  /** @nullable */
+  modalityName: string | null;
 });
 
 export type SalesScoreboardMonth = SalesScoreboardTotals & {
@@ -797,6 +910,7 @@ toDate?: string;
  */
 months?: string[];
 productId?: string;
+modalityId?: string;
 };
 
 export type GetMonthlySalesBackupParams = {

@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { CalendarDays, CircleHelp, Gauge, Layers, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react';
+import { CalendarDays, CircleHelp, Gauge, Layers, Pencil, Plus, RefreshCw, Trash2, Upload, X } from 'lucide-react';
 import {
   getGetOccupancyModalitiesQueryKey,
   getGetOccupancyRecordsQueryKey,
@@ -16,6 +16,7 @@ import type { GetOccupancyRecordsParams, OccupancyModality, OccupancyRecord, Occ
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { formatMonthKey, getSaoPauloMonthKey } from '@/lib/sales-utils';
+import OccupancyImportDialog from '@/components/occupancy-import-dialog';
 
 type Kind = 'daily' | 'monthly';
 type FilterMode = 'all' | 'day' | 'range' | 'months';
@@ -103,6 +104,7 @@ export default function OccupancyManagement() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const deleteLock = useRef(false);
   const [modalitiesOpen, setModalitiesOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const filterInvalid = (filterMode === 'day' && !filterDay)
     || (filterMode === 'range' && (!filterFrom || !filterTo || filterFrom > filterTo))
@@ -268,6 +270,7 @@ export default function OccupancyManagement() {
           <p className="mt-1 max-w-[560px] text-sm text-[#77717f]">Registre a ocupação das aulas como ela chega do sistema de presença. Cada percentual fica como foi informado, por dia ou como consolidado do mês.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => setImportOpen(true)} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#d7f500] px-4 text-sm font-extrabold text-[#262b15] transition hover:bg-[#c9e600]" data-testid="button-import-occupancy"><Upload size={15} /> Importar ocupação</button>
           <button type="button" onClick={() => setModalitiesOpen(true)} className="inline-flex h-11 items-center gap-2 rounded-xl border border-[#ded7e7] bg-white px-4 text-sm font-bold text-[#5d4a78] transition hover:bg-[#f7f4fa]" data-testid="button-manage-modalities"><Layers size={15} /> Modalidades</button>
           <button type="button" onClick={refreshBase} disabled={isRefreshing} aria-busy={isRefreshing} className="inline-flex h-11 items-center gap-2 rounded-xl border border-[#ded7e7] bg-white px-4 text-sm font-bold text-[#5d4a78] transition hover:bg-[#f7f4fa] disabled:cursor-wait disabled:opacity-65" data-testid="button-refresh-occupancy"><RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} /> {isRefreshing ? 'Atualizando…' : 'Atualizar base'}</button>
         </div>
@@ -477,6 +480,7 @@ export default function OccupancyManagement() {
       </AlertDialog>
 
       <ModalitiesDialog open={modalitiesOpen} onOpenChange={setModalitiesOpen} modalities={modalities} isLoading={modalitiesQuery.isLoading} isError={modalitiesQuery.isError} onRetry={refreshBase} onChanged={invalidateAll} />
+      <OccupancyImportDialog open={importOpen} onOpenChange={setImportOpen} onImported={() => { void invalidateAll(); }} />
     </div>
   );
 }

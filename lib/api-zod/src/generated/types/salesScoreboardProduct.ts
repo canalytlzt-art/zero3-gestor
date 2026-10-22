@@ -11,4 +11,8 @@ export type SalesScoreboardProduct = SalesScoreboardTotals & ({
   /** @nullable */
   productId: string | null;
   productName: string;
+  /** @nullable */
+  modalityId: string | null;
+  /** @nullable */
+  modalityName: string | null;
 });

@@ -53,6 +53,7 @@ import {
 } from "@workspace/api-zod";
 import {
   db,
+  occupancyModalitiesTable,
   productsTable,
   salesGoalsTable,
   salesHistoryTable,
@@ -1176,9 +1177,20 @@ export function createSalesRouter(
       res.status(400).json({ error: "Enter a valid product name" });
       return;
     }
-    const actorId = getAuth(req).userId!;
+    const actorId = getUserId(req)!;
+    if (parsed.data.modalityId) {
+      const [modality] = await database
+        .select({ id: occupancyModalitiesTable.id })
+        .from(occupancyModalitiesTable)
+        .where(eq(occupancyModalitiesTable.id, parsed.data.modalityId))
+        .limit(1);
+      if (!modality) {
+        res.status(400).json({ error: "Selected modality does not exist" });
+        return;
+      }
+    }
     try {
-      const result = await db.transaction(async (tx) =>
+      const result = await database.transaction(async (tx) =>
         runIdempotent(
           tx,
           {
@@ -1205,6 +1217,7 @@ export function createSalesRouter(
                 name,
                 normalizedName,
                 suggestedPriceCents: parsed.data.suggestedPriceCents,
+                modalityId: parsed.data.modalityId ?? null,
                 isActive: parsed.data.isActive,
               })
               .returning();
@@ -1254,9 +1267,20 @@ export function createSalesRouter(
       res.status(400).json({ error: "Enter a valid product name" });
       return;
     }
-    const actorId = getAuth(req).userId!;
+    const actorId = getUserId(req)!;
+    if (parsed.data.modalityId) {
+      const [modality] = await database
+        .select({ id: occupancyModalitiesTable.id })
+        .from(occupancyModalitiesTable)
+        .where(eq(occupancyModalitiesTable.id, parsed.data.modalityId))
+        .limit(1);
+      if (!modality) {
+        res.status(400).json({ error: "Selected modality does not exist" });
+        return;
+      }
+    }
     try {
-      const result = await db.transaction(async (tx) =>
+      const result = await database.transaction(async (tx) =>
         runIdempotent(
           tx,
           {
@@ -1293,6 +1317,10 @@ export function createSalesRouter(
                 name,
                 normalizedName,
                 suggestedPriceCents: parsed.data.suggestedPriceCents,
+                modalityId:
+                  parsed.data.modalityId === undefined
+                    ? current.modalityId
+                    : parsed.data.modalityId,
                 isActive: parsed.data.isActive,
                 version: current.version + 1,
                 updatedAt: new Date(),
@@ -1372,6 +1400,7 @@ export function createSalesRouter(
       toDate: queryDate(req.query.toDate),
       months: monthsInput,
       productId: req.query.productId,
+      modalityId: req.query.modalityId,
     });
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.message });
@@ -1426,22 +1455,31 @@ export function createSalesRouter(
       saleFilters.push(eq(salesTable.productId, parsed.data.productId));
       refundFilters.push(eq(salesTable.productId, parsed.data.productId));
     }
+    if (parsed.data.modalityId) {
+      saleFilters.push(eq(productsTable.modalityId, parsed.data.modalityId));
+      refundFilters.push(eq(productsTable.modalityId, parsed.data.modalityId));
+    }
 
     const saleMonth = sql<string>`to_char(${salesTable.saleDate}, 'YYYY-MM')`;
     const saleRows = await database
       .select({
         productId: salesTable.productId,
         productName: sql<string>`coalesce(${productsTable.name}, ${salesTable.productName}, 'Não categorizado')`,
+        modalityId: productsTable.modalityId,
+        modalityName: occupancyModalitiesTable.name,
         month: saleMonth,
         quantity: sql<string>`coalesce(sum(${salesTable.quantity}), 0)::text`,
         salesCents: sql<string>`coalesce(sum(${salesTable.totalCents}), 0)::text`,
       })
       .from(salesTable)
       .leftJoin(productsTable, eq(productsTable.id, salesTable.productId))
+      .leftJoin(occupancyModalitiesTable, eq(occupancyModalitiesTable.id, productsTable.modalityId))
       .where(and(...saleFilters))
       .groupBy(
         salesTable.productId,
         productsTable.name,
+        productsTable.modalityId,
+        occupancyModalitiesTable.name,
         salesTable.productName,
         saleMonth,
       );
@@ -1451,16 +1489,21 @@ export function createSalesRouter(
       .select({
         productId: salesTable.productId,
         productName: sql<string>`coalesce(${productsTable.name}, ${salesTable.productName}, 'Não categorizado')`,
+        modalityId: productsTable.modalityId,
+        modalityName: occupancyModalitiesTable.name,
         month: refundMonth,
         refundCents: sql<string>`coalesce(sum(${salesRefundsTable.amountCents}), 0)::text`,
       })
       .from(salesRefundsTable)
       .innerJoin(salesTable, eq(salesTable.id, salesRefundsTable.saleId))
       .leftJoin(productsTable, eq(productsTable.id, salesTable.productId))
+      .leftJoin(occupancyModalitiesTable, eq(occupancyModalitiesTable.id, productsTable.modalityId))
       .where(and(...refundFilters))
       .groupBy(
         salesTable.productId,
         productsTable.name,
+        productsTable.modalityId,
+        occupancyModalitiesTable.name,
         salesTable.productName,
         refundMonth,
       );
@@ -1468,6 +1511,8 @@ export function createSalesRouter(
     type ProductAggregate = {
       productId: string | null;
       productName: string;
+      modalityId: string | null;
+      modalityName: string | null;
       quantity: bigint;
       salesCents: bigint;
       refundCents: bigint;
@@ -1482,6 +1527,8 @@ export function createSalesRouter(
     const getProduct = (
       productId: string | null,
       productName: string,
+      modalityId: string | null = null,
+      modalityName: string | null = null,
     ): ProductAggregate => {
       const key = productId ?? "__uncategorized__";
       const current = productTotals.get(key);
@@ -1489,6 +1536,8 @@ export function createSalesRouter(
       const created = {
         productId,
         productName,
+        modalityId,
+        modalityName,
         quantity: 0n,
         salesCents: 0n,
         refundCents: 0n,
@@ -1507,7 +1556,7 @@ export function createSalesRouter(
     for (const row of saleRows) {
       const quantity = BigInt(row.quantity);
       const salesCents = BigInt(row.salesCents);
-      const product = getProduct(row.productId, row.productName);
+      const product = getProduct(row.productId, row.productName, row.modalityId, row.modalityName);
       product.quantity += quantity;
       product.salesCents += salesCents;
       const month = getMonth(row.month);
@@ -1516,7 +1565,7 @@ export function createSalesRouter(
     }
     for (const row of refundRows) {
       const refundCents = BigInt(row.refundCents);
-      getProduct(row.productId, row.productName).refundCents += refundCents;
+      getProduct(row.productId, row.productName, row.modalityId, row.modalityName).refundCents += refundCents;
       getMonth(row.month).refundCents += refundCents;
     }
 
@@ -1539,11 +1588,19 @@ export function createSalesRouter(
     }
     if (parsed.data.productId && !productTotals.has(parsed.data.productId)) {
       const [product] = await database
-        .select({ id: productsTable.id, name: productsTable.name })
+        .select({
+          id: productsTable.id,
+          name: productsTable.name,
+          modalityId: productsTable.modalityId,
+          modalityName: occupancyModalitiesTable.name,
+        })
         .from(productsTable)
+        .leftJoin(occupancyModalitiesTable, eq(occupancyModalitiesTable.id, productsTable.modalityId))
         .where(eq(productsTable.id, parsed.data.productId))
         .limit(1);
-      if (product) getProduct(product.id, product.name);
+      if (product && (!parsed.data.modalityId || product.modalityId === parsed.data.modalityId)) {
+        getProduct(product.id, product.name, product.modalityId, product.modalityName);
+      }
     }
 
     const safeNumber = (value: bigint, label: string): number => {
@@ -1565,6 +1622,8 @@ export function createSalesRouter(
       .map((row) => ({
         productId: row.productId,
         productName: row.productName,
+        modalityId: row.modalityId,
+        modalityName: row.modalityName,
         quantity: safeNumber(row.quantity, "quantity"),
         salesCents: safeNumber(row.salesCents, "sales"),
         refundCents: safeNumber(row.refundCents, "refunds"),
@@ -2037,7 +2096,10 @@ export function createSalesRouter(
         .json({ error: "Informe um mês válido no formato AAAA-MM." });
       return;
     }
-    const backup = await buildMonthlySalesBackup(parsed.data.month);
+    const backup = await database.transaction(async (tx) => {
+      await tx.execute(sql`set transaction isolation level repeatable read`);
+      return buildMonthlySalesBackup(parsed.data.month, tx);
+    });
     const validated = monthlyBackupV2RuntimeSchema.safeParse(backup);
     if (
       !validated.success ||
@@ -2056,7 +2118,7 @@ export function createSalesRouter(
   async function previewLegacyBackup(backup: MonthlySalesBackupV1) {
     const saleIds = backup.sales.map(({ id }) => id);
     const existingSales = saleIds.length
-      ? await db
+      ? await database
           .select()
           .from(salesTable)
           .where(inArray(salesTable.id, saleIds))
@@ -2078,7 +2140,7 @@ export function createSalesRouter(
     ];
     const productKeys = productNames.map((name) => productNameKey(name));
     const existingProducts = productKeys.length
-      ? await db
+      ? await database
           .select()
           .from(productsTable)
           .where(inArray(productsTable.normalizedName, productKeys))
@@ -2086,7 +2148,7 @@ export function createSalesRouter(
     const existingProductsByName = new Map(
       existingProducts.map((product) => [product.normalizedName, product]),
     );
-    const existingGoals = await db
+    const existingGoals = await database
       .select()
       .from(salesGoalsTable)
       .where(
@@ -2207,7 +2269,7 @@ export function createSalesRouter(
       });
       return;
     }
-    const analysis = await db.transaction((tx) =>
+    const analysis = await database.transaction((tx) =>
       analyzeMonthlyBackupRestore(
         tx,
         backup.data as unknown as MonthlySalesBackupV2,
@@ -2235,9 +2297,9 @@ export function createSalesRouter(
         return;
       }
       const backup = validated.data as unknown as MonthlySalesBackupV2;
-      const actorId = getAuth(req).userId!;
+      const actorId = getUserId(req)!;
       try {
-        const result = await db.transaction((tx) =>
+        const result = await database.transaction((tx) =>
           applyMonthlyBackupRestore(tx, backup, actorId),
         );
         res.json(RestoreMonthlySalesBackupResponse.parse(result));
@@ -2318,7 +2380,7 @@ export function createSalesRouter(
 
     const actorId = getUserId(req)!;
     const legacyPreview = await previewLegacyBackup(backup);
-    const restored = await db.transaction(async (tx) => {
+    const restored = await database.transaction(async (tx) => {
       await tx.execute(
         sql`lock table products, sales, sales_refunds, sales_goals, sales_history in share row exclusive mode`,
       );

@@ -80,6 +80,10 @@ export const GetOccupancyRecordsResponseItem = zod.object({
   "percentage": zod.number().min(getOccupancyRecordsResponsePercentageMin).max(getOccupancyRecordsResponsePercentageMax),
   "className": zod.string().nullable(),
   "notes": zod.string().nullable(),
+  "sourceFileHash": zod.string().nullable(),
+  "sourceSheet": zod.string().nullable(),
+  "sourceCell": zod.string().nullable(),
+  "sourceCells": zod.union([zod.record(zod.string(), zod.string()),zod.null()]),
   "version": zod.number().int(),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
@@ -126,6 +130,10 @@ export const CreateOccupancyRecordResponse = zod.object({
   "percentage": zod.number().min(createOccupancyRecordResponsePercentageMin).max(createOccupancyRecordResponsePercentageMax),
   "className": zod.string().nullable(),
   "notes": zod.string().nullable(),
+  "sourceFileHash": zod.string().nullable(),
+  "sourceSheet": zod.string().nullable(),
+  "sourceCell": zod.string().nullable(),
+  "sourceCells": zod.union([zod.record(zod.string(), zod.string()),zod.null()]),
   "version": zod.number().int(),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
@@ -178,6 +186,10 @@ export const UpdateOccupancyRecordResponse = zod.object({
   "percentage": zod.number().min(updateOccupancyRecordResponsePercentageMin).max(updateOccupancyRecordResponsePercentageMax),
   "className": zod.string().nullable(),
   "notes": zod.string().nullable(),
+  "sourceFileHash": zod.string().nullable(),
+  "sourceSheet": zod.string().nullable(),
+  "sourceCell": zod.string().nullable(),
+  "sourceCells": zod.union([zod.record(zod.string(), zod.string()),zod.null()]),
   "version": zod.number().int(),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
@@ -196,6 +208,153 @@ export const DeleteOccupancyRecordBody = zod.object({
 })
 
 export const DeleteOccupancyRecordResponse = zod.void()
+
+
+export const previewOccupancyImportBodyFileHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const previewOccupancyImportBodyEntriesItemOnePeriodMin = 7;
+export const previewOccupancyImportBodyEntriesItemOnePeriodMax = 10;
+
+export const previewOccupancyImportBodyEntriesItemOneModalityNameMax = 120;
+
+export const previewOccupancyImportBodyEntriesItemOnePercentageMin = 0;
+export const previewOccupancyImportBodyEntriesItemOnePercentageMax = 100;
+
+export const previewOccupancyImportBodyEntriesItemOneClassNameMax = 120;
+
+export const previewOccupancyImportBodyEntriesItemOneNotesMax = 1000;
+
+export const previewOccupancyImportBodyEntriesItemTwoIndexMin = 0;
+
+export const previewOccupancyImportBodyEntriesItemTwoSourceSheetMax = 120;
+
+export const previewOccupancyImportBodyEntriesItemTwoSourceCellRegExp = new RegExp('^[A-Z]{1,4}[1-9][0-9]*$');
+export const previewOccupancyImportBodyEntriesItemTwoSourceCellsRegExpOne = new RegExp('^[A-Z]{1,4}[1-9][0-9]*$');
+export const previewOccupancyImportBodyEntriesMax = 250;
+
+
+
+export const PreviewOccupancyImportBody = zod.object({
+  "fileHash": zod.string().regex(previewOccupancyImportBodyFileHashRegExp),
+  "entries": zod.array(zod.object({
+  "kind": zod.enum(['daily', 'monthly']),
+  "period": zod.string().min(previewOccupancyImportBodyEntriesItemOnePeriodMin).max(previewOccupancyImportBodyEntriesItemOnePeriodMax).describe('AAAA-MM-DD para diário ou AAAA-MM para mensal'),
+  "modalityId": zod.string().uuid().optional(),
+  "modalityName": zod.string().min(1).max(previewOccupancyImportBodyEntriesItemOneModalityNameMax),
+  "percentage": zod.number().min(previewOccupancyImportBodyEntriesItemOnePercentageMin).max(previewOccupancyImportBodyEntriesItemOnePercentageMax),
+  "className": zod.string().max(previewOccupancyImportBodyEntriesItemOneClassNameMax).nullish(),
+  "notes": zod.string().max(previewOccupancyImportBodyEntriesItemOneNotesMax).nullish()
+}).and(zod.object({
+  "index": zod.number().int().min(previewOccupancyImportBodyEntriesItemTwoIndexMin),
+  "sourceSheet": zod.string().min(1).max(previewOccupancyImportBodyEntriesItemTwoSourceSheetMax),
+  "sourceCell": zod.string().regex(previewOccupancyImportBodyEntriesItemTwoSourceCellRegExp),
+  "sourceCells": zod.record(zod.string(), zod.string().regex(previewOccupancyImportBodyEntriesItemTwoSourceCellsRegExpOne))
+}))).min(1).max(previewOccupancyImportBodyEntriesMax)
+})
+
+export const previewOccupancyImportResponseRowsItemIndexMin = 0;
+
+export const previewOccupancyImportResponseRowsItemExistingRecordOnePercentageMin = 0;
+export const previewOccupancyImportResponseRowsItemExistingRecordOnePercentageMax = 100;
+
+
+
+export const PreviewOccupancyImportResponse = zod.object({
+  "rows": zod.array(zod.object({
+  "index": zod.number().int().min(previewOccupancyImportResponseRowsItemIndexMin),
+  "status": zod.enum(['new', 'already_imported', 'conflict', 'duplicate_in_file']),
+  "message": zod.string(),
+  "existingRecord": zod.union([zod.object({
+  "id": zod.string().uuid(),
+  "kind": zod.enum(['daily', 'monthly']),
+  "period": zod.string(),
+  "month": zod.string(),
+  "modalityId": zod.string().uuid(),
+  "modalityName": zod.string(),
+  "percentage": zod.number().min(previewOccupancyImportResponseRowsItemExistingRecordOnePercentageMin).max(previewOccupancyImportResponseRowsItemExistingRecordOnePercentageMax),
+  "className": zod.string().nullable(),
+  "notes": zod.string().nullable(),
+  "sourceFileHash": zod.string().nullable(),
+  "sourceSheet": zod.string().nullable(),
+  "sourceCell": zod.string().nullable(),
+  "sourceCells": zod.union([zod.record(zod.string(), zod.string()),zod.null()]),
+  "version": zod.number().int(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}),zod.null()])
+}))
+})
+
+
+export const commitOccupancyImportBodyFileHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const commitOccupancyImportBodyEntriesItemRecordOnePeriodMin = 7;
+export const commitOccupancyImportBodyEntriesItemRecordOnePeriodMax = 10;
+
+export const commitOccupancyImportBodyEntriesItemRecordOneModalityNameMax = 120;
+
+export const commitOccupancyImportBodyEntriesItemRecordOnePercentageMin = 0;
+export const commitOccupancyImportBodyEntriesItemRecordOnePercentageMax = 100;
+
+export const commitOccupancyImportBodyEntriesItemRecordOneClassNameMax = 120;
+
+export const commitOccupancyImportBodyEntriesItemRecordOneNotesMax = 1000;
+
+export const commitOccupancyImportBodyEntriesItemRecordTwoIndexMin = 0;
+
+export const commitOccupancyImportBodyEntriesItemRecordTwoSourceSheetMax = 120;
+
+export const commitOccupancyImportBodyEntriesItemRecordTwoSourceCellRegExp = new RegExp('^[A-Z]{1,4}[1-9][0-9]*$');
+export const commitOccupancyImportBodyEntriesItemRecordTwoSourceCellsRegExpOne = new RegExp('^[A-Z]{1,4}[1-9][0-9]*$');
+
+export const commitOccupancyImportBodyEntriesMax = 250;
+
+
+
+export const CommitOccupancyImportBody = zod.object({
+  "fileHash": zod.string().regex(commitOccupancyImportBodyFileHashRegExp),
+  "entries": zod.array(zod.object({
+  "record": zod.object({
+  "kind": zod.enum(['daily', 'monthly']),
+  "period": zod.string().min(commitOccupancyImportBodyEntriesItemRecordOnePeriodMin).max(commitOccupancyImportBodyEntriesItemRecordOnePeriodMax).describe('AAAA-MM-DD para diário ou AAAA-MM para mensal'),
+  "modalityId": zod.string().uuid().optional(),
+  "modalityName": zod.string().min(1).max(commitOccupancyImportBodyEntriesItemRecordOneModalityNameMax),
+  "percentage": zod.number().min(commitOccupancyImportBodyEntriesItemRecordOnePercentageMin).max(commitOccupancyImportBodyEntriesItemRecordOnePercentageMax),
+  "className": zod.string().max(commitOccupancyImportBodyEntriesItemRecordOneClassNameMax).nullish(),
+  "notes": zod.string().max(commitOccupancyImportBodyEntriesItemRecordOneNotesMax).nullish()
+}).and(zod.object({
+  "index": zod.number().int().min(commitOccupancyImportBodyEntriesItemRecordTwoIndexMin),
+  "sourceSheet": zod.string().min(1).max(commitOccupancyImportBodyEntriesItemRecordTwoSourceSheetMax),
+  "sourceCell": zod.string().regex(commitOccupancyImportBodyEntriesItemRecordTwoSourceCellRegExp),
+  "sourceCells": zod.record(zod.string(), zod.string().regex(commitOccupancyImportBodyEntriesItemRecordTwoSourceCellsRegExpOne))
+})),
+  "existingRecordId": zod.string().uuid().optional(),
+  "expectedVersion": zod.number().int().min(1).optional()
+})).min(1).max(commitOccupancyImportBodyEntriesMax)
+})
+
+export const commitOccupancyImportResponseRowsItemIndexMin = 0;
+
+export const commitOccupancyImportResponseInsertedMin = 0;
+
+export const commitOccupancyImportResponseUpdatedMin = 0;
+
+export const commitOccupancyImportResponseAlreadyImportedMin = 0;
+
+export const commitOccupancyImportResponseConflictsMin = 0;
+
+
+
+export const CommitOccupancyImportResponse = zod.object({
+  "rows": zod.array(zod.object({
+  "index": zod.number().int().min(commitOccupancyImportResponseRowsItemIndexMin),
+  "status": zod.enum(['inserted', 'updated', 'already_imported', 'conflict', 'duplicate_in_batch']),
+  "id": zod.string().uuid().nullable(),
+  "message": zod.string()
+})),
+  "inserted": zod.number().int().min(commitOccupancyImportResponseInsertedMin),
+  "updated": zod.number().int().min(commitOccupancyImportResponseUpdatedMin),
+  "alreadyImported": zod.number().int().min(commitOccupancyImportResponseAlreadyImportedMin),
+  "conflicts": zod.number().int().min(commitOccupancyImportResponseConflictsMin)
+})
 
 
 /**
@@ -230,6 +389,7 @@ export const GetProductsResponseItem = zod.object({
   "normalizedName": zod.string(),
   "suggestedPriceCents": zod.number().int().min(getProductsResponseSuggestedPriceCentsMin).max(getProductsResponseSuggestedPriceCentsMax),
   "isActive": zod.boolean(),
+  "modalityId": zod.string().uuid().nullable(),
   "version": zod.number().int().min(1),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
@@ -250,7 +410,8 @@ export const createProductBodyOneSuggestedPriceCentsMax = 9007199254740991;
 export const CreateProductBody = zod.object({
   "name": zod.string().min(1).max(createProductBodyOneNameMax),
   "suggestedPriceCents": zod.number().int().min(createProductBodyOneSuggestedPriceCentsMin).max(createProductBodyOneSuggestedPriceCentsMax),
-  "isActive": zod.boolean()
+  "isActive": zod.boolean(),
+  "modalityId": zod.string().uuid().nullish()
 }).and(zod.object({
   "idempotencyKey": zod.string().uuid()
 }))
@@ -267,6 +428,7 @@ export const CreateProductResponse = zod.object({
   "normalizedName": zod.string(),
   "suggestedPriceCents": zod.number().int().min(createProductResponseSuggestedPriceCentsMin).max(createProductResponseSuggestedPriceCentsMax),
   "isActive": zod.boolean(),
+  "modalityId": zod.string().uuid().nullable(),
   "version": zod.number().int().min(1),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
@@ -291,7 +453,8 @@ export const updateProductBodyOneSuggestedPriceCentsMax = 9007199254740991;
 export const UpdateProductBody = zod.object({
   "name": zod.string().min(1).max(updateProductBodyOneNameMax),
   "suggestedPriceCents": zod.number().int().min(updateProductBodyOneSuggestedPriceCentsMin).max(updateProductBodyOneSuggestedPriceCentsMax),
-  "isActive": zod.boolean()
+  "isActive": zod.boolean(),
+  "modalityId": zod.string().uuid().nullish()
 }).and(zod.object({
   "idempotencyKey": zod.string().uuid(),
   "expectedVersion": zod.number().int().min(1)
@@ -309,6 +472,7 @@ export const UpdateProductResponse = zod.object({
   "normalizedName": zod.string(),
   "suggestedPriceCents": zod.number().int().min(updateProductResponseSuggestedPriceCentsMin).max(updateProductResponseSuggestedPriceCentsMax),
   "isActive": zod.boolean(),
+  "modalityId": zod.string().uuid().nullable(),
   "version": zod.number().int().min(1),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
@@ -519,7 +683,8 @@ export const GetSalesScoreboardQueryParams = zod.object({
   "fromDate": zod.date().optional(),
   "toDate": zod.date().optional(),
   "months": zod.array(zod.coerce.string().regex(getSalesScoreboardQueryMonthsItemRegExp)).optional(),
-  "productId": zod.coerce.string().uuid().optional()
+  "productId": zod.coerce.string().uuid().optional(),
+  "modalityId": zod.coerce.string().uuid().optional()
 })
 
 export const getSalesScoreboardResponseTotalsQuantityMin = 0;
@@ -575,7 +740,9 @@ export const GetSalesScoreboardResponse = zod.object({
   "netCents": zod.number().int().min(getSalesScoreboardResponseProductsItemOneNetCentsMin).max(getSalesScoreboardResponseProductsItemOneNetCentsMax)
 }).and(zod.object({
   "productId": zod.string().uuid().nullable(),
-  "productName": zod.string()
+  "productName": zod.string(),
+  "modalityId": zod.string().uuid().nullable(),
+  "modalityName": zod.string().nullable()
 }))),
   "months": zod.array(zod.object({
   "quantity": zod.number().int().min(getSalesScoreboardResponseMonthsItemOneQuantityMin).max(getSalesScoreboardResponseMonthsItemOneQuantityMax),

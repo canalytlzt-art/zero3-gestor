@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import { after, before, test } from "node:test";
 import express from "express";
-import { and, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as dbSchema from "@workspace/db/schema";
 import {
@@ -40,10 +40,19 @@ before(async () => {
   });
   testDatabase = drizzle(testPool, { schema: dbSchema });
   await testPool.query(`
+    CREATE TABLE occupancy_modalities (
+      id uuid PRIMARY KEY,
+      name text NOT NULL,
+      normalized_name text NOT NULL UNIQUE,
+      version integer NOT NULL DEFAULT 1,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
     CREATE TABLE products (
       id uuid PRIMARY KEY,
       name text NOT NULL,
       normalized_name text NOT NULL UNIQUE,
+      modality_id uuid REFERENCES occupancy_modalities(id) ON DELETE SET NULL,
       suggested_price_cents bigint NOT NULL DEFAULT 0,
       is_active boolean NOT NULL DEFAULT true,
       version integer NOT NULL DEFAULT 1,
@@ -278,10 +287,102 @@ async function recordSale(
   return sale.id;
 }
 
+test("Scoreboard modality filters preserve gross sales, refunds, net revenue, and unclassified products", async () => {
+  await withSalesApi(getTestDatabase(), async (baseUrl) => {
+    const modalityId = randomUUID();
+    const modalityName = `Modalidade teste ${randomUUID()}`;
+    await testPool!.query(
+      "INSERT INTO occupancy_modalities (id, name, normalized_name) VALUES ($1, $2, $3)",
+      [modalityId, modalityName, modalityName.toLocaleLowerCase("pt-BR")],
+    );
+
+    const productName = `Plano vinculado ${randomUUID()}`;
+    const productKey = randomUUID();
+    createdIdempotencyKeys.push(productKey);
+    const productResponse = await apiRequest(baseUrl, "/products", {
+      method: "POST",
+      body: {
+        name: productName,
+        suggestedPriceCents: 5000,
+        isActive: true,
+        modalityId,
+        idempotencyKey: productKey,
+      },
+    });
+    assert.equal(productResponse.status, 201);
+    const product = (await productResponse.json()) as { id: string; modalityId: string | null };
+    createdProductIds.push(product.id);
+    assert.equal(product.modalityId, modalityId);
+
+    const linkedSaleId = await recordSale(baseUrl, productName, "2097-11-05");
+    const unlinkedName = `Plano não classificado ${randomUUID()}`;
+    await recordSale(baseUrl, unlinkedName, "2097-11-06");
+    const refundKey = randomUUID();
+    createdIdempotencyKeys.push(refundKey);
+    const refundResponse = await apiRequest(baseUrl, `/sales/${linkedSaleId}/refunds`, {
+      method: "POST",
+      body: {
+        refundDate: "2097-11-12",
+        amountCents: 1200,
+        reason: "Estorno para teste isolado",
+        idempotencyKey: refundKey,
+      },
+    });
+    assert.equal(refundResponse.status, 201);
+    const refund = (await refundResponse.json()) as { id: string };
+    createdRefundIds.push(refund.id);
+
+    const filteredResponse = await apiRequest(
+      baseUrl,
+      `/sales/scoreboard?fromDate=2097-11-01&toDate=2097-11-30&modalityId=${modalityId}`,
+    );
+    assert.equal(filteredResponse.status, 200);
+    const filtered = (await filteredResponse.json()) as {
+      totals: { quantity: number; salesCents: number; refundCents: number; netCents: number };
+      products: Array<{ productName: string; modalityId: string | null; modalityName: string | null }>;
+      months: Array<{ month: string; quantity: number; salesCents: number; refundCents: number; netCents: number }>;
+    };
+    assert.deepEqual(filtered.totals, {
+      quantity: 1,
+      salesCents: 5000,
+      refundCents: 1200,
+      netCents: 3800,
+    });
+    assert.equal(filtered.products.length, 1);
+    assert.equal(filtered.products[0]?.productName, productName);
+    assert.equal(filtered.products[0]?.modalityId, modalityId);
+    assert.equal(filtered.products[0]?.modalityName, modalityName);
+    assert.deepEqual(filtered.months, [{
+      month: "2097-11",
+      quantity: 1,
+      salesCents: 5000,
+      refundCents: 1200,
+      netCents: 3800,
+    }]);
+
+    const allResponse = await apiRequest(
+      baseUrl,
+      "/sales/scoreboard?fromDate=2097-11-01&toDate=2097-11-30",
+    );
+    assert.equal(allResponse.status, 200);
+    const all = (await allResponse.json()) as {
+      totals: { quantity: number; salesCents: number; refundCents: number; netCents: number };
+      products: Array<{ productName: string; modalityId: string | null; modalityName: string | null }>;
+    };
+    assert.deepEqual(all.totals, {
+      quantity: 2,
+      salesCents: 10000,
+      refundCents: 1200,
+      netCents: 8800,
+    });
+    assert.equal(all.products.find(({ productName: name }) => name === unlinkedName)?.modalityId, null);
+  });
+});
+
 async function saveGoal(
   baseUrl: string,
   month: string,
-  productName: string,
+  productName: string | null,
   targetCents: number,
 ): Promise<{
   id: string;
@@ -847,5 +948,168 @@ test("refunds validate input, replay idempotently, and serialize concurrent bala
       refundCents: 5000,
       netCents: 0,
     });
+  });
+});
+
+test("monthly backup HTTP endpoints enforce access and use the isolated router database", async () => {
+  await withSalesApi(getTestDatabase(), async (baseUrl) => {
+    const month = "2098-04";
+    const saleDate = `${month}-02`;
+    await recordSale(baseUrl, "Backup isolado por API", saleDate);
+
+    const protectedRequests = [
+      { path: `/sales/backup?month=${month}`, method: "GET" },
+      { path: "/sales/restore/preview", method: "POST", body: {} },
+      { path: "/sales/restore", method: "POST", body: {} },
+    ];
+    for (const request of protectedRequests) {
+      const anonymous = await apiRequest(baseUrl, request.path, {
+        method: request.method,
+        body: request.body,
+        auth: "anonymous",
+      });
+      assert.equal(anonymous.status, 401, `${request.path} requires authentication`);
+      const blocked = await apiRequest(baseUrl, request.path, {
+        method: request.method,
+        body: request.body,
+        auth: "unauthorized",
+      });
+      assert.equal(blocked.status, 403, `${request.path} requires an authorized user`);
+    }
+
+    const backupResponse = await apiRequest(baseUrl, `/sales/backup?month=${month}`);
+    assert.equal(backupResponse.status, 200);
+    const backup = await backupResponse.json() as {
+      period: string;
+      counts: { periodSales: number; totalRecords: number };
+      sales: Array<{ record: { saleDate: string } }>;
+    };
+    assert.equal(backup.period, month);
+    assert.equal(backup.counts.periodSales, 1);
+    assert.equal(backup.sales[0]?.record.saleDate, saleDate);
+
+    const previewResponse = await apiRequest(baseUrl, "/sales/restore/preview", {
+      method: "POST",
+      body: backup,
+    });
+    assert.equal(previewResponse.status, 200);
+    const preview = await previewResponse.json() as {
+      blocked: boolean;
+      toInsert: { sales: number };
+      identical: { sales: number };
+    };
+    assert.equal(preview.blocked, false);
+    assert.equal(preview.toInsert.sales, 0);
+    assert.equal(preview.identical.sales, 1);
+
+    const restoreResponse = await apiRequest(baseUrl, "/sales/restore", {
+      method: "POST",
+      body: backup,
+    });
+    assert.equal(restoreResponse.status, 200);
+    const restored = await restoreResponse.json() as {
+      inserted: { sales: number };
+      identical: { sales: number };
+    };
+    assert.equal(restored.inserted.sales, 0);
+    assert.equal(restored.identical.sales, 1);
+    const snapshots = await getTestDatabase()
+      .select()
+      .from(salesHistoryTable)
+      .where(eq(salesHistoryTable.operation, "pre-restore-backup"));
+    assert.equal(snapshots.at(-1)?.actorId, "integration-user");
+  });
+});
+
+test("fictional October-November scenario reconciles scoreboard products, months, filters, and goals", async () => {
+  await withSalesApi(getTestDatabase(), async (baseUrl) => {
+    const records = [
+      { saleDate: "2026-10-05", productName: "Plano 12 aulas", quantity: 2, unitAmountCents: 30000 },
+      { saleDate: "2026-10-12", productName: "Plano 8 aulas", quantity: 3, unitAmountCents: 22000 },
+      { saleDate: "2026-10-20", productName: "Aula avulsa", quantity: 1, unitAmountCents: 6000 },
+      { saleDate: "2026-11-02", productName: "Plano 12 aulas", quantity: 3, unitAmountCents: 30000 },
+      { saleDate: "2026-11-07", productName: "Plano 8 aulas", quantity: 1, unitAmountCents: 22000 },
+      { saleDate: "2026-11-10", productName: "Aula avulsa", quantity: 2, unitAmountCents: 6000 },
+    ];
+    const saleIds: string[] = [];
+    const productIds = new Map<string, string>();
+    for (const record of records) {
+      const idempotencyKey = randomUUID();
+      createdIdempotencyKeys.push(idempotencyKey);
+      const response = await apiRequest(baseUrl, "/sales", {
+        method: "POST",
+        body: { ...record, notes: null, idempotencyKey },
+      });
+      assert.equal(response.status, 201);
+      const sale = await response.json() as { id: string; productId: string };
+      saleIds.push(sale.id);
+      createdSaleIds.push(sale.id);
+      createdProductIds.push(sale.productId);
+      productIds.set(record.productName, sale.productId);
+    }
+
+    const refunds = [
+      { saleIndex: 0, refundDate: "2026-10-21", amountCents: 10000, reason: "Parcial" },
+      { saleIndex: 1, refundDate: "2026-11-15", amountCents: 66000, reason: "Total em novembro" },
+      { saleIndex: 3, refundDate: "2026-11-16", amountCents: 20000, reason: "Parcial" },
+    ];
+    for (const refund of refunds) {
+      const idempotencyKey = randomUUID();
+      createdIdempotencyKeys.push(idempotencyKey);
+      const response = await apiRequest(baseUrl, `/sales/${saleIds[refund.saleIndex]}/refunds`, {
+        method: "POST",
+        body: { refundDate: refund.refundDate, amountCents: refund.amountCents, reason: refund.reason, idempotencyKey },
+      });
+      assert.equal(response.status, 201);
+      const saved = await response.json() as { id: string };
+      createdRefundIds.push(saved.id);
+    }
+
+    const octoberGoal = await saveGoal(baseUrl, "2026-10", null, 200000);
+    const novemberGoal = await saveGoal(baseUrl, "2026-11", null, 100000);
+    const rangeResponse = await apiRequest(baseUrl, "/sales/scoreboard?fromDate=2026-10-01&toDate=2026-11-30");
+    assert.equal(rangeResponse.status, 200);
+    const range = await rangeResponse.json() as {
+      totals: { quantity: number; salesCents: number; refundCents: number; netCents: number };
+      products: Array<{ productName: string; quantity: number; salesCents: number; refundCents: number; netCents: number }>;
+      months: Array<{ month: string; quantity: number; salesCents: number; refundCents: number; netCents: number }>;
+    };
+    assert.deepEqual(range.totals, { quantity: 12, salesCents: 256000, refundCents: 96000, netCents: 160000 });
+    assert.deepEqual(
+      Object.fromEntries(range.products.map(({ productName, quantity, salesCents, refundCents, netCents }) => [
+        productName, [quantity, salesCents, refundCents, netCents],
+      ])),
+      {
+        "Aula avulsa": [3, 18000, 0, 18000],
+        "Plano 12 aulas": [5, 150000, 30000, 120000],
+        "Plano 8 aulas": [4, 88000, 66000, 22000],
+      },
+    );
+    assert.deepEqual(range.months, [
+      { month: "2026-10", quantity: 6, salesCents: 132000, refundCents: 10000, netCents: 122000 },
+      { month: "2026-11", quantity: 6, salesCents: 124000, refundCents: 86000, netCents: 38000 },
+    ]);
+
+    const novemberPlanResponse = await apiRequest(
+      baseUrl,
+      `/sales/scoreboard?fromDate=2026-11-01&toDate=2026-11-30&productId=${productIds.get("Plano 8 aulas")}`,
+    );
+    assert.equal(novemberPlanResponse.status, 200);
+    const novemberPlan = await novemberPlanResponse.json() as {
+      totals: { quantity: number; salesCents: number; refundCents: number; netCents: number };
+    };
+    assert.deepEqual(novemberPlan.totals, { quantity: 1, salesCents: 22000, refundCents: 66000, netCents: -44000 });
+
+    const novemberDayResponse = await apiRequest(baseUrl, "/sales/scoreboard?fromDate=2026-11-15&toDate=2026-11-15");
+    assert.equal(novemberDayResponse.status, 200);
+    const novemberDay = await novemberDayResponse.json() as {
+      totals: { quantity: number; salesCents: number; refundCents: number; netCents: number };
+    };
+    assert.deepEqual(novemberDay.totals, { quantity: 0, salesCents: 0, refundCents: 66000, netCents: -66000 });
+
+    assert.equal(122000 / octoberGoal.targetCents * 100, 61);
+    assert.equal(38000 / novemberGoal.targetCents * 100, 38);
+    assert.equal((160000 / (octoberGoal.targetCents + novemberGoal.targetCents) * 100).toFixed(2), "53.33");
+    assert.equal(octoberGoal.targetCents + novemberGoal.targetCents - 160000, 140000);
   });
 });

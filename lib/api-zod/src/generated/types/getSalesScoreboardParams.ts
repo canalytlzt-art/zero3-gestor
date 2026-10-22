@@ -14,4 +14,5 @@ toDate?: Date;
  */
 months?: string[];
 productId?: string;
+modalityId?: string;
 };

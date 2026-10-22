@@ -105,6 +105,37 @@ try {
     assert.equal(empty.Sheets["Resumo por plano"].B9.v, 0);
     check("real XLSX round-trip: numeric money, literal text, refund dates, negative net, and empty period");
 
+    const combinedWorkbook = createSalesWorkbook(
+      sourceSales as never,
+      sourceRefunds as never,
+      sourceProducts as never,
+      { fromDate: "2026-10-01", toDate: "2026-11-30", productName: "", generatedAt: "isolated test" },
+    );
+    const combinedBytes = XLSX.write(combinedWorkbook, { type: "buffer", bookType: "xlsx" });
+    const combinedOpened = XLSX.read(combinedBytes, { type: "buffer", cellFormula: true });
+    const combinedRows = XLSX.utils.sheet_to_json(
+      combinedOpened.Sheets["Resumo por plano"], { header: 1, raw: true },
+    ) as unknown[][];
+    const valueFor = (label: string) => combinedRows.find((row) => row[0] === label)?.[1];
+    assert.equal(valueFor("Vendas registradas (R$)"), 2560);
+    assert.equal(valueFor("Estornos (R$)"), 960);
+    assert.equal(valueFor("Faturamento após estornos (R$)"), 1600);
+    assert.equal(valueFor("Quantidade vendida"), 12);
+    const productHeader = combinedRows.findIndex(
+      (row) => row[0] === "Plano/produto" && row[1] === "Quantidade vendida",
+    );
+    assert.deepEqual(combinedRows.slice(productHeader + 1, productHeader + 4), [
+      ["Aula avulsa", 3, 180, 0, 180],
+      ["Plano 12 aulas", 5, 1500, 300, 1200],
+      ["Plano 8 aulas", 4, 880, 660, 220],
+    ]);
+    const monthlyHeader = combinedRows.findIndex((row) => row[0] === "Mês/ano");
+    assert.deepEqual(combinedRows.slice(monthlyHeader + 1, monthlyHeader + 3), [
+      ["2026-10", 6, 1320, 100, 1220],
+      ["2026-11", 6, 1240, 860, 380],
+    ]);
+    check("October-November acceptance totals reconcile in numeric XLSX summary, products, and months");
+
     await tx.execute(sql`truncate pg_temp.sales_history, pg_temp.sales_refunds, pg_temp.sales_goals, pg_temp.sales, pg_temp.products`);
     const preview = await analyzeMonthlyBackupRestore(tx, backup as never);
     assert.deepEqual(preview.preview.dependencyMonths, ["2026-10"]);

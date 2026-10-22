@@ -145,3 +145,89 @@ test("concurrent duplicates do not sum or overwrite, including blank and normali
   assert.equal(rows.body.length, 2);
   assert.equal(rows.body.every((r: { percentage: number }) => r.percentage === 70), true);
 });
+
+test("occupancy imports preview without side effects, are idempotent, and require versioned consent to update", async () => {
+  const fileHash = "a".repeat(64);
+  const entry = {
+    index: 0, sourceSheet: "Matrículas", sourceCell: "C2",
+    sourceCells: { period: "A2", modality: "B2", percentage: "C2" },
+    kind: "daily", period: "2026-09-01", modalityName: "Import Pilates",
+    percentage: 75.25, className: "18h",
+  };
+  const countModality = async () => Number((await testPool.query(
+    "SELECT count(*)::int AS count FROM occupancy_modalities WHERE normalized_name=$1", ["import pilates"],
+  )).rows[0].count);
+  assert.equal((await call("/occupancy/import/preview", "POST", { fileHash, entries: [entry] }, await server("anonymous"))).status, 401);
+  const preview = await call<{ rows: Array<{ status: string }> }>("/occupancy/import/preview", "POST", { fileHash, entries: [entry] });
+  assert.equal(preview.status, 200);
+  assert.equal(preview.body.rows[0].status, "new");
+  assert.equal(await countModality(), 0, "preview must not create a modality");
+
+  const imported = await call<{ rows: Array<{ status: string; id: string | null }> }>("/occupancy/import", "POST", { fileHash, entries: [{ record: entry }] });
+  assert.equal(imported.body.rows[0].status, "inserted");
+  const id = imported.body.rows[0].id!;
+  const sameFile = await call<{ rows: Array<{ status: string; id: string | null }> }>("/occupancy/import", "POST", { fileHash, entries: [{ record: entry }] });
+  assert.deepEqual(sameFile.body.rows[0], { index: 0, status: "already_imported", id, message: "Já importado; mantido sem duplicação." });
+  assert.equal((await call<OccupancyRecord[]>("/occupancy?months=2026-09")).body.length, 1);
+
+  const changedEntry = { ...entry, percentage: 80 };
+  const changedPreview = await call<{ rows: Array<{ status: string; existingRecord: OccupancyRecord }> }>("/occupancy/import/preview", "POST", { fileHash, entries: [changedEntry] });
+  assert.equal(changedPreview.body.rows[0].status, "conflict");
+  const noConsent = await call<{ rows: Array<{ status: string }> }>("/occupancy/import", "POST", { fileHash, entries: [{ record: changedEntry }] });
+  assert.equal(noConsent.body.rows[0].status, "conflict");
+  const updated = await call<{ rows: Array<{ status: string; id: string | null }> }>("/occupancy/import", "POST", {
+    fileHash,
+    entries: [{ record: changedEntry, existingRecordId: id, expectedVersion: changedPreview.body.rows[0].existingRecord.version }],
+  });
+  assert.equal(updated.body.rows[0].status, "updated");
+  assert.equal(updated.body.rows[0].id, id);
+  const stale = await call<{ rows: Array<{ status: string }> }>("/occupancy/import", "POST", {
+    fileHash,
+    entries: [{ record: { ...entry, percentage: 60 }, existingRecordId: id, expectedVersion: 1 }],
+  });
+  assert.equal(stale.body.rows[0].status, "conflict");
+  assert.equal((await call<OccupancyRecord[]>(`/occupancy?months=2026-09`)).body[0].percentage, 80);
+
+  const otherHash = "b".repeat(64);
+  const sameScope = { ...entry, index: 1, sourceSheet: "Outra", sourceCell: "D9", sourceCells: { period: "A9", modality: "B9", percentage: "D9" }, percentage: 90 };
+  const naturalConflict = await call<{ rows: Array<{ status: string; existingRecord: OccupancyRecord }> }>("/occupancy/import/preview", "POST", { fileHash: otherHash, entries: [sameScope] });
+  assert.equal(naturalConflict.body.rows[0].status, "conflict");
+  assert.equal(naturalConflict.body.rows[0].existingRecord.id, id);
+  const withoutUpdate = await call<{ rows: Array<{ status: string }> }>("/occupancy/import", "POST", { fileHash: otherHash, entries: [{ record: sameScope }] });
+  assert.equal(withoutUpdate.body.rows[0].status, "conflict");
+  const authorizedUpdate = await call<{ rows: Array<{ status: string }> }>("/occupancy/import", "POST", {
+    fileHash: otherHash,
+    entries: [{ record: sameScope, existingRecordId: id, expectedVersion: naturalConflict.body.rows[0].existingRecord.version }],
+  });
+  assert.equal(authorizedUpdate.body.rows[0].status, "updated");
+  assert.equal((await call<OccupancyRecord[]>("/occupancy?months=2026-09")).body[0].percentage, 90);
+
+  const audit = await testPool.query("SELECT operation FROM occupancy_history WHERE entity_id=$1 ORDER BY created_at", [id]);
+  assert.deepEqual(audit.rows.map((row) => row.operation), ["import_create", "import_update", "import_update"]);
+  const source = await testPool.query("SELECT source_file_hash,source_sheet,source_cell,source_cells FROM occupancy_records WHERE id=$1", [id]);
+  assert.deepEqual(source.rows[0], { source_file_hash: otherHash, source_sheet: "Outra", source_cell: "D9", source_cells: sameScope.sourceCells });
+});
+
+test("occupancy import is safe under simultaneous retries and repeated rows in one batch", async () => {
+  const fileHash = "c".repeat(64);
+  const entry = {
+    index: 0, sourceSheet: "Presença", sourceCell: "C2",
+    sourceCells: { period: "A2", modality: "B2", percentage: "C2" },
+    kind: "daily", period: "2026-08-08", modalityName: "Import Pilates Retry",
+    percentage: 0, className: null,
+  };
+  const request = { fileHash, entries: [{ record: entry }] };
+  const pair = await Promise.all([
+    call<{ rows: Array<{ status: string }> }>("/occupancy/import", "POST", request),
+    call<{ rows: Array<{ status: string }> }>("/occupancy/import", "POST", request),
+  ]);
+  assert.deepEqual(pair.map((result) => result.body.rows[0].status).sort(), ["already_imported", "inserted"]);
+  const duplicated = await call<{ rows: Array<{ status: string }> }>("/occupancy/import", "POST", {
+    fileHash: "d".repeat(64), entries: [
+      { record: { ...entry, index: 1, period: "2026-08-09", sourceCell: "C3", sourceCells: { period: "A3", modality: "B3", percentage: "C3" } } },
+      { record: { ...entry, index: 2, period: "2026-08-09", sourceCell: "C3", sourceCells: { period: "A3", modality: "B3", percentage: "C3" } } },
+    ],
+  });
+  assert.deepEqual(duplicated.body.rows.map((row) => row.status), ["inserted", "duplicate_in_batch"]);
+  assert.equal((await call<OccupancyRecord[]>("/occupancy?months=2026-08")).body.length, 2);
+});

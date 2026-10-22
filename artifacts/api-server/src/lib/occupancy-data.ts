@@ -62,6 +62,8 @@ export function serializeOccupancy(record: OccupancyRecordRow, modalityName: str
     id: record.id, kind: record.kind, period: record.kind === "daily" ? record.date! : record.month,
     month: record.month, modalityId: record.modalityId, modalityName,
     percentage: Number(record.percentage), className: record.className, notes: record.notes,
+    sourceFileHash: record.sourceFileHash, sourceSheet: record.sourceSheet,
+    sourceCell: record.sourceCell, sourceCells: record.sourceCells,
     version: record.version, createdAt: record.createdAt.toISOString(), updatedAt: record.updatedAt.toISOString(),
   };
 }

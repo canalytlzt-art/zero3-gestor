@@ -16,6 +16,8 @@ export interface Product {
      */
   suggestedPriceCents: number;
   isActive: boolean;
+  /** @nullable */
+  modalityId: string | null;
   /** @minimum 1 */
   version: number;
   createdAt: Date;

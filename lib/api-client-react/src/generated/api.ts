@@ -34,6 +34,10 @@ import type {
   MonthlySalesBackupInput,
   MonthlySalesBackupV2,
   OccupancyFailureResponse,
+  OccupancyImportCommitInput,
+  OccupancyImportCommitResponse,
+  OccupancyImportPreviewInput,
+  OccupancyImportPreviewResponse,
   OccupancyModality,
   OccupancyModalityInput,
   OccupancyModalityUpdate,
@@ -648,6 +652,170 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getDeleteOccupancyRecordMutationOptions(options));
+    }
+
+export const getPreviewOccupancyImportUrl = () => {
+
+
+
+
+  return `/api/occupancy/import/preview`
+}
+
+export const previewOccupancyImport = async (occupancyImportPreviewInput: OccupancyImportPreviewInput, options?: Parameters<typeof customFetch>[1]): Promise<OccupancyImportPreviewResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<OccupancyImportPreviewResponse>(getPreviewOccupancyImportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(occupancyImportPreviewInput)
+  }
+);}
+
+
+
+
+
+export const getPreviewOccupancyImportMutationKey = () => ['previewOccupancyImport'] as const;
+
+export const getPreviewOccupancyImportMutationOptions = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewOccupancyImport>>, TError,PreviewOccupancyImportMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof previewOccupancyImport>>, TError,PreviewOccupancyImportMutationVariables, TContext> => {
+
+const mutationKey = getPreviewOccupancyImportMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof previewOccupancyImport>>, PreviewOccupancyImportMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  previewOccupancyImport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PreviewOccupancyImportMutationResult = NonNullable<Awaited<ReturnType<typeof previewOccupancyImport>>>
+    export type PreviewOccupancyImportMutationBody = BodyType<OccupancyImportPreviewInput>
+    export type PreviewOccupancyImportMutationError = ErrorType<OccupancyFailureResponse>
+    export type PreviewOccupancyImportMutationVariables = {data: BodyType<OccupancyImportPreviewInput>}
+
+    export const usePreviewOccupancyImport = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewOccupancyImport>>, TError,PreviewOccupancyImportMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof previewOccupancyImport>>,
+        TError,
+        PreviewOccupancyImportMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPreviewOccupancyImportMutationOptions(options));
+    }
+
+export const getCommitOccupancyImportUrl = () => {
+
+
+
+
+  return `/api/occupancy/import`
+}
+
+export const commitOccupancyImport = async (occupancyImportCommitInput: OccupancyImportCommitInput, options?: Parameters<typeof customFetch>[1]): Promise<OccupancyImportCommitResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<OccupancyImportCommitResponse>(getCommitOccupancyImportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(occupancyImportCommitInput)
+  }
+);}
+
+
+
+
+
+export const getCommitOccupancyImportMutationKey = () => ['commitOccupancyImport'] as const;
+
+export const getCommitOccupancyImportMutationOptions = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof commitOccupancyImport>>, TError,CommitOccupancyImportMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof commitOccupancyImport>>, TError,CommitOccupancyImportMutationVariables, TContext> => {
+
+const mutationKey = getCommitOccupancyImportMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof commitOccupancyImport>>, CommitOccupancyImportMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  commitOccupancyImport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CommitOccupancyImportMutationResult = NonNullable<Awaited<ReturnType<typeof commitOccupancyImport>>>
+    export type CommitOccupancyImportMutationBody = BodyType<OccupancyImportCommitInput>
+    export type CommitOccupancyImportMutationError = ErrorType<OccupancyFailureResponse>
+    export type CommitOccupancyImportMutationVariables = {data: BodyType<OccupancyImportCommitInput>}
+
+    export const useCommitOccupancyImport = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof commitOccupancyImport>>, TError,CommitOccupancyImportMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof commitOccupancyImport>>,
+        TError,
+        CommitOccupancyImportMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCommitOccupancyImportMutationOptions(options));
     }
 
 export const getHealthCheckUrl = () => {
