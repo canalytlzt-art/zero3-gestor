@@ -2,3 +2,4 @@
 - [Backup JSON dates](backup-json-dates.md) — generated API validators coerce dates; validate the serialized backup contract before that coercion.
 - [API date and database boundaries](refund-api-boundaries.md) — validate calendar dates from raw JSON and keep routed DB reads and writes on the injected connection.
 - [Importação de planilhas](spreadsheet-import.md) — origem pode ter só cliente, Data de início e valor; CSV com acentos exige decodificação explícita.
+- [Domínio de ocupação](occupancy-domain.md) — presença/capacidade ficam fora do app; percentuais não são somados nem convertidos em pessoas.
