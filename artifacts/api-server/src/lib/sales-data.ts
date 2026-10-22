@@ -13,6 +13,33 @@ export const MAX_SAFE_CENTS = Number.MAX_SAFE_INTEGER;
 export const PRODUCT_NAME_LOCK_NAMESPACE = 5062;
 export const PRODUCT_NAME_LOCK_KEY = 1;
 
+export function getBusinessMonthKey(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(now);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  if (!year || !month) {
+    throw new Error("Unable to determine the current month in America/Sao_Paulo");
+  }
+  return `${year}-${month}`;
+}
+
+export function monthKeysBetween(first: string, last: string): string[] {
+  const firstMatch = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(first);
+  const lastMatch = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(last);
+  if (!firstMatch || !lastMatch) return [];
+  const firstIndex = Number(firstMatch[1]) * 12 + Number(firstMatch[2]) - 1;
+  const lastIndex = Number(lastMatch[1]) * 12 + Number(lastMatch[2]) - 1;
+  if (lastIndex < firstIndex) return [];
+  return Array.from({ length: lastIndex - firstIndex + 1 }, (_, offset) => {
+    const index = firstIndex + offset;
+    return `${String(Math.floor(index / 12)).padStart(4, "0")}-${String((index % 12) + 1).padStart(2, "0")}`;
+  });
+}
+
 export function normalizeProductName(value: string): string {
   return value.trim().replace(/\s+/g, " ");
 }

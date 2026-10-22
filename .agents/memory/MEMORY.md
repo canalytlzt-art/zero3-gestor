@@ -1,1 +1,2 @@
 - [Vite React dependency cache](vite-react-cache.md) — after React version changes, inspect and refresh Vite's optimized dependencies if the runtime still reports mismatched versions.
+- [Backup JSON dates](backup-json-dates.md) — generated API validators coerce dates; validate the serialized backup contract before that coercion.

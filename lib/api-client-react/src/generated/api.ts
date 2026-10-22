@@ -26,8 +26,11 @@ import type {
   CreateProductInput,
   CreateSaleInput,
   CreateSalesRefundInput,
+  GetMonthlySalesBackupParams,
+  GetSalesScoreboardParams,
   HealthStatus,
   MonthlySalesBackupInput,
+  MonthlySalesBackupV2,
   Product,
   Sale,
   SalesGoal,
@@ -38,7 +41,9 @@ import type {
   SalesRefund,
   SalesRefundCandidate,
   SalesRefundRecord,
+  SalesRestorePreview,
   SalesRestoreResult,
+  SalesScoreboard,
   UpdateProductInput,
   UpdateSaleInput,
   UpdateSalesRefundInput,
@@ -812,6 +817,90 @@ export function useGetSalesHistory<TData = Awaited<ReturnType<typeof getSalesHis
 
 
 
+export const getGetSalesScoreboardUrl = (params?: GetSalesScoreboardParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/sales/scoreboard?${stringifiedParams}` : `/api/sales/scoreboard`
+}
+
+/**
+ * @summary Aggregate active sales and refunds for scoreboard filters
+ */
+export const getSalesScoreboard = async (params?: GetSalesScoreboardParams, options?: Parameters<typeof customFetch>[1]): Promise<SalesScoreboard> => {
+
+  return customFetch<SalesScoreboard>(getGetSalesScoreboardUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSalesScoreboardQueryKey = (params?: GetSalesScoreboardParams,) => {
+    return [
+    `/api/sales/scoreboard`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetSalesScoreboardQueryOptions = <TData = Awaited<ReturnType<typeof getSalesScoreboard>>, TError = ErrorType<ApiError>>(params?: GetSalesScoreboardParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSalesScoreboard>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSalesScoreboardQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSalesScoreboard>>> = ({ signal }) => getSalesScoreboard(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSalesScoreboard>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSalesScoreboardQueryResult = NonNullable<Awaited<ReturnType<typeof getSalesScoreboard>>>
+export type GetSalesScoreboardQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Aggregate active sales and refunds for scoreboard filters
+ */
+
+export function useGetSalesScoreboard<TData = Awaited<ReturnType<typeof getSalesScoreboard>>, TError = ErrorType<ApiError>>(
+ params?: GetSalesScoreboardParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSalesScoreboard>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSalesScoreboardQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getGetSalesRefundCandidatesUrl = () => {
 
 
@@ -1473,6 +1562,178 @@ export const useUpsertSalesGoal = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getUpsertSalesGoalMutationOptions(options));
+    }
+
+export const getGetMonthlySalesBackupUrl = (params: GetMonthlySalesBackupParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/sales/backup?${stringifiedParams}` : `/api/sales/backup`
+}
+
+/**
+ * @summary Create a complete monthly sales backup
+ */
+export const getMonthlySalesBackup = async (params: GetMonthlySalesBackupParams, options?: Parameters<typeof customFetch>[1]): Promise<MonthlySalesBackupV2> => {
+
+  return customFetch<MonthlySalesBackupV2>(getGetMonthlySalesBackupUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMonthlySalesBackupQueryKey = (params?: GetMonthlySalesBackupParams,) => {
+    return [
+    `/api/sales/backup`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetMonthlySalesBackupQueryOptions = <TData = Awaited<ReturnType<typeof getMonthlySalesBackup>>, TError = ErrorType<ApiError>>(params: GetMonthlySalesBackupParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMonthlySalesBackup>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMonthlySalesBackupQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMonthlySalesBackup>>> = ({ signal }) => getMonthlySalesBackup(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMonthlySalesBackup>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMonthlySalesBackupQueryResult = NonNullable<Awaited<ReturnType<typeof getMonthlySalesBackup>>>
+export type GetMonthlySalesBackupQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Create a complete monthly sales backup
+ */
+
+export function useGetMonthlySalesBackup<TData = Awaited<ReturnType<typeof getMonthlySalesBackup>>, TError = ErrorType<ApiError>>(
+ params: GetMonthlySalesBackupParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMonthlySalesBackup>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMonthlySalesBackupQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getPreviewMonthlySalesBackupRestoreUrl = () => {
+
+
+
+
+  return `/api/sales/restore/preview`
+}
+
+/**
+ * @summary Preview a monthly sales backup before restoring it
+ */
+export const previewMonthlySalesBackupRestore = async (monthlySalesBackupInput: MonthlySalesBackupInput, options?: Parameters<typeof customFetch>[1]): Promise<SalesRestorePreview> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<SalesRestorePreview>(getPreviewMonthlySalesBackupRestoreUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(monthlySalesBackupInput)
+  }
+);}
+
+
+
+
+
+export const getPreviewMonthlySalesBackupRestoreMutationKey = () => ['previewMonthlySalesBackupRestore'] as const;
+
+export const getPreviewMonthlySalesBackupRestoreMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewMonthlySalesBackupRestore>>, TError,PreviewMonthlySalesBackupRestoreMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof previewMonthlySalesBackupRestore>>, TError,PreviewMonthlySalesBackupRestoreMutationVariables, TContext> => {
+
+const mutationKey = getPreviewMonthlySalesBackupRestoreMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof previewMonthlySalesBackupRestore>>, PreviewMonthlySalesBackupRestoreMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  previewMonthlySalesBackupRestore(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PreviewMonthlySalesBackupRestoreMutationResult = NonNullable<Awaited<ReturnType<typeof previewMonthlySalesBackupRestore>>>
+    export type PreviewMonthlySalesBackupRestoreMutationBody = BodyType<MonthlySalesBackupInput>
+    export type PreviewMonthlySalesBackupRestoreMutationError = ErrorType<ApiError>
+    export type PreviewMonthlySalesBackupRestoreMutationVariables = {data: BodyType<MonthlySalesBackupInput>}
+
+    /**
+ * @summary Preview a monthly sales backup before restoring it
+ */
+export const usePreviewMonthlySalesBackupRestore = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewMonthlySalesBackupRestore>>, TError,PreviewMonthlySalesBackupRestoreMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof previewMonthlySalesBackupRestore>>,
+        TError,
+        PreviewMonthlySalesBackupRestoreMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPreviewMonthlySalesBackupRestoreMutationOptions(options));
     }
 
 export const getRestoreMonthlySalesBackupUrl = () => {

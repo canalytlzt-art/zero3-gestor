@@ -5,29 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { MonthlySalesBackupInputFormat } from './monthlySalesBackupInputFormat';
-import type { MonthlySalesBackupInputVersion } from './monthlySalesBackupInputVersion';
-import type { SalesBackupRecord } from './salesBackupRecord';
-import type { SalesGoalBackupRecord } from './salesGoalBackupRecord';
+import type { MonthlySalesBackupV1 } from './monthlySalesBackupV1';
+import type { MonthlySalesBackupV2 } from './monthlySalesBackupV2';
 
-export interface MonthlySalesBackupInput {
-  format: MonthlySalesBackupInputFormat;
-  version: MonthlySalesBackupInputVersion;
-  /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
-  month: string;
-  generatedAt: Date;
-  /**
-     * @minimum 0
-     * @maximum 10000
-     */
-  recordCount: number;
-  /**
-     * @minimum 0
-     * @maximum 500
-     */
-  goalCount: number;
-  /** @maxItems 10000 */
-  sales: SalesBackupRecord[];
-  /** @maxItems 500 */
-  goals: SalesGoalBackupRecord[];
-}
+export type MonthlySalesBackupInput = MonthlySalesBackupV2 | MonthlySalesBackupV1;

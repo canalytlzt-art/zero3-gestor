@@ -5,14 +5,13 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { SalesRestoreConflict } from './salesRestoreConflict';
+import type { SalesRestoreEntityCounts } from './salesRestoreEntityCounts';
 
 export interface SalesRestoreResult {
   /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
-  month: string;
-  /** @minimum 0 */
-  insertedSales: number;
-  /** @minimum 0 */
-  skippedSales: number;
-  /** @minimum 0 */
-  restoredGoals: number;
+  period: string;
+  inserted: SalesRestoreEntityCounts;
+  identical: SalesRestoreEntityCounts;
+  conflicts: SalesRestoreConflict[];
 }

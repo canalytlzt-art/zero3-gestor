@@ -6,7 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface SalesBackupRecord {
+export interface SalesBackupV1Record {
   id: string;
   saleDate: Date;
   /**

@@ -10,6 +10,10 @@ import {
   getGetSalesHistoryQueryKey,
   getGetSalesGoalsQueryKey,
   getGetSalesQueryKey,
+  getGetSalesRefundsQueryKey,
+  getGetSalesScoreboardQueryKey,
+  getMonthlySalesBackup,
+  previewMonthlySalesBackupRestore,
   useCancelSale,
   useCreateProduct,
   useCreateSale,
@@ -18,15 +22,16 @@ import {
   useGetSales,
   useGetSalesHistory,
   useGetSalesGoals,
+  useGetSalesRefunds,
   useImportSales,
   useRestoreMonthlySalesBackup,
   useUpdateProduct,
   useUpdateSale,
 } from '@workspace/api-client-react';
-import type { CreateProductInput, MonthlySalesBackupInput, Product, Sale, SaleInput, SalesImportRow, SalesRestoreResult, UpdateProductInput } from '@workspace/api-client-react';
+import type { CreateProductInput, MonthlySalesBackupInput, Product, Sale, SaleInput, SalesImportRow, SalesRestorePreview, SalesRestoreResult, UpdateProductInput } from '@workspace/api-client-react';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { createMonthlySalesBackup, downloadMonthlyBackup, parseMonthlySalesBackup } from '@/lib/sales-export';
+import { downloadMonthlyBackup, parseMonthlySalesBackup } from '@/lib/sales-export';
 import { formatCents, formatMonthKey, getSaoPauloMonthKey, normalizeProductName, productNameKey } from '@/lib/sales-utils';
 
 const MAX_BACKUP_FILE_BYTES = 10 * 1024 * 1024;
@@ -181,11 +186,15 @@ function conflictAwareMessage(error: unknown, context: 'venda' | 'produto') {
   return errorMessage(error);
 }
 
-function filterSalesForExport(sales: Sale[], fromDate: string, toDate: string, filterProduct: string) {
+function filterSalesForExport(sales: Sale[], fromDate: string, toDate: string, filterProduct: string, products: Product[] = []) {
+  const productIds = new Set([
+    ...products.filter(({ name }) => productNameKey(name) === productNameKey(filterProduct)).map(({ id }) => id),
+    ...sales.filter(({ productName }) => productNameKey(productName) === productNameKey(filterProduct)).map(({ productId }) => productId),
+  ]);
   return sales
     .filter((sale) => !fromDate || sale.saleDate >= fromDate)
     .filter((sale) => !toDate || sale.saleDate <= toDate)
-    .filter((sale) => !filterProduct || productNameKey(sale.productName) === productNameKey(filterProduct))
+    .filter((sale) => !filterProduct || productIds.has(sale.productId))
     .slice()
     .sort((a, b) => b.saleDate.localeCompare(a.saleDate) || b.createdAt.localeCompare(a.createdAt));
 }
@@ -202,7 +211,10 @@ function formatGeneratedAt(value: string) {
 
 type RestorePreview = {
   backup: MonthlySalesBackupInput;
-  knownExistingSales: number | null;
+  report: SalesRestorePreview;
+  sales: Array<{ id: string; saleDate: string; productName: string; totalCents: number; scope: string }>;
+  salesCents: bigint;
+  refundsCents: bigint;
 };
 
 function Field({ label, name, type = 'text', placeholder, testId, onChange, ...props }: {
@@ -251,6 +263,9 @@ export default function SalesManagement() {
   const updateProduct = useUpdateProduct();
   const importSales = useImportSales();
   const restoreBackup = useRestoreMonthlySalesBackup();
+  const { data: refunds, refetch: refetchRefunds } = useGetSalesRefunds({
+    query: { queryKey: getGetSalesRefundsQueryKey(), refetchOnMount: 'always' },
+  });
   const [editing, setEditing] = useState<Sale | null>(null);
   const [cancelling, setCancelling] = useState<Sale | null>(null);
   const [historySale, setHistorySale] = useState<Sale | null>(null);
@@ -278,6 +293,7 @@ export default function SalesManagement() {
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isGeneratingBackup, setIsGeneratingBackup] = useState(false);
+  const [isPreviewingRestore, setIsPreviewingRestore] = useState(false);
   const [exportFeedback, setExportFeedback] = useState('');
   const [exportError, setExportError] = useState('');
   const [backupError, setBackupError] = useState('');
@@ -309,14 +325,18 @@ export default function SalesManagement() {
   }, [products, historySales]);
 
   const filteredSales = useMemo(
-    () => filterSalesForExport(historySales ?? [], fromDate, toDate, filterProduct)
+    () => filterSalesForExport(historySales ?? [], fromDate, toDate, filterProduct, products)
       .filter((sale) => filterStatus === 'all' || sale.status === filterStatus),
-    [historySales, fromDate, toDate, filterProduct, filterStatus],
+    [historySales, fromDate, toDate, filterProduct, filterStatus, products],
   );
   const visibleProducts = useMemo(() => products.filter((product) => product.name.toLocaleLowerCase('pt-BR').includes(productSearch.trim().toLocaleLowerCase('pt-BR'))), [products, productSearch]);
   const backupMonthSales = useMemo(
-    () => (sales ?? []).filter((sale) => sale.saleDate.slice(0, 7) === backupMonth),
-    [sales, backupMonth],
+    () => (historySales ?? []).filter((sale) => sale.saleDate.slice(0, 7) === backupMonth),
+    [historySales, backupMonth],
+  );
+  const backupMonthRefunds = useMemo(
+    () => (refunds ?? []).filter((refund) => refund.refundDate.slice(0, 7) === backupMonth),
+    [refunds, backupMonth],
   );
   const backupMonthGoals = useMemo(
     () => (salesGoals ?? []).filter((goal) => goal.month === backupMonth),
@@ -526,13 +546,17 @@ export default function SalesManagement() {
     setExportError('');
     setExportFeedback('');
     try {
-      const result = await refetchSales();
-      if (result.isError || !result.data) throw new Error('Não foi possível atualizar os lançamentos antes da exportação.');
-      const rows = filterSalesForExport(result.data, fromDate, toDate, filterProduct);
+      const [result, refundResult, productResult] = await Promise.all([refetchHistory(), refetchRefunds(), refetchProducts()]);
+      if (result.isError || !result.data || refundResult.isError || !refundResult.data || productResult.isError || !productResult.data) {
+        throw new Error('Não foi possível atualizar vendas, estornos e produtos antes da exportação.');
+      }
       const generatedDay = new Date().toISOString().slice(0, 10);
       const { downloadSalesWorkbook } = await import('@/lib/sales-workbook');
-      downloadSalesWorkbook(rows, `zero3-pro-relatorio-vendas-${generatedDay}.xlsx`);
-      setExportFeedback(`Planilha exportada com ${rows.length} ${rows.length === 1 ? 'lançamento' : 'lançamentos'} dos filtros selecionados.`);
+      downloadSalesWorkbook(result.data, refundResult.data, productResult.data, {
+        fromDate, toDate, productName: filterProduct,
+        generatedAt: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+      }, `zero3-pro-relatorio-vendas-${generatedDay}.xlsx`);
+      setExportFeedback('Planilha exportada com vendas e estornos válidos dos filtros de data e produto. Cancelamentos não entram no resultado financeiro.');
     } catch (error) {
       setExportError(errorMessage(error));
     } finally {
@@ -547,7 +571,7 @@ export default function SalesManagement() {
     setExportError('');
     setExportFeedback('');
     setBackupDialogOpen(true);
-    void Promise.all([refetchSales(), refetchGoals()]);
+    void Promise.all([refetchHistory(), refetchRefunds(), refetchGoals()]);
   }
 
   async function generateMonthlyBackup() {
@@ -555,14 +579,11 @@ export default function SalesManagement() {
     setIsGeneratingBackup(true);
     setBackupError('');
     try {
-      const [salesResult, goalsResult] = await Promise.all([refetchSales(), refetchGoals()]);
-      if (salesResult.isError || !salesResult.data) throw new Error('Não foi possível carregar os lançamentos para o backup.');
-      if (goalsResult.isError || !goalsResult.data) throw new Error('Não foi possível carregar as metas. O backup não foi gerado para evitar uma cópia incompleta.');
-      const backup = createMonthlySalesBackup(backupMonth, salesResult.data, goalsResult.data);
+      const backup = await getMonthlySalesBackup({ month: backupMonth });
       downloadMonthlyBackup(backup);
       setBackupError('');
       setExportError('');
-      setExportFeedback(`Backup de ${formatMonthKey(backupMonth)} gerado com ${backup.recordCount} ${backup.recordCount === 1 ? 'lançamento' : 'lançamentos'} e ${backup.goalCount} ${backup.goalCount === 1 ? 'meta' : 'metas'}.`);
+      setExportFeedback(`Backup de ${formatMonthKey(backupMonth)}: ${backup.counts.periodSales} vendas, ${backup.counts.periodRefunds} estornos e ${backup.counts.periodGoals} metas do mês; ${backup.counts.dependencySales + backup.counts.dependencyRefunds} dependências preservadas.`);
     } catch (error) {
       setBackupError(errorMessage(error));
     } finally {
@@ -585,27 +606,42 @@ export default function SalesManagement() {
       return;
     }
 
+    setIsPreviewingRestore(true);
     try {
       const parsed = parseMonthlySalesBackup(JSON.parse(await file.text()));
-      const salesResult = await refetchSales();
-      const existingIds = salesResult.data ? new Set(salesResult.data.map((sale) => sale.id)) : null;
-      const knownExistingSales = salesResult.isError || !salesResult.data
-        ? null
-        : parsed.sales.reduce((count, sale) => count + Number(existingIds?.has(sale.id) ?? false), 0);
-      setRestorePreview({ backup: parsed, knownExistingSales });
+      const report = await previewMonthlySalesBackupRestore(parsed);
+      const previewSales = 'schemaVersion' in parsed
+        ? parsed.sales.map(({ scope, record }) => ({
+          id: String(record.id), saleDate: String(record.saleDate), productName: String(record.productName),
+          totalCents: Number(record.totalCents), scope,
+        }))
+        : parsed.sales.map((sale) => ({ ...sale, scope: 'period' }));
+      const salesCents = 'schemaVersion' in parsed
+        ? parsed.sales.filter(({ scope, record }) => scope === 'period' && record.status === 'active').reduce((sum, { record }) => sum + BigInt(Number(record.totalCents)), 0n)
+        : parsed.sales.reduce((sum, sale) => sum + BigInt(sale.totalCents), 0n);
+      const refundsCents = 'schemaVersion' in parsed
+        ? parsed.refunds.filter(({ scope, record }) => scope === 'period' && record.status === 'active').reduce((sum, { record }) => sum + BigInt(Number(record.amountCents)), 0n)
+        : 0n;
+      setRestorePreview({ backup: parsed, report, sales: previewSales, salesCents, refundsCents });
     } catch (error) {
       setRestoreError(error instanceof SyntaxError
         ? 'O arquivo não contém um JSON válido.'
         : errorMessage(error));
+    } finally {
+      setIsPreviewingRestore(false);
     }
   }
 
   async function confirmBackupRestore() {
-    if (!restorePreview || restoreBackup.isPending) return;
+    if (!restorePreview || restorePreview.report.blocked || restoreBackup.isPending) return;
     setRestoreError('');
     try {
       const result = await restoreBackup.mutateAsync({ data: restorePreview.backup });
       await invalidateSalesRelated();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: getGetSalesRefundsQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: getGetSalesScoreboardQueryKey() }),
+      ]);
       setRestoreResult(result);
     } catch (error) {
       setRestoreError(errorMessage(error));
@@ -740,7 +776,7 @@ export default function SalesManagement() {
           >
             <Download size={15} /> Exportar
           </summary>
-          <div className="absolute right-0 z-20 mt-2 min-w-[230px] rounded-2xl border border-[#e7e1e9] bg-white p-1.5 shadow-[0_12px_35px_rgba(40,32,56,.15)]">
+          <div className="absolute left-0 z-20 mt-2 w-[230px] max-w-[calc(100vw-2rem)] rounded-2xl border border-[#e7e1e9] bg-white p-1.5 shadow-[0_12px_35px_rgba(40,32,56,.15)] sm:left-auto sm:right-0">
             <button type="button" onClick={() => void exportSpreadsheet()} disabled={isExporting} className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-xs font-semibold text-[#4d4559] transition hover:bg-[#f8f6fa] disabled:opacity-50" data-testid="button-export-spreadsheet">
               <FileSpreadsheet size={15} className="text-[#6d9b45]" />
               <span>Planilha do período (.xlsx)</span>
@@ -862,32 +898,37 @@ export default function SalesManagement() {
           <DialogHeader className="text-left">
             <DialogTitle className="text-lg font-extrabold tracking-[-.035em] text-[#332d40]">Backup mensal</DialogTitle>
             <DialogDescription className="text-xs leading-5 text-[#827b8b]">
-              Inclui todos os lançamentos do mês selecionado, sem aplicar o filtro de plano, e as metas cadastradas para esse mês.
+              Inclui vendas, estornos, metas, produtos e histórico, sem filtro de plano. Vendas de outros meses e seus estornos são incluídos quando necessários aos vínculos, sem mudar suas datas.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <label className="block text-[10px] font-bold uppercase tracking-[.1em] text-[#817b89]">Mês do backup
               <input type="month" value={backupMonth} onChange={(event) => setBackupMonth(event.target.value)} data-testid="input-monthly-backup-month" className="mt-1.5 h-11 w-full rounded-xl border border-[#e7e2ea] bg-[#fcfbfd] px-3.5 text-sm font-medium normal-case tracking-normal text-[#342d43] outline-none focus:border-[#9477bf]" />
             </label>
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-2 sm:grid-cols-3">
               <div className="rounded-xl bg-[#f8f6f9] px-3.5 py-3">
                 <p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Lançamentos</p>
                 <p className="mt-1 text-sm font-extrabold tabular-nums text-[#40374e]" data-testid="text-monthly-backup-sales-count">{backupMonthSales.length}</p>
                 <p className="mt-1 text-[10px] text-[#8a8491]">Independente do filtro de plano.</p>
               </div>
               <div className="rounded-xl bg-[#f8f6f9] px-3.5 py-3">
+                <p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Estornos do mês</p>
+                <p className="mt-1 text-sm font-extrabold tabular-nums text-[#40374e]">{backupMonthRefunds.length}</p>
+              </div>
+              <div className="rounded-xl bg-[#f8f6f9] px-3.5 py-3">
                 <p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Metas mensais</p>
                 <p className="mt-1 text-sm font-extrabold tabular-nums text-[#40374e]" data-testid="text-monthly-backup-goals-count">{backupMonthGoals.length}</p>
               </div>
             </div>
+            <p className="text-[10px] leading-4 text-[#827b8b]">As contagens acima são uma prévia. O arquivo é conferido diretamente no servidor e pode incluir dependências de outros meses.</p>
             {(isLoading || isFetching || isGoalsLoading || isGoalsFetching) && <p className="text-[11px] text-[#827b8b]" role="status">Atualizando a base para gerar uma cópia recente…</p>}
-            {!isLoading && !isFetching && !isError && backupMonthSales.length === 0 && <p className="rounded-xl border border-dashed border-[#ded7e7] px-3.5 py-3 text-xs leading-5 text-[#716a79]" data-testid="status-monthly-backup-empty">Nenhum lançamento neste mês. O arquivo terá zero vendas; nenhuma linha fictícia será criada.</p>}
+            {!isLoading && !isFetching && !isError && backupMonthSales.length === 0 && backupMonthRefunds.length === 0 && <p className="rounded-xl border border-dashed border-[#ded7e7] px-3.5 py-3 text-xs leading-5 text-[#716a79]" data-testid="status-monthly-backup-empty">Nenhuma movimentação neste mês. O arquivo terá zero movimentações; metas existentes serão preservadas. Nenhuma linha fictícia será criada.</p>}
             {(isError || isGoalsError) && <div className="rounded-xl bg-[#fff5f2] px-3.5 py-3 text-xs text-[#85554e]" role="alert" data-testid="status-monthly-backup-load-error"><p>Não foi possível ler todos os dados para gerar o backup.</p><button type="button" onClick={() => void Promise.all([refetchSales(), refetchGoals()])} className="mt-2 inline-flex items-center gap-1.5 font-bold underline underline-offset-2"><RefreshCw size={12} /> Tentar novamente</button></div>}
             {backupError && <p className="rounded-xl bg-[#fff0ed] px-3.5 py-2.5 text-xs font-semibold text-[#9c483f]" role="alert" data-testid="status-monthly-backup-error">{backupError}</p>}
           </div>
           <DialogFooter className="gap-2">
             <button type="button" onClick={() => setBackupDialogOpen(false)} disabled={isGeneratingBackup} className="h-10 rounded-xl border border-[#e3dfe7] px-4 text-sm font-bold text-[#716a79] transition hover:bg-[#f8f6fa] disabled:opacity-50" data-testid="button-cancel-monthly-backup">Fechar</button>
-            <button type="button" onClick={() => void generateMonthlyBackup()} disabled={isGeneratingBackup || isLoading || isFetching || isGoalsLoading || isGoalsFetching || isError || isGoalsError} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#7656b8] px-4 text-sm font-bold text-white transition hover:bg-[#6848a9] disabled:cursor-wait disabled:opacity-60" data-testid="button-generate-monthly-backup">
+            <button type="button" onClick={() => void generateMonthlyBackup()} disabled={isGeneratingBackup || !/^\d{4}-(0[1-9]|1[0-2])$/.test(backupMonth)} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#7656b8] px-4 text-sm font-bold text-white transition hover:bg-[#6848a9] disabled:cursor-wait disabled:opacity-60" data-testid="button-generate-monthly-backup">
               {isGeneratingBackup ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : <Download size={14} />}
               {isGeneratingBackup ? 'Gerando…' : 'Baixar backup JSON'}
             </button>
@@ -898,49 +939,55 @@ export default function SalesManagement() {
       <Dialog
         open={restoreDialogOpen}
         onOpenChange={(open) => {
-          if (!restoreBackup.isPending) setRestoreDialogOpen(open);
+          if (!restoreBackup.isPending && !isPreviewingRestore) setRestoreDialogOpen(open);
         }}
       >
-        <DialogContent className="max-w-lg border-[#e7e1e9] bg-[#fffefc] p-6 sm:rounded-[24px]">
+        <DialogContent className="max-h-[90dvh] max-w-lg overflow-y-auto border-[#e7e1e9] bg-[#fffefc] p-6 sm:rounded-[24px]">
           <DialogHeader className="text-left">
             <DialogTitle className="text-lg font-extrabold tracking-[-.035em] text-[#332d40]">Restaurar backup mensal</DialogTitle>
             <DialogDescription className="text-xs leading-5 text-[#827b8b]">
-              Confira o conteúdo antes de confirmar. Lançamentos com o mesmo ID serão ignorados; registros atuais não serão removidos.
+              Registros idênticos são ignorados. Se o mesmo ID tiver conteúdo diferente, o atual será mantido. Nada é apagado; a aplicação é atômica e uma cópia privada do estado anterior é guardada no servidor.
             </DialogDescription>
           </DialogHeader>
+          {isPreviewingRestore && <p role="status" className="text-sm text-[#716a79]">Validando o arquivo e comparando os registros com a base…</p>}
           {restoreError && <p className="rounded-xl bg-[#fff0ed] px-3.5 py-2.5 text-xs font-semibold text-[#9c483f]" role="alert" data-testid="status-backup-restore-error">{restoreError}</p>}
           {restorePreview && !restoreResult && (
             <div className="space-y-3">
               <div className="rounded-xl bg-[#f8f6f9] px-3.5 py-3.5" data-testid="panel-backup-restore-preview">
-                <p className="text-sm font-extrabold capitalize text-[#40374e]">{formatMonthKey(restorePreview.backup.month)}</p>
+                <p className="text-sm font-extrabold capitalize text-[#40374e]">{formatMonthKey(restorePreview.report.period)}</p>
                 <p className="mt-1 text-[10px] text-[#827b8b]">Gerado em {formatGeneratedAt(restorePreview.backup.generatedAt)}</p>
                 <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs font-semibold text-[#625a6d]">
-                  <span data-testid="text-restore-preview-sales">{restorePreview.backup.recordCount} lançamentos</span>
-                  <span data-testid="text-restore-preview-goals">{restorePreview.backup.goalCount} metas</span>
+                  <span data-testid="text-restore-preview-sales">{restorePreview.sales.length} vendas no arquivo</span>
+                  <span data-testid="text-restore-preview-goals">{restorePreview.backup.goals.length} metas</span>
                 </div>
                 <p className="mt-2 text-[10px] leading-4 text-[#827b8b]">
-                  {restorePreview.knownExistingSales === null
-                    ? 'Não foi possível estimar quantos IDs já existem; o servidor ainda evitará duplicações ao restaurar.'
-                    : `${restorePreview.knownExistingSales} lançamento(s) já presente(s) serão ignorados.`}
+                  {Object.values(restorePreview.report.toInsert).reduce((sum, count) => sum + count, 0)} registros novos · {Object.values(restorePreview.report.identical).reduce((sum, count) => sum + count, 0)} idênticos · {restorePreview.report.conflicts.length} conflitos.
                 </p>
+                <p className="mt-2 text-xs leading-5 text-[#625a6d]">No mês: vendas {formatCents(restorePreview.salesCents)} · estornos {formatCents(restorePreview.refundsCents)} · após estornos {formatCents(restorePreview.salesCents - restorePreview.refundsCents)}.</p>
+                {restorePreview.report.dependencyMonths.length > 0 && <p className="mt-2 text-xs leading-5 text-[#7656b8]">Meses adicionais por dependência: {restorePreview.report.dependencyMonths.map(formatMonthKey).join(', ')}. As datas originais serão preservadas.</p>}
+                {!('schemaVersion' in restorePreview.backup) && <p className="mt-2 text-xs text-[#85554e]">Formato legado: este arquivo não contém estornos nem o histórico completo. Apenas as informações presentes podem ser recuperadas.</p>}
               </div>
-              {restorePreview.backup.sales.length === 0
+              {restorePreview.sales.length === 0
                 ? <p className="rounded-xl border border-dashed border-[#ded7e7] px-3.5 py-3 text-xs text-[#716a79]" data-testid="status-restore-preview-empty">Este backup não contém lançamentos.</p>
                 : <ul className="max-h-36 space-y-1.5 overflow-y-auto rounded-xl border border-[#eeeaf0] p-3 text-[11px] text-[#625a6d]" aria-label="Prévia dos lançamentos">
-                  {restorePreview.backup.sales.slice(0, 5).map((sale) => <li key={sale.id} className="flex justify-between gap-3"><span className="min-w-0 truncate">{formatDate(sale.saleDate)} · {sale.productName}</span><span className="shrink-0 font-semibold tabular-nums">{formatCents(sale.totalCents)}</span></li>)}
-                  {restorePreview.backup.sales.length > 5 && <li className="pt-1 text-[#8a8491]">e mais {restorePreview.backup.sales.length - 5} lançamentos…</li>}
+                  {restorePreview.sales.slice(0, 5).map((sale) => <li key={sale.id} className="flex justify-between gap-3"><span className="min-w-0 truncate">{formatDate(sale.saleDate)} · {sale.productName}{sale.scope === 'dependency' ? ' (dependência)' : ''}</span><span className="shrink-0 font-semibold tabular-nums">{formatCents(sale.totalCents)}</span></li>)}
+                  {restorePreview.sales.length > 5 && <li className="pt-1 text-[#8a8491]">e mais {restorePreview.sales.length - 5} vendas…</li>}
                 </ul>}
+              {restorePreview.report.conflicts.length > 0 && <div className="rounded-xl border border-[#ecd9c9] bg-[#fff8ed] p-3 text-xs text-[#85554e]">
+                <p className="font-bold">{restorePreview.report.blocked ? 'Restauração bloqueada por vínculos ou saldo.' : 'Conflitos: os registros atuais serão mantidos.'}</p>
+                <ul className="mt-2 max-h-36 space-y-2 overflow-auto">{restorePreview.report.conflicts.map((conflict, index) => <li key={`${conflict.entityType}-${conflict.id}-${index}`}><span className="break-all font-semibold">{conflict.entityType} · {conflict.id}</span><br />{conflict.reason}</li>)}</ul>
+              </div>}
               <p className="rounded-xl border border-[#e9e0c8] bg-[#fcf8ed] px-3.5 py-3 text-[10px] leading-5 text-[#725d2d]">
                 Ao confirmar, os lançamentos ausentes serão adicionados pelos IDs internos e as metas deste mês serão restauradas ou atualizadas. Nenhum registro fora do mês será alterado.
               </p>
             </div>
           )}
           {restoreResult && <div className="rounded-xl bg-[#eff6e5] px-3.5 py-3 text-xs leading-5 text-[#55772c]" role="status" data-testid="status-backup-restore-success">
-            Backup de {formatMonthKey(restoreResult.month)} processado: {restoreResult.insertedSales} novos lançamentos, {restoreResult.skippedSales} já existentes ignorados e {restoreResult.restoredGoals} metas restauradas/atualizadas.
+            Backup de {formatMonthKey(restoreResult.period)} processado: {restoreResult.inserted.sales} vendas, {restoreResult.inserted.refunds} estornos, {restoreResult.inserted.goals} metas, {restoreResult.inserted.products} produtos e {restoreResult.inserted.histories} registros de histórico adicionados. {Object.values(restoreResult.identical).reduce((sum, count) => sum + count, 0)} idênticos ignorados; {restoreResult.conflicts.length} conflitos mantiveram os dados atuais.
           </div>}
           <DialogFooter className="gap-2">
             <button type="button" onClick={() => setRestoreDialogOpen(false)} disabled={restoreBackup.isPending} className="h-10 rounded-xl border border-[#e3dfe7] px-4 text-sm font-bold text-[#716a79] transition hover:bg-[#f8f6fa] disabled:opacity-50" data-testid="button-cancel-backup-restore">{restoreResult ? 'Concluir' : 'Cancelar'}</button>
-            {!restoreResult && <button type="button" onClick={() => void confirmBackupRestore()} disabled={!restorePreview || restoreBackup.isPending} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#7656b8] px-4 text-sm font-bold text-white transition hover:bg-[#6848a9] disabled:cursor-wait disabled:opacity-60" data-testid="button-confirm-backup-restore">
+            {!restoreResult && <button type="button" onClick={() => void confirmBackupRestore()} disabled={!restorePreview || restorePreview.report.blocked || restoreBackup.isPending || isPreviewingRestore} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#7656b8] px-4 text-sm font-bold text-white transition hover:bg-[#6848a9] disabled:cursor-wait disabled:opacity-60" data-testid="button-confirm-backup-restore">
               {restoreBackup.isPending && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />}
               {restoreBackup.isPending ? 'Restaurando…' : 'Confirmar restauração'}
             </button>}

@@ -6,9 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type MonthlySalesBackupInputFormat = typeof MonthlySalesBackupInputFormat[keyof typeof MonthlySalesBackupInputFormat];
+export type MonthlySalesBackupV1Format = typeof MonthlySalesBackupV1Format[keyof typeof MonthlySalesBackupV1Format];
 
 
-export const MonthlySalesBackupInputFormat = {
+export const MonthlySalesBackupV1Format = {
   'zero3-pro-monthly-backup': 'zero3-pro-monthly-backup',
 } as const;

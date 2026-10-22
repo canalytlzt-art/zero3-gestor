@@ -308,6 +308,45 @@ export type SalesRefundRecord = SalesRefund & {
   saleStatus: SalesRefundRecordSaleStatus;
 };
 
+export interface SalesScoreboardTotals {
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  quantity: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  salesCents: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  refundCents: number;
+  /**
+     * @minimum -9007199254740991
+     * @maximum 9007199254740991
+     */
+  netCents: number;
+}
+
+export type SalesScoreboardProduct = SalesScoreboardTotals & {
+  productId: string;
+  productName: string;
+};
+
+export type SalesScoreboardMonth = SalesScoreboardTotals & {
+  /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
+  month: string;
+};
+
+export interface SalesScoreboard {
+  totals: SalesScoreboardTotals;
+  products: SalesScoreboardProduct[];
+  months: SalesScoreboardMonth[];
+}
+
 export interface CreateSalesRefundInput {
   refundDate: string;
   /**
@@ -351,7 +390,7 @@ export interface VoidSalesRefundInput {
   idempotencyKey: string;
 }
 
-export interface SalesBackupRecord {
+export interface SalesBackupV1Record {
   id: string;
   saleDate: string;
   /**
@@ -382,7 +421,7 @@ export interface SalesBackupRecord {
   createdAt: string;
 }
 
-export interface SalesGoalBackupRecord {
+export interface SalesGoalBackupV1Record {
   id: string;
   /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
   month: string;
@@ -399,23 +438,23 @@ export interface SalesGoalBackupRecord {
   updatedAt: string;
 }
 
-export type MonthlySalesBackupInputFormat = typeof MonthlySalesBackupInputFormat[keyof typeof MonthlySalesBackupInputFormat];
+export type MonthlySalesBackupV1Format = typeof MonthlySalesBackupV1Format[keyof typeof MonthlySalesBackupV1Format];
 
 
-export const MonthlySalesBackupInputFormat = {
+export const MonthlySalesBackupV1Format = {
   'zero3-pro-monthly-backup': 'zero3-pro-monthly-backup',
 } as const;
 
-export type MonthlySalesBackupInputVersion = typeof MonthlySalesBackupInputVersion[keyof typeof MonthlySalesBackupInputVersion];
+export type MonthlySalesBackupV1Version = typeof MonthlySalesBackupV1Version[keyof typeof MonthlySalesBackupV1Version];
 
 
-export const MonthlySalesBackupInputVersion = {
+export const MonthlySalesBackupV1Version = {
   NUMBER_1: 1,
 } as const;
 
-export interface MonthlySalesBackupInput {
-  format: MonthlySalesBackupInputFormat;
-  version: MonthlySalesBackupInputVersion;
+export interface MonthlySalesBackupV1 {
+  format: MonthlySalesBackupV1Format;
+  version: MonthlySalesBackupV1Version;
   /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
   month: string;
   generatedAt: string;
@@ -430,20 +469,136 @@ export interface MonthlySalesBackupInput {
      */
   goalCount: number;
   /** @maxItems 10000 */
-  sales: SalesBackupRecord[];
+  sales: SalesBackupV1Record[];
   /** @maxItems 500 */
-  goals: SalesGoalBackupRecord[];
+  goals: SalesGoalBackupV1Record[];
+}
+
+export type SalesBackupRecordEnvelopeScope = typeof SalesBackupRecordEnvelopeScope[keyof typeof SalesBackupRecordEnvelopeScope];
+
+
+export const SalesBackupRecordEnvelopeScope = {
+  period: 'period',
+  dependency: 'dependency',
+} as const;
+
+export type SalesBackupRecordEnvelopeRecord = { [key: string]: unknown };
+
+export interface SalesBackupRecordEnvelope {
+  scope: SalesBackupRecordEnvelopeScope;
+  record: SalesBackupRecordEnvelopeRecord;
+}
+
+export interface SalesBackupRecordCounts {
+  /** @minimum 0 */
+  periodSales: number;
+  /** @minimum 0 */
+  periodRefunds: number;
+  /** @minimum 0 */
+  periodGoals: number;
+  /** @minimum 0 */
+  dependencySales: number;
+  /** @minimum 0 */
+  dependencyRefunds: number;
+  /** @minimum 0 */
+  products: number;
+  /** @minimum 0 */
+  histories: number;
+  /** @minimum 0 */
+  totalRecords: number;
+}
+
+export type MonthlySalesBackupV2SchemaVersion = typeof MonthlySalesBackupV2SchemaVersion[keyof typeof MonthlySalesBackupV2SchemaVersion];
+
+
+export const MonthlySalesBackupV2SchemaVersion = {
+  NUMBER_2: 2,
+} as const;
+
+export type MonthlySalesBackupV2Currency = typeof MonthlySalesBackupV2Currency[keyof typeof MonthlySalesBackupV2Currency];
+
+
+export const MonthlySalesBackupV2Currency = {
+  BRL: 'BRL',
+} as const;
+
+export type MonthlySalesBackupV2BusinessTimezone = typeof MonthlySalesBackupV2BusinessTimezone[keyof typeof MonthlySalesBackupV2BusinessTimezone];
+
+
+export const MonthlySalesBackupV2BusinessTimezone = {
+  'America/Sao_Paulo': 'America/Sao_Paulo',
+} as const;
+
+export interface MonthlySalesBackupV2 {
+  schemaVersion: MonthlySalesBackupV2SchemaVersion;
+  generatedAt: string;
+  /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
+  period: string;
+  currency: MonthlySalesBackupV2Currency;
+  businessTimezone: MonthlySalesBackupV2BusinessTimezone;
+  counts: SalesBackupRecordCounts;
+  /** @maxItems 2000 */
+  products: SalesBackupRecordEnvelope[];
+  /** @maxItems 10000 */
+  sales: SalesBackupRecordEnvelope[];
+  /** @maxItems 20000 */
+  refunds: SalesBackupRecordEnvelope[];
+  /** @maxItems 500 */
+  goals: SalesBackupRecordEnvelope[];
+  /** @maxItems 50000 */
+  histories: SalesBackupRecordEnvelope[];
+}
+
+export type MonthlySalesBackupInput = MonthlySalesBackupV2 | MonthlySalesBackupV1;
+
+export interface SalesRestoreEntityCounts {
+  /** @minimum 0 */
+  products: number;
+  /** @minimum 0 */
+  sales: number;
+  /** @minimum 0 */
+  refunds: number;
+  /** @minimum 0 */
+  goals: number;
+  /** @minimum 0 */
+  histories: number;
+}
+
+export type SalesRestoreConflictEntityType = typeof SalesRestoreConflictEntityType[keyof typeof SalesRestoreConflictEntityType];
+
+
+export const SalesRestoreConflictEntityType = {
+  product: 'product',
+  sale: 'sale',
+  refund: 'refund',
+  goal: 'goal',
+  history: 'history',
+} as const;
+
+export interface SalesRestoreConflict {
+  entityType: SalesRestoreConflictEntityType;
+  id: string;
+  reason: string;
+  blocking: boolean;
+}
+
+export interface SalesRestorePreview {
+  /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
+  period: string;
+  /** @items.pattern ^\d{4}-(0[1-9]|1[0-2])$ */
+  dependencyMonths: string[];
+  toInsert: SalesRestoreEntityCounts;
+  identical: SalesRestoreEntityCounts;
+  conflicts: SalesRestoreConflict[];
+  blocked: boolean;
 }
 
 export interface SalesRestoreResult {
   /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
-  month: string;
-  /** @minimum 0 */
-  insertedSales: number;
-  /** @minimum 0 */
-  skippedSales: number;
-  /** @minimum 0 */
-  restoredGoals: number;
+  period: string;
+  inserted: SalesRestoreEntityCounts;
+  identical: SalesRestoreEntityCounts;
+  conflicts: SalesRestoreConflict[];
 }
 
 export interface ApiError {
@@ -453,4 +608,21 @@ export interface ApiError {
 export interface AccessStatus {
   authorized: boolean;
 }
+
+export type GetSalesScoreboardParams = {
+fromDate?: string;
+toDate?: string;
+/**
+ * @items.pattern ^\d{4}-(0[1-9]|1[0-2])$
+ */
+months?: string[];
+productId?: string;
+};
+
+export type GetMonthlySalesBackupParams = {
+/**
+ * @pattern ^\d{4}-(0[1-9]|1[0-2])$
+ */
+month: string;
+};
 

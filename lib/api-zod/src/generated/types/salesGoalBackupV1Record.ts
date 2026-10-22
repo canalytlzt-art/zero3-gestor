@@ -6,7 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface SalesGoalBackupRecord {
+export interface SalesGoalBackupV1Record {
   id: string;
   /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
   month: string;

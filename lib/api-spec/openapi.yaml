@@ -286,6 +286,65 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+  /sales/scoreboard:
+    get:
+      operationId: getSalesScoreboard
+      tags: [sales]
+      summary: Aggregate active sales and refunds for scoreboard filters
+      parameters:
+        - name: fromDate
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: toDate
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: months
+          in: query
+          required: false
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+        - name: productId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Conciliated sales, refunds, net revenue, and quantity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesScoreboard"
+        "400":
+          description: Invalid or conflicting period filters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Authenticated user is not on the authorized email list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /sales/refund-candidates:
     get:
       operationId: getSalesRefundCandidates
@@ -611,6 +670,79 @@ paths:
                 $ref: "#/components/schemas/ApiError"
         "409":
           description: Idempotency key reused with different data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /sales/backup:
+    get:
+      operationId: getMonthlySalesBackup
+      tags: [sales]
+      summary: Create a complete monthly sales backup
+      parameters:
+        - name: month
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+      responses:
+        "200":
+          description: Complete monthly backup including refund dependencies
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonthlySalesBackupV2"
+        "400":
+          description: Invalid month
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Authenticated user is not on the authorized email list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /sales/restore/preview:
+    post:
+      operationId: previewMonthlySalesBackupRestore
+      tags: [sales]
+      summary: Preview a monthly sales backup before restoring it
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MonthlySalesBackupInput"
+      responses:
+        "200":
+          description: Existing IDs, conflicts, additions, and dependency months
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesRestorePreview"
+        "400":
+          description: Invalid backup file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Authenticated user is not on the authorized email list
           content:
             application/json:
               schema:
@@ -1210,6 +1342,60 @@ components:
               type: string
               enum: [active, cancelled]
           required: [saleDate, productId, productName, quantity, unitAmountCents, totalCents, saleStatus]
+    SalesScoreboardTotals:
+      type: object
+      properties:
+        quantity:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        salesCents:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        refundCents:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        netCents:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+      required: [quantity, salesCents, refundCents, netCents]
+    SalesScoreboardProduct:
+      allOf:
+        - $ref: "#/components/schemas/SalesScoreboardTotals"
+        - type: object
+          properties:
+            productId:
+              type: string
+              format: uuid
+            productName:
+              type: string
+          required: [productId, productName]
+    SalesScoreboardMonth:
+      allOf:
+        - $ref: "#/components/schemas/SalesScoreboardTotals"
+        - type: object
+          properties:
+            month:
+              type: string
+              pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+          required: [month]
+    SalesScoreboard:
+      type: object
+      properties:
+        totals:
+          $ref: "#/components/schemas/SalesScoreboardTotals"
+        products:
+          type: array
+          items:
+            $ref: "#/components/schemas/SalesScoreboardProduct"
+        months:
+          type: array
+          items:
+            $ref: "#/components/schemas/SalesScoreboardMonth"
+      required: [totals, products, months]
     CreateSalesRefundInput:
       type: object
       properties:
@@ -1263,7 +1449,7 @@ components:
           type: string
           format: uuid
       required: [reason, expectedVersion, idempotencyKey]
-    SalesBackupRecord:
+    SalesBackupV1Record:
       type: object
       properties:
         id:
@@ -1303,7 +1489,7 @@ components:
         - totalCents
         - notes
         - createdAt
-    SalesGoalBackupRecord:
+    SalesGoalBackupV1Record:
       type: object
       properties:
         id:
@@ -1328,7 +1514,7 @@ components:
         - productName
         - targetCents
         - updatedAt
-    MonthlySalesBackupInput:
+    MonthlySalesBackupV1:
       type: object
       properties:
         format:
@@ -1355,12 +1541,12 @@ components:
           type: array
           maxItems: 10000
           items:
-            $ref: "#/components/schemas/SalesBackupRecord"
+            $ref: "#/components/schemas/SalesBackupV1Record"
         goals:
           type: array
           maxItems: 500
           items:
-            $ref: "#/components/schemas/SalesGoalBackupRecord"
+            $ref: "#/components/schemas/SalesGoalBackupV1Record"
       required:
         - format
         - version
@@ -1370,26 +1556,167 @@ components:
         - goalCount
         - sales
         - goals
+    SalesBackupRecordEnvelope:
+      type: object
+      properties:
+        scope:
+          type: string
+          enum: [period, dependency]
+        record:
+          type: object
+          additionalProperties: true
+      required: [scope, record]
+    SalesBackupRecordCounts:
+      type: object
+      properties:
+        periodSales:
+          type: integer
+          minimum: 0
+        periodRefunds:
+          type: integer
+          minimum: 0
+        periodGoals:
+          type: integer
+          minimum: 0
+        dependencySales:
+          type: integer
+          minimum: 0
+        dependencyRefunds:
+          type: integer
+          minimum: 0
+        products:
+          type: integer
+          minimum: 0
+        histories:
+          type: integer
+          minimum: 0
+        totalRecords:
+          type: integer
+          minimum: 0
+      required: [periodSales, periodRefunds, periodGoals, dependencySales, dependencyRefunds, products, histories, totalRecords]
+    MonthlySalesBackupV2:
+      type: object
+      properties:
+        schemaVersion:
+          type: integer
+          enum: [2]
+        generatedAt:
+          type: string
+          format: date-time
+        period:
+          type: string
+          pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+        currency:
+          type: string
+          enum: [BRL]
+        businessTimezone:
+          type: string
+          enum: [America/Sao_Paulo]
+        counts:
+          $ref: "#/components/schemas/SalesBackupRecordCounts"
+        products:
+          type: array
+          maxItems: 2000
+          items:
+            $ref: "#/components/schemas/SalesBackupRecordEnvelope"
+        sales:
+          type: array
+          maxItems: 10000
+          items:
+            $ref: "#/components/schemas/SalesBackupRecordEnvelope"
+        refunds:
+          type: array
+          maxItems: 20000
+          items:
+            $ref: "#/components/schemas/SalesBackupRecordEnvelope"
+        goals:
+          type: array
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/SalesBackupRecordEnvelope"
+        histories:
+          type: array
+          maxItems: 50000
+          items:
+            $ref: "#/components/schemas/SalesBackupRecordEnvelope"
+      required: [schemaVersion, generatedAt, period, currency, businessTimezone, counts, products, sales, refunds, goals, histories]
+    MonthlySalesBackupInput:
+      oneOf:
+        - $ref: "#/components/schemas/MonthlySalesBackupV2"
+        - $ref: "#/components/schemas/MonthlySalesBackupV1"
+    SalesRestoreEntityCounts:
+      type: object
+      properties:
+        products:
+          type: integer
+          minimum: 0
+        sales:
+          type: integer
+          minimum: 0
+        refunds:
+          type: integer
+          minimum: 0
+        goals:
+          type: integer
+          minimum: 0
+        histories:
+          type: integer
+          minimum: 0
+      required: [products, sales, refunds, goals, histories]
+    SalesRestoreConflict:
+      type: object
+      properties:
+        entityType:
+          type: string
+          enum: [product, sale, refund, goal, history]
+        id:
+          type: string
+        reason:
+          type: string
+        blocking:
+          type: boolean
+      required: [entityType, id, reason, blocking]
+    SalesRestorePreview:
+      type: object
+      properties:
+        period:
+          type: string
+          pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+        dependencyMonths:
+          type: array
+          items:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+        toInsert:
+          $ref: "#/components/schemas/SalesRestoreEntityCounts"
+        identical:
+          $ref: "#/components/schemas/SalesRestoreEntityCounts"
+        conflicts:
+          type: array
+          items:
+            $ref: "#/components/schemas/SalesRestoreConflict"
+        blocked:
+          type: boolean
+      required: [period, dependencyMonths, toInsert, identical, conflicts, blocked]
     SalesRestoreResult:
       type: object
       properties:
-        month:
+        period:
           type: string
           pattern: '^\d{4}-(0[1-9]|1[0-2])$'
-        insertedSales:
-          type: integer
-          minimum: 0
-        skippedSales:
-          type: integer
-          minimum: 0
-        restoredGoals:
-          type: integer
-          minimum: 0
+        inserted:
+          $ref: "#/components/schemas/SalesRestoreEntityCounts"
+        identical:
+          $ref: "#/components/schemas/SalesRestoreEntityCounts"
+        conflicts:
+          type: array
+          items:
+            $ref: "#/components/schemas/SalesRestoreConflict"
       required:
-        - month
-        - insertedSales
-        - skippedSales
-        - restoredGoals
+        - period
+        - inserted
+        - identical
+        - conflicts
     ApiError:
       type: object
       properties:

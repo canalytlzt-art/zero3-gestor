@@ -8,13 +8,22 @@ import { ArrowDownRight, ArrowRight, BarChart3, CalendarDays, Check, CircleHelp,
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { getGetAccessStatusQueryKey, getGetSalesGoalsQueryKey, getGetSalesQueryKey, useGetAccessStatus, useGetSales, useGetSalesGoals } from '@workspace/api-client-react';
-import type { Sale } from '@workspace/api-client-react';
+import {
+  getGetAccessStatusQueryKey,
+  getGetProductsQueryKey,
+  getGetSalesGoalsQueryKey,
+  getGetSalesScoreboardQueryKey,
+  useGetAccessStatus,
+  useGetProducts,
+  useGetSalesGoals,
+  useGetSalesScoreboard,
+} from '@workspace/api-client-react';
+import type { GetSalesScoreboardParams } from '@workspace/api-client-react';
 import NotFound from '@/pages/not-found';
 import { Link, Redirect, Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
 import SalesManagement from '@/components/sales-management';
 import ScoreboardGoals from '@/components/scoreboard-goals';
-import { formatCents, formatMonthKey, getSaoPauloMonthKey, isCompleteCalendarMonthRange, monthKeysBetween, normalizeProductName, productNameKey } from '@/lib/sales-utils';
+import { formatCents, formatMonthKey, getSaoPauloMonthKey, isCompleteCalendarMonthRange, monthKeysBetween, productNameKey } from '@/lib/sales-utils';
 
 const queryClient = new QueryClient();
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
@@ -153,9 +162,43 @@ function Landing() {
   );
 }
 
+function MetricCard({
+  icon,
+  label,
+  value,
+  detail,
+  testId,
+  accent = 'purple',
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  detail: string;
+  testId: string;
+  accent?: 'purple' | 'lime';
+}) {
+  return (
+    <article className="flex min-h-[118px] items-center gap-3 rounded-2xl border border-[#dfe3eb] bg-white px-4 py-4 shadow-[0_4px_14px_rgba(31,41,55,.035)] sm:px-5">
+      <span
+        className={`grid h-11 w-11 shrink-0 place-items-center rounded-full ${accent === 'lime' ? 'bg-[#d7f500] text-[#252331]' : 'bg-[#f1eaff] text-[#6d28d9]'}`}
+        aria-hidden="true"
+      >
+        {icon}
+      </span>
+      <div className="min-w-0">
+        <p className="text-xs font-medium text-[#5b6475]">{label}</p>
+        <p className="mt-1 whitespace-nowrap text-[clamp(1.2rem,2vw,1.85rem)] font-extrabold leading-tight tracking-[-.045em] tabular-nums text-[#111827]" data-testid={testId}>
+          {value}
+        </p>
+        <p className="mt-1 text-[10px] leading-4 text-[#737b8a]">{detail}</p>
+      </div>
+    </article>
+  );
+}
+
 function ScoreboardContent() {
-  const { data: sales, isLoading, isFetching, isError, refetch } = useGetSales({
-    query: { queryKey: getGetSalesQueryKey(), refetchOnMount: 'always' },
+  const { data: productRecords, isLoading: isProductsLoading, isFetching: isProductsFetching, isError: isProductsError, refetch: refetchProducts } = useGetProducts({
+    query: { queryKey: getGetProductsQueryKey(), refetchOnMount: 'always' },
   });
   const {
     data: salesGoals,
@@ -174,13 +217,43 @@ function ScoreboardContent() {
   const [filterProduct, setFilterProduct] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const allMonthKeys = useMemo(() => {
-    const monthKeys = (sales ?? []).map((sale) => sale.saleDate.slice(0, 7));
-    monthKeys.push(currentMonthKey);
-    monthKeys.sort();
-    return monthKeysBetween(monthKeys[0], monthKeys[monthKeys.length - 1]);
-  }, [sales, currentMonthKey]);
   const invalidRange = periodMode === 'range' && (!dateFrom || !dateTo || dateFrom > dateTo);
+  const invalidMonthSelection = (periodMode === 'single' && !selectedMonth)
+    || (periodMode === 'multiple' && selectedMonths.length === 0);
+  const scoreboardParams = useMemo<GetSalesScoreboardParams>(() => {
+    const params: GetSalesScoreboardParams = {};
+    if (periodMode === 'current') params.months = [currentMonthKey];
+    if (periodMode === 'single' && selectedMonth) params.months = [selectedMonth];
+    if (periodMode === 'multiple' && selectedMonths.length) params.months = [...new Set(selectedMonths)].sort();
+    if (periodMode === 'range' && !invalidRange) {
+      params.fromDate = dateFrom;
+      params.toDate = dateTo;
+    }
+    if (filterProduct) params.productId = filterProduct;
+    return params;
+  }, [periodMode, currentMonthKey, selectedMonth, selectedMonths, invalidRange, dateFrom, dateTo, filterProduct]);
+  const {
+    data: scoreboardData,
+    isLoading: isScoreboardLoading,
+    isFetching: isScoreboardFetching,
+    isError: isScoreboardError,
+    refetch: refetchScoreboard,
+  } = useGetSalesScoreboard(scoreboardParams, {
+    query: {
+      queryKey: getGetSalesScoreboardQueryKey(scoreboardParams),
+      enabled: !invalidRange && !invalidMonthSelection,
+      refetchOnMount: 'always',
+    },
+  });
+  const products = useMemo(() => (productRecords ?? [])
+    .map((product) => ({
+      id: product.id,
+      key: productNameKey(product.name),
+      name: product.name,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' })),
+  [productRecords]);
+  const allMonthKeys = (scoreboardData?.months ?? []).map((month) => month.month);
   const periodMonthKeys = useMemo(() => {
     switch (periodMode) {
       case 'current':
@@ -204,69 +277,20 @@ function ScoreboardContent() {
     : periodMonthKeys.length > 0
       ? 'complete'
       : 'invalid';
-  const selectedMonthSet = useMemo(() => new Set(periodMonthKeys), [periodMonthKeys]);
-  const products = useMemo(() => {
-    const names = new Map<string, string>();
-    for (const sale of sales ?? []) {
-      const name = normalizeProductName(sale.productName);
-      const key = productNameKey(name);
-      if (name && !names.has(key)) names.set(key, name);
-    }
-    return [...names.entries()]
-      .map(([key, name]) => ({ key, name }))
-      .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
-  }, [sales]);
-  const filteredSales = useMemo(() => (sales ?? []).filter((sale) => {
-    const monthKey = sale.saleDate.slice(0, 7);
-    const periodMatches = periodMode === 'all'
-      || (periodMode === 'range'
-        ? !invalidRange && sale.saleDate >= dateFrom && sale.saleDate <= dateTo
-        : selectedMonthSet.has(monthKey));
-    const productMatches = !filterProduct || productNameKey(sale.productName) === filterProduct;
-    return periodMatches && productMatches;
-  }), [sales, periodMode, invalidRange, dateFrom, dateTo, selectedMonthSet, filterProduct]);
-  const report = useMemo(() => {
-    const productGroups = new Map<string, { name: string; quantity: bigint; revenueCents: bigint }>();
-    const monthGroups = new Map<string, { quantity: bigint; revenueCents: bigint }>();
-    let revenueCents = 0n;
-    let quantity = 0n;
-
-    for (const sale of filteredSales) {
-      const amount = BigInt(sale.totalCents);
-      const normalizedName = normalizeProductName(sale.productName);
-      const productKey = productNameKey(normalizedName);
-      const product = productGroups.get(productKey) ?? { name: normalizedName, quantity: 0n, revenueCents: 0n };
-      product.quantity += BigInt(sale.quantity);
-      product.revenueCents += amount;
-      productGroups.set(productKey, product);
-
-      const month = sale.saleDate.slice(0, 7);
-      const monthly = monthGroups.get(month) ?? { quantity: 0n, revenueCents: 0n };
-      monthly.quantity += BigInt(sale.quantity);
-      monthly.revenueCents += amount;
-      monthGroups.set(month, monthly);
-
-      quantity += BigInt(sale.quantity);
-      revenueCents += amount;
-    }
-
-    return {
-      quantity,
-      revenueCents,
-      products: [...productGroups.values()].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' })),
-      months: periodMonthKeys.map((month) => [
-        month,
-        monthGroups.get(month) ?? { quantity: 0n, revenueCents: 0n },
-      ] as const),
-    };
-  }, [filteredSales, periodMonthKeys]);
-  const invalidMonthSelection = periodMode === 'single' && !selectedMonth;
+  const emptyScoreboard = {
+    totals: { quantity: 0, salesCents: 0, refundCents: 0, netCents: 0 },
+    products: [],
+    months: [],
+  };
+  const report = invalidRange || invalidMonthSelection ? emptyScoreboard : scoreboardData ?? emptyScoreboard;
   const selectedProductName = filterProduct
-    ? products.find((product) => product.key === filterProduct)?.name ?? filterProduct
+    ? products.find((product) => product.id === filterProduct)?.name ?? null
     : null;
-  const isRefreshing = isFetching || isGoalsFetching;
+  const isLoading = isScoreboardLoading || isProductsLoading;
+  const isError = isScoreboardError || isProductsError;
+  const isRefreshing = isScoreboardFetching || isProductsFetching || isGoalsFetching;
   const refreshScoreboard = () => {
-    void Promise.all([refetch(), refetchSalesGoals()]);
+    void Promise.all([refetchScoreboard(), refetchProducts(), refetchSalesGoals()]);
   };
   const changePeriodMode = (mode: 'current' | 'single' | 'multiple' | 'range' | 'all') => {
     setPeriodMode(mode);
@@ -300,12 +324,12 @@ function ScoreboardContent() {
 
   return (
     <div className="space-y-5" data-testid="report-scoreboard">
-      <section className="rounded-[24px] border border-[#e7e1e9] bg-[#fffefc] p-4 shadow-[0_8px_28px_rgba(47,39,62,.035)] sm:p-6" aria-label="Filtros do relatório">
+      <section className="rounded-[24px] border border-[#e7e1e9] bg-[#fffefc] p-4 shadow-[0_8px_28px_rgba(47,39,62,.035)] sm:p-6" aria-labelledby="scoreboard-heading">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="eyebrow text-[9px] font-bold text-[#8a8491]">relatório de vendas</p>
-            <h2 className="mt-1 text-lg font-extrabold tracking-[-.04em] text-[#332d40]">Resultado consolidado</h2>
-            <p className="mt-1 text-xs text-[#827b8b]">Valores calculados a partir dos lançamentos persistidos.</p>
+            <h2 id="scoreboard-heading" className="mt-1 text-2xl font-extrabold tracking-[-.04em] text-[#171522] sm:text-[30px]">Scoreboard</h2>
+            <p className="mt-1 text-sm text-[#77717f]">Vendas e faturamento por período</p>
           </div>
           <button
             type="button"
@@ -380,7 +404,7 @@ function ScoreboardContent() {
           <label className="block text-[10px] font-bold uppercase tracking-[.1em] text-[#817b89]">Plano ou produto
             <select value={filterProduct} onChange={(event) => setFilterProduct(event.target.value)} data-testid="filter-scoreboard-product" className="mt-1.5 h-10 w-full rounded-lg border border-[#e7e2ea] bg-[#fffefc] px-3 text-xs font-medium normal-case tracking-normal text-[#443d50] outline-none focus:border-[#9477bf]">
               <option value="">Todos os produtos</option>
-              {products.map(({ key, name }) => <option key={key} value={key}>{name}</option>)}
+              {products.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
             </select>
           </label>
           <button type="button" onClick={clearFilters} className="h-10 rounded-lg px-3 text-xs font-semibold text-[#766d83] transition hover:bg-[#f6f3f8] xl:whitespace-nowrap" data-testid="button-clear-scoreboard-filters">Limpar filtros</button>
@@ -389,22 +413,86 @@ function ScoreboardContent() {
         {invalidMonthSelection && <p className="mt-3 text-xs font-semibold text-[#a24f45]" role="alert" data-testid="status-scoreboard-month">Selecione o mês que deseja consultar.</p>}
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-2" aria-label="Resumo do período">
-        <div className="relative overflow-hidden rounded-[22px] bg-[#302842] px-5 py-5 text-white sm:px-6">
-          <span className="absolute -right-5 -top-12 h-36 w-36 rounded-full border-[22px] border-white/[.05]" aria-hidden="true" />
-          <p className="relative text-[10px] font-bold uppercase tracking-[.13em] text-[#c8bfd4]">Receita total</p>
-          <p className="relative mt-2 font-[family-name:var(--app-font-serif)] text-[clamp(1.8rem,4vw,2.65rem)] font-extrabold leading-none tracking-[-.06em]" data-testid="text-scoreboard-revenue">{formatCents(report.revenueCents)}</p>
-          <p className="relative mt-3 text-[11px] text-[#c8bfd4]">Soma exata dos valores dos lançamentos filtrados</p>
-        </div>
-        <div className="rounded-[22px] border border-[#e6e1e9] bg-[#f0edf4] px-5 py-5 sm:px-6">
-          <p className="text-[10px] font-bold uppercase tracking-[.13em] text-[#777080]">Planos/produtos vendidos</p>
-          <p className="mt-2 font-[family-name:var(--app-font-serif)] text-[clamp(1.8rem,4vw,2.65rem)] font-extrabold leading-none tracking-[-.06em] text-[#392f4b]" data-testid="text-scoreboard-quantity">{report.quantity.toLocaleString('pt-BR')}</p>
-          <p className="mt-3 text-[11px] text-[#777080]">Unidades no período, somando a quantidade de cada venda</p>
-        </div>
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Resumo do período">
+        <MetricCard
+          icon={<BarChart3 size={19} aria-hidden="true" />}
+          label="Vendas registradas"
+          value={formatCents(report.totals.salesCents)}
+          detail="Pela data de cada venda"
+          testId="text-scoreboard-sales"
+        />
+        <MetricCard
+          icon={<ArrowDownRight size={19} aria-hidden="true" />}
+          label="Estornos"
+          value={formatCents(report.totals.refundCents)}
+          detail="Pela data de cada estorno"
+          testId="text-scoreboard-refunds"
+        />
+        <MetricCard
+          icon={<ArrowRight size={19} aria-hidden="true" />}
+          label="Faturamento após estornos"
+          value={formatCents(report.totals.netCents)}
+          detail="Vendas menos estornos"
+          testId="text-scoreboard-net"
+          accent="lime"
+        />
+        <MetricCard
+          icon={<ClipboardList size={19} aria-hidden="true" />}
+          label="Quantidade vendida"
+          value={report.totals.quantity.toLocaleString('pt-BR')}
+          detail="Soma das quantidades vendidas"
+          testId="text-scoreboard-quantity"
+        />
       </section>
 
+      {report.products.length === 0 && !invalidRange && !invalidMonthSelection && (
+        <section className="flex items-start gap-3 rounded-[18px] border border-dashed border-[#dcd5e2] bg-[#fbf9fc] px-4 py-4" data-testid="status-scoreboard-empty">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#eee8f7] text-[#7656b8]"><ClipboardList size={17} /></span>
+          <div>
+            <p className="text-sm font-bold text-[#40374e]">{(productRecords ?? []).length ? 'Nenhuma movimentação neste recorte' : 'Ainda não há produtos registrados'}</p>
+            <p className="mt-1 text-xs leading-5 text-[#827b8b]">{(productRecords ?? []).length ? 'Altere os filtros para consultar outros períodos ou produtos.' : 'Quando houver vendas e estornos, os totais e as tabelas serão preenchidos aqui.'}</p>
+          </div>
+        </section>
+      )}
+
+      <div className="grid gap-5 xl:grid-cols-[1.15fr_.85fr]">
+        <section className="overflow-hidden rounded-[22px] border border-[#e7e1e9] bg-[#fffefc]" aria-labelledby="scoreboard-products-heading" data-testid="table-scoreboard-products">
+          <div className="flex items-end justify-between border-b border-[#ece7ee] px-4 py-4 sm:px-5">
+            <div><p className="eyebrow text-[9px] font-bold text-[#8a8491]">por produto</p><h2 id="scoreboard-products-heading" className="mt-1 text-base font-extrabold tracking-[-.035em] text-[#332d40]">Resultado por produto</h2></div>
+            <span className="text-[10px] font-semibold text-[#8a8491]" data-testid="text-scoreboard-product-groups">{report.products.length} {report.products.length === 1 ? 'produto' : 'produtos'}</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] border-collapse text-left text-xs">
+              <thead><tr className="bg-[#f8f6f9] text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]"><th className="px-4 py-3 sm:px-5">Plano / produto</th><th className="px-4 py-3 text-right">Quantidade</th><th className="px-4 py-3 text-right">Vendas</th><th className="px-4 py-3 text-right">Estornos</th><th className="px-4 py-3 text-right sm:px-5">Após estornos</th></tr></thead>
+              <tbody>
+                {report.products.map((product) => <tr key={product.productId} className="border-t border-[#f0edf1]" data-testid={`row-scoreboard-product-${product.productId}`}><th scope="row" className="max-w-[260px] truncate px-4 py-3.5 font-semibold text-[#494253] sm:px-5">{product.productName}</th><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{product.quantity.toLocaleString('pt-BR')}</td><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{formatCents(product.salesCents)}</td><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{formatCents(product.refundCents)}</td><td className="px-4 py-3.5 text-right font-bold tabular-nums text-[#463954] sm:px-5">{formatCents(product.netCents)}</td></tr>)}
+              </tbody>
+              <tfoot><tr className="border-t border-[#e5dfea] bg-[#f6f3f8] font-extrabold text-[#3e354b]" data-testid="row-scoreboard-products-total"><th scope="row" className="px-4 py-3.5 sm:px-5">Total</th><td className="px-4 py-3.5 text-right tabular-nums" data-testid="text-scoreboard-product-quantity-total">{report.totals.quantity.toLocaleString('pt-BR')}</td><td className="px-4 py-3.5 text-right tabular-nums">{formatCents(report.totals.salesCents)}</td><td className="px-4 py-3.5 text-right tabular-nums">{formatCents(report.totals.refundCents)}</td><td className="px-4 py-3.5 text-right tabular-nums sm:px-5" data-testid="text-scoreboard-product-net-total">{formatCents(report.totals.netCents)}</td></tr></tfoot>
+            </table>
+          </div>
+        </section>
+
+        <section className="overflow-hidden rounded-[22px] border border-[#e7e1e9] bg-[#fffefc]" aria-labelledby="scoreboard-months-heading" data-testid="table-scoreboard-months">
+          <div className="border-b border-[#ece7ee] px-4 py-4 sm:px-5">
+            <p className="eyebrow text-[9px] font-bold text-[#8a8491]">evolução mensal</p><h2 id="scoreboard-months-heading" className="mt-1 text-base font-extrabold tracking-[-.035em] text-[#332d40]">Resumo por mês</h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] border-collapse text-left text-xs">
+              <thead><tr className="bg-[#f8f6f9] text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]"><th className="px-4 py-3 sm:px-5">Mês / ano</th><th className="px-4 py-3 text-right">Quantidade</th><th className="px-4 py-3 text-right">Vendas</th><th className="px-4 py-3 text-right">Estornos</th><th className="px-4 py-3 text-right sm:px-5">Após estornos</th></tr></thead>
+              <tbody>
+                {report.months.map((month) => {
+                  const monthLabel = formatMonthKey(month.month);
+                  return <tr key={month.month} className="border-t border-[#f0edf1]" data-testid={`row-scoreboard-month-${month.month}`}><th scope="row" className="px-4 py-3.5 font-semibold capitalize text-[#494253] sm:px-5">{monthLabel}</th><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{month.quantity.toLocaleString('pt-BR')}</td><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{formatCents(month.salesCents)}</td><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{formatCents(month.refundCents)}</td><td className="px-4 py-3.5 text-right font-bold tabular-nums text-[#463954] sm:px-5">{formatCents(month.netCents)}</td></tr>;
+                })}
+              </tbody>
+              <tfoot><tr className="border-t border-[#e5dfea] bg-[#f6f3f8] font-extrabold text-[#3e354b]" data-testid="row-scoreboard-months-total"><th scope="row" className="px-4 py-3.5 sm:px-5">Total</th><td className="px-4 py-3.5 text-right tabular-nums" data-testid="text-scoreboard-month-quantity-total">{report.totals.quantity.toLocaleString('pt-BR')}</td><td className="px-4 py-3.5 text-right tabular-nums">{formatCents(report.totals.salesCents)}</td><td className="px-4 py-3.5 text-right tabular-nums">{formatCents(report.totals.refundCents)}</td><td className="px-4 py-3.5 text-right tabular-nums sm:px-5" data-testid="text-scoreboard-month-net-total">{formatCents(report.totals.netCents)}</td></tr></tfoot>
+            </table>
+          </div>
+        </section>
+      </div>
+
       <ScoreboardGoals
-        actualRevenueCents={report.revenueCents}
+        actualRevenueCents={BigInt(report.totals.netCents)}
         monthKeys={periodMonthKeys}
         comparisonMode={goalComparisonMode}
         selectedProductName={selectedProductName}
@@ -415,54 +503,8 @@ function ScoreboardContent() {
         onRetry={() => { void refetchSalesGoals(); }}
       />
 
-      {filteredSales.length === 0 && !invalidRange && !invalidMonthSelection && !(periodMode === 'multiple' && selectedMonths.length === 0) && (
-        <section className="flex items-start gap-3 rounded-[18px] border border-dashed border-[#dcd5e2] bg-[#fbf9fc] px-4 py-4" data-testid="status-scoreboard-empty">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#eee8f7] text-[#7656b8]"><ClipboardList size={17} /></span>
-          <div>
-            <p className="text-sm font-bold text-[#40374e]">{(sales ?? []).length ? 'Nenhum lançamento neste recorte' : 'Ainda não há vendas registradas'}</p>
-            <p className="mt-1 text-xs leading-5 text-[#827b8b]">{(sales ?? []).length ? 'Altere ou limpe os filtros para consultar outros resultados.' : 'Quando a equipe registrar vendas, os totais e as tabelas serão preenchidos aqui.'}</p>
-          </div>
-        </section>
-      )}
-
-      <div className="grid gap-5 xl:grid-cols-[1.15fr_.85fr]">
-        <section className="overflow-hidden rounded-[22px] border border-[#e7e1e9] bg-[#fffefc]" aria-labelledby="scoreboard-products-heading" data-testid="table-scoreboard-products">
-          <div className="flex items-end justify-between border-b border-[#ece7ee] px-4 py-4 sm:px-5">
-            <div><p className="eyebrow text-[9px] font-bold text-[#8a8491]">por produto</p><h2 id="scoreboard-products-heading" className="mt-1 text-base font-extrabold tracking-[-.035em] text-[#332d40]">Vendas por produto</h2></div>
-            <span className="text-[10px] font-semibold text-[#8a8491]" data-testid="text-scoreboard-product-groups">{report.products.length} {report.products.length === 1 ? 'produto' : 'produtos'}</span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[540px] border-collapse text-left text-xs">
-              <thead><tr className="bg-[#f8f6f9] text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]"><th className="px-4 py-3 sm:px-5">Produto</th><th className="px-4 py-3 text-right">Quantidade</th><th className="px-4 py-3 text-right sm:px-5">Receita</th></tr></thead>
-              <tbody>
-                {report.products.map((product) => <tr key={productNameKey(product.name)} className="border-t border-[#f0edf1]" data-testid={`row-scoreboard-product-${productNameKey(product.name)}`}><th scope="row" className="max-w-[260px] truncate px-4 py-3.5 font-semibold text-[#494253] sm:px-5">{product.name}</th><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{product.quantity.toLocaleString('pt-BR')}</td><td className="px-4 py-3.5 text-right font-bold tabular-nums text-[#463954] sm:px-5">{formatCents(product.revenueCents)}</td></tr>)}
-              </tbody>
-              <tfoot><tr className="border-t border-[#e5dfea] bg-[#f6f3f8] font-extrabold text-[#3e354b]" data-testid="row-scoreboard-products-total"><th scope="row" className="px-4 py-3.5 sm:px-5">Total</th><td className="px-4 py-3.5 text-right tabular-nums" data-testid="text-scoreboard-product-quantity-total">{report.quantity.toLocaleString('pt-BR')}</td><td className="px-4 py-3.5 text-right tabular-nums sm:px-5" data-testid="text-scoreboard-product-revenue-total">{formatCents(report.products.reduce((sum, product) => sum + product.revenueCents, 0n))}</td></tr></tfoot>
-            </table>
-          </div>
-        </section>
-
-        <section className="overflow-hidden rounded-[22px] border border-[#e7e1e9] bg-[#fffefc]" aria-labelledby="scoreboard-months-heading" data-testid="table-scoreboard-months">
-          <div className="border-b border-[#ece7ee] px-4 py-4 sm:px-5">
-            <p className="eyebrow text-[9px] font-bold text-[#8a8491]">evolução mensal</p><h2 id="scoreboard-months-heading" className="mt-1 text-base font-extrabold tracking-[-.035em] text-[#332d40]">Resumo por mês</h2>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[470px] border-collapse text-left text-xs">
-              <thead><tr className="bg-[#f8f6f9] text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]"><th className="px-4 py-3 sm:px-5">Mês / ano</th><th className="px-4 py-3 text-right">Quantidade</th><th className="px-4 py-3 text-right sm:px-5">Receita</th></tr></thead>
-              <tbody>
-                {report.months.map(([month, values]) => {
-                  const monthLabel = formatMonthKey(month);
-                  return <tr key={month} className="border-t border-[#f0edf1]" data-testid={`row-scoreboard-month-${month}`}><th scope="row" className="px-4 py-3.5 font-semibold capitalize text-[#494253] sm:px-5">{monthLabel}</th><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{values.quantity.toLocaleString('pt-BR')}</td><td className="px-4 py-3.5 text-right font-bold tabular-nums text-[#463954] sm:px-5">{formatCents(values.revenueCents)}</td></tr>;
-                })}
-              </tbody>
-              <tfoot><tr className="border-t border-[#e5dfea] bg-[#f6f3f8] font-extrabold text-[#3e354b]" data-testid="row-scoreboard-months-total"><th scope="row" className="px-4 py-3.5 sm:px-5">Total</th><td className="px-4 py-3.5 text-right tabular-nums" data-testid="text-scoreboard-month-quantity-total">{report.months.reduce((sum, [, values]) => sum + values.quantity, 0n).toLocaleString('pt-BR')}</td><td className="px-4 py-3.5 text-right tabular-nums sm:px-5" data-testid="text-scoreboard-month-revenue-total">{formatCents(report.months.reduce((sum, [, values]) => sum + values.revenueCents, 0n))}</td></tr></tfoot>
-            </table>
-          </div>
-        </section>
-      </div>
-
       <div className="flex flex-col gap-1 border-t border-[#e8e3ea] pt-3 text-[10px] text-[#8b8591] sm:flex-row sm:items-center sm:justify-between" data-testid="status-scoreboard-audit">
-        <span>Totais conciliados pelo mesmo conjunto filtrado: receita e unidades.</span>
+        <span>Totais conciliados pelo mesmo conjunto filtrado: vendas, estornos, saldo e quantidade.</span>
         <span className="inline-flex items-center gap-1.5"><LockKeyhole size={12} /> Visível somente para pessoas autorizadas</span>
       </div>
     </div>
