@@ -3,3 +3,4 @@
 - [API date and database boundaries](refund-api-boundaries.md) — validate calendar dates from raw JSON and keep routed DB reads and writes on the injected connection.
 - [Importação de planilhas](spreadsheet-import.md) — origem pode ter só cliente, Data de início e valor; CSV com acentos exige decodificação explícita.
 - [Domínio de ocupação](occupancy-domain.md) — a nova regra calcula ocupação por presenças/vagas; registros antigos só com percentual continuam separados.
+- [Scripts TSX inline](tsx-inline-async.md) — `tsx -e` compila como CJS neste workspace; envolva verificações assíncronas em uma IIFE.
