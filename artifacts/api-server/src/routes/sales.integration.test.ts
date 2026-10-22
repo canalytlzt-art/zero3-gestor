@@ -367,6 +367,16 @@ test("imports customer, date, and exact total without creating a product or dedu
   };
 
   await withSalesApi(getTestDatabase(), async (baseUrl) => {
+    const invalidDate = await apiRequest(baseUrl, "/sales/import", {
+      method: "POST",
+      body: { ...requestBody, rows: [{ ...rows[0], saleDate: "2098-02-31" }] },
+    });
+    assert.equal(invalidDate.status, 400);
+    const negativeAmount = await apiRequest(baseUrl, "/sales/import", {
+      method: "POST",
+      body: { ...requestBody, rows: [{ ...rows[0], totalCents: -1 }] },
+    });
+    assert.equal(negativeAmount.status, 400);
     const response = await apiRequest(baseUrl, "/sales/import", {
       method: "POST",
       body: requestBody,
@@ -378,6 +388,7 @@ test("imports customer, date, and exact total without creating a product or dedu
       importedCount: number;
       sales: Array<{
         id: string;
+        version: number;
         productId: string | null;
         productName: string;
         customerName: string | null;
@@ -457,6 +468,25 @@ test("imports customer, date, and exact total without creating a product or dedu
       history[0]?.afterData?.sourceFileName,
       "vendas-teste.xlsx",
     );
+    const editKey = randomUUID();
+    createdIdempotencyKeys.push(editKey);
+    const editedResponse = await apiRequest(baseUrl, `/sales/${imported.sales[0].id}`, {
+      method: "PATCH",
+      body: {
+        saleDate: "2098-11-15",
+        productName: "Não categorizado",
+        customerName: "Cliente corrigido",
+        quantity: 1,
+        unitAmountCents: 123456,
+        notes: null,
+        expectedVersion: imported.sales[0].version,
+        idempotencyKey: editKey,
+      },
+    });
+    assert.equal(editedResponse.status, 200);
+    const edited = await editedResponse.json() as { productId: string | null; customerName: string };
+    assert.equal(edited.productId, null, "editing the customer does not create a fake product");
+    assert.equal(edited.customerName, "Cliente corrigido");
   });
 
   const productCountAfter = Number(

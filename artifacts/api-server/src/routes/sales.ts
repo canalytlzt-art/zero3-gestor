@@ -1425,7 +1425,7 @@ export function createSalesRouter(
     }
 
     const saleMonth = sql<string>`to_char(${salesTable.saleDate}, 'YYYY-MM')`;
-    const saleRows = await db
+    const saleRows = await database
       .select({
         productId: salesTable.productId,
         productName: sql<string>`coalesce(${productsTable.name}, ${salesTable.productName}, 'Não categorizado')`,
@@ -1444,7 +1444,7 @@ export function createSalesRouter(
       );
 
     const refundMonth = sql<string>`to_char(${salesRefundsTable.refundDate}, 'YYYY-MM')`;
-    const refundRows = await db
+    const refundRows = await database
       .select({
         productId: salesTable.productId,
         productName: sql<string>`coalesce(${productsTable.name}, ${salesTable.productName}, 'Não categorizado')`,
@@ -1535,7 +1535,7 @@ export function createSalesRouter(
       monthKeys = monthKeysBetween(firstMonth, lastMonth);
     }
     if (parsed.data.productId && !productTotals.has(parsed.data.productId)) {
-      const [product] = await db
+      const [product] = await database
         .select({ id: productsTable.id, name: productsTable.name })
         .from(productsTable)
         .where(eq(productsTable.id, parsed.data.productId))
@@ -1717,7 +1717,7 @@ export function createSalesRouter(
       res.status(400).json({ error: params.error.message });
       return;
     }
-    const [sale] = await db
+    const [sale] = await database
       .select({ id: salesTable.id })
       .from(salesTable)
       .where(eq(salesTable.id, params.data.id))
@@ -1726,7 +1726,7 @@ export function createSalesRouter(
       res.status(404).json({ error: "Sale not found" });
       return;
     }
-    const history = await db
+    const history = await database
       .select()
       .from(salesHistoryTable)
       .where(
@@ -1738,6 +1738,15 @@ export function createSalesRouter(
 
   router.post("/sales/import", async (req, res): Promise<void> => {
     if (!(await requireSalesAccess(req, res))) return;
+    if (Array.isArray(req.body?.rows)) {
+      const invalidDateRow = req.body.rows.find((row: { saleDate?: unknown }) =>
+        parseSaleDate(row?.saleDate) === null,
+      );
+      if (invalidDateRow) {
+        res.status(400).json({ error: `Data da venda inválida na aba ${invalidDateRow.sourceSheet || "Planilha"}, linha ${invalidDateRow.sourceRow || "?"}.` });
+        return;
+      }
+    }
     const parsed = ImportSalesBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.message });
@@ -1794,9 +1803,9 @@ export function createSalesRouter(
         sourceRow: row.sourceRow,
       });
     }
-    const actorId = getAuth(req).userId!;
+    const actorId = getUserId(req)!;
     try {
-      const result = await db.transaction(async (tx) =>
+      const result = await database.transaction(async (tx) =>
         runIdempotent(
           tx,
           {
@@ -2336,16 +2345,17 @@ export function createSalesRouter(
       const preparedSales = [];
       for (let index = 0; index < backup.sales.length; index += 1) {
         const sale = backup.sales[index];
-        const product = sale.productId === null
-          ? null
-          : await getBackupProduct(sale.productName, sale.unitAmountCents);
+        const product = await getBackupProduct(
+          sale.productName,
+          sale.unitAmountCents,
+        );
         preparedSales.push({
           sale,
           saleDate: parseSaleDate(
             (rawSales[index] as { saleDate?: unknown }).saleDate,
           )!,
-          productId: product?.id ?? null,
-          productName: product?.name ?? UNCATEGORIZED_SALE_LABEL,
+          productId: product.id,
+          productName: normalizeProductName(sale.productName),
         });
       }
 
@@ -2583,9 +2593,9 @@ export function createSalesRouter(
       return;
     }
 
-    const actorId = getAuth(req).userId!;
+    const actorId = getUserId(req)!;
     try {
-      const result = await db.transaction(async (tx) =>
+      const result = await database.transaction(async (tx) =>
         runIdempotent(
           tx,
           {

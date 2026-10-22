@@ -203,6 +203,35 @@ try {
     const emptyBackup = await buildMonthlySalesBackup("2035-01", tx);
     assert.equal(emptyBackup.counts.totalRecords, 0);
     check("empty month creates no fictitious records");
+
+    const uncategorizedId = randomUUID();
+    const [uncategorizedSale] = await tx.insert(salesTable).values({
+      id: uncategorizedId, productId: null, productName: "Não categorizado",
+      customerName: "Cliente de importação", saleDate: "2035-02-03",
+      quantity: 1, unitAmountCents: 12345, totalCents: 12345, notes: null,
+    }).returning();
+    const uncategorizedBackup = monthlyBackupV2RuntimeSchema.parse(
+      await buildMonthlySalesBackup("2035-02", tx),
+    );
+    parseMonthlySalesBackup(uncategorizedBackup);
+    assert.equal(uncategorizedBackup.counts.products, 0);
+    assert.equal(uncategorizedBackup.sales[0].record.productId, null);
+    const uncategorizedWorkbook = createSalesWorkbook(
+      clone([uncategorizedSale]) as never, [], [],
+      { fromDate: "2035-02-01", toDate: "2035-02-28", productName: "", generatedAt: "isolated test" },
+    );
+    const uncategorizedSummary = XLSX.utils.sheet_to_json(
+      uncategorizedWorkbook.Sheets["Resumo por plano"], { header: 1, raw: true },
+    ) as unknown[][];
+    assert.equal(uncategorizedSummary.find((row) => row[0] === "Não categorizado")?.[2], 123.45);
+    await tx.delete(salesTable).where(eq(salesTable.id, uncategorizedId));
+    const uncategorizedRestore = await applyMonthlyBackupRestore(tx, uncategorizedBackup as never, "isolated-test");
+    assert.equal(uncategorizedRestore.inserted.sales, 1);
+    const [restoredUncategorized] = await tx.select().from(salesTable).where(eq(salesTable.id, uncategorizedId));
+    assert.equal(restoredUncategorized.productId, null);
+    assert.equal(restoredUncategorized.totalCents, 12345);
+    assert.equal((await tx.select().from(productsTable).where(eq(productsTable.name, "Não categorizado"))).length, 0);
+    check("uncategorized imports survive Excel, backup validation, and restoration without a fake product");
     throw done;
   });
 } catch (error) {

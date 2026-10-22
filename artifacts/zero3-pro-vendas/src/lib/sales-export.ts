@@ -103,7 +103,7 @@ const productRecordSchema = z.object({
 
 const saleRecordSchema = z.object({
   id: uuidSchema,
-  productId: uuidSchema,
+  productId: uuidSchema.nullable(),
   saleDate: dateSchema,
   productName: z.string().min(1).max(120),
   quantity: z.number().int().min(1).max(2_147_483_647),
@@ -227,7 +227,8 @@ const monthlyBackupV2Schema = z.object({
     if (!Number.isSafeInteger(total) || total !== record.totalCents) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['sales', index, 'record', 'totalCents'], message: 'O total do lançamento não confere.' });
     }
-    if (!productIds.has(record.productId)) {
+    if ((record.productId !== null && !productIds.has(record.productId))
+      || (record.productId === null && record.productName !== 'Não categorizado')) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['sales', index, 'record', 'productId'], message: 'O produto associado não está incluído no backup.' });
     }
     if ((record.status === 'active' && record.cancellationReason !== null) || (record.status === 'cancelled' && !record.cancellationReason?.trim())) {

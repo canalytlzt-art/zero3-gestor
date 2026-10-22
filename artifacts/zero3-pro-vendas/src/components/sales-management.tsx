@@ -320,16 +320,17 @@ export default function SalesManagement() {
     }];
   }), [selectedImportLines, products]);
   const invalidSelectedImportCount = selectedImportLines.filter((line) => !line.value).length;
-  const skippedImportCount = importedLines.filter((line) =>
-    !line.sheetSelected || !line.value || skippedImportRows.has(line.key),
-  ).length;
+  const skippedImportCount = importedLines.length - selectedImportLines.length;
   const importOverLimit = selectedImportLines.length > MAX_IMPORT_ROWS;
   const selectedImportSheets = (importWorkspace?.sheets ?? []).filter((sheet) => sheet.selected);
   const importMappingIncomplete = !importWorkspace || !selectedImportSheets.length
     || selectedImportSheets.some((sheet) => (
       (["customerName", "saleDate", "totalAmount"] as const).some((field) => sheet.mapping[field] === null)
     ));
-  const importTotalCents = selectedImportLines.reduce((sum, line) => sum + (line.value?.totalCents ?? 0), 0);
+  const importTotalBigInt = selectedImportLines.reduce((sum, line) => sum + BigInt(line.value?.totalCents ?? 0), 0n);
+  const importTotalTooLarge = importTotalBigInt > BigInt(Number.MAX_SAFE_INTEGER);
+  const importTotalCents = importTotalTooLarge ? 0 : Number(importTotalBigInt);
+  const importTotalLabel = importTotalTooLarge ? 'Total acima do limite seguro' : formatCents(importTotalCents);
 
   async function invalidateSalesRelated() {
     await Promise.all([
@@ -337,6 +338,7 @@ export default function SalesManagement() {
       queryClient.invalidateQueries({ queryKey: getGetSalesHistoryQueryKey() }),
       queryClient.invalidateQueries({ queryKey: getGetProductsQueryKey() }),
       queryClient.invalidateQueries({ queryKey: getGetSalesGoalsQueryKey() }),
+      queryClient.invalidateQueries({ queryKey: getGetSalesScoreboardQueryKey() }),
     ]);
   }
 
@@ -446,7 +448,7 @@ export default function SalesManagement() {
   }
 
   async function commitImport() {
-    if (!importWorkspace || importMappingIncomplete || !validImportRows.length || invalidSelectedImportCount > 0
+    if (!importWorkspace || importMappingIncomplete || !validImportRows.length || invalidSelectedImportCount > 0 || importTotalTooLarge
       || importOverLimit || importSales.isPending || operationLock.current) return;
     const workspace = importWorkspace;
     operationLock.current = true;
@@ -1010,7 +1012,7 @@ export default function SalesManagement() {
           </div> : <>
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[#f8f6fa] px-3.5 py-3">
               <div className="min-w-0"><p className="truncate text-sm font-bold text-[#40374e]" data-testid="text-import-filename">{importWorkspace.filename}</p><p className="mt-0.5 text-[10px] text-[#817b89]">{importWorkspace.sheets.length} aba(s) · hash SHA-256 do arquivo original.</p></div>
-              <span className="rounded-full bg-white px-3 py-1.5 text-[10px] font-bold text-[#5d4a78]" data-testid="text-import-valid-count">{validImportRows.length} prontas · {invalidSelectedImportCount} com erro · {skippedImportCount} fora da importação · {formatCents(importTotalCents)}</span>
+              <span className="rounded-full bg-white px-3 py-1.5 text-[10px] font-bold text-[#5d4a78]" data-testid="text-import-valid-count">{selectedImportLines.length} selecionadas · {validImportRows.length} prontas · {invalidSelectedImportCount} com erro · {skippedImportCount} fora da importação · {importTotalLabel}</span>
             </div>
             <div className="max-h-[340px] space-y-3 overflow-auto pr-1" data-testid="panel-import-sheets">
               {importWorkspace.sheets.map((sheet, sheetIndex) => <section key={sheet.name} className="rounded-xl border border-[#e9e4ec] p-3" data-testid={`panel-import-sheet-${sheetIndex}`}>
@@ -1071,6 +1073,7 @@ export default function SalesManagement() {
             {importMappingIncomplete && <p className="rounded-xl bg-[#fff5e8] px-3.5 py-2.5 text-xs font-semibold text-[#805824]" role="alert" data-testid="status-import-mapping-required">Selecione ao menos uma aba e mapeie nome do cliente, data de início e valor da venda. Produto e quantidade não são obrigatórios.</p>}
             {invalidSelectedImportCount > 0 && <p className="rounded-xl bg-[#fff0ed] px-3.5 py-2.5 text-xs font-semibold text-[#9c483f]" role="alert" data-testid="status-import-invalid-rows">{invalidSelectedImportCount} linha(s) selecionada(s) têm dados inválidos. Corrija o mapeamento ou desmarque cada linha com erro.</p>}
             {importOverLimit && <p className="rounded-xl bg-[#fff5e8] px-3.5 py-2.5 text-xs font-semibold text-[#805824]" role="alert" data-testid="status-import-limit">O limite é de 500 linhas por importação. Desmarque abas/linhas ou divida o arquivo.</p>}
+            {importTotalTooLarge && <p className="rounded-xl bg-[#fff0ed] px-3.5 py-2.5 text-xs font-semibold text-[#9c483f]" role="alert">O total ultrapassa o limite de precisão do sistema. Reduza a seleção antes de importar.</p>}
             <div className="max-h-[300px] overflow-auto rounded-xl border border-[#e9e4ec]" data-testid="table-import-preview">
               <table className="w-full min-w-[760px] border-collapse text-left text-xs">
                 <thead className="sticky top-0 bg-[#f1edf7] text-[10px] font-bold uppercase tracking-[.08em] text-[#655579]"><tr><th className="px-3 py-2.5">Importar</th><th className="px-3 py-2.5">Aba / linha</th><th className="px-3 py-2.5">Cliente</th><th className="px-3 py-2.5">Data</th><th className="px-3 py-2.5">Plano/produto</th><th className="px-3 py-2.5">Valor</th><th className="px-3 py-2.5">Resultado</th></tr></thead>
@@ -1088,10 +1091,10 @@ export default function SalesManagement() {
                         })} aria-label={`Incluir linha ${line.sourceRow} da aba ${line.sourceSheet}`} data-testid={`checkbox-import-include-${idSuffix}`} className="h-4 w-4 accent-[#7656b8]" />
                       </td>
                       <td className="px-3 py-2.5 text-[#4b4356]">{line.sourceSheet} · {line.sourceRow}</td>
-                      <td className="px-3 py-2.5 text-[#4b4356]">{line.value?.customerName ?? '—'}</td>
-                      <td className="px-3 py-2.5 text-[#4b4356]">{line.value ? formatDate(line.value.saleDate) : '—'}</td>
-                      <td className="px-3 py-2.5 text-[#4b4356]">{line.value?.productName ?? 'Não categorizado'}</td>
-                      <td className="px-3 py-2.5 tabular-nums text-[#4b4356]">{line.value ? formatCents(line.value.totalCents) : '—'}</td>
+                      <td className="px-3 py-2.5 text-[#4b4356]">{line.preview.customerName || '—'}</td>
+                      <td className="px-3 py-2.5 text-[#4b4356]">{isValidCalendarDate(line.preview.saleDate) ? formatDate(line.preview.saleDate) : line.preview.saleDate || '—'}</td>
+                      <td className="px-3 py-2.5 text-[#4b4356]">{line.preview.productName ?? 'Não categorizado'}</td>
+                      <td className="px-3 py-2.5 tabular-nums text-[#4b4356]">{line.preview.totalCents !== null ? formatCents(line.preview.totalCents) : line.preview.amountText || '—'}</td>
                       <td className="px-3 py-2.5">
                         {!line.sheetSelected
                           ? <span className="text-[10px] text-[#817b89]">Aba fora da seleção</span>
@@ -1101,17 +1104,18 @@ export default function SalesManagement() {
                               {line.value ? 'Pronta para importar' : line.errors.join(' ')}
                             </span>}
                       </td>
-                  </tr>)}
+                  </tr>;
+                  })}
                 </tbody>
               </table>
             </div>
             <div className="rounded-xl border border-[#e9e0c8] bg-[#fcf8ed] px-3.5 py-3 text-[10px] leading-5 text-[#725d2d]">
-              A prévia inclui as linhas de cada aba, com nome, data, valor e status. {selectedImportLines.length - invalidSelectedImportCount} linha(s) válida(s) somam {formatCents(importTotalCents)}; {invalidSelectedImportCount} linha(s) selecionada(s) precisam ser corrigidas ou desmarcadas. Linhas vazias e subtotais/totais são ignorados. A repetição do arquivo é impedida pelo hash, não por semelhança entre cliente e valor. Nenhum dado é salvo até confirmar.
+              A prévia inclui as linhas de cada aba, com nome, data, valor e status. {selectedImportLines.length - invalidSelectedImportCount} linha(s) válida(s) · {importTotalLabel}; {invalidSelectedImportCount} linha(s) selecionada(s) precisam ser corrigidas ou desmarcadas. Linhas vazias e subtotais/totais são ignorados. A repetição do arquivo é impedida pelo hash, não por semelhança entre cliente e valor. Nenhum dado é salvo até confirmar.
             </div>
           </>}
           <DialogFooter className="gap-2">
             <button type="button" onClick={() => { setImportOpen(false); setImportWorkspace(null); setImportError(''); }} disabled={importSales.isPending} className="h-10 rounded-xl border border-[#e3dfe7] px-4 text-sm font-bold text-[#716a79] hover:bg-[#f8f6fa] disabled:opacity-50" data-testid="button-cancel-import">Cancelar</button>
-            {importWorkspace && <button type="button" onClick={() => void commitImport()} disabled={!validImportRows.length || invalidSelectedImportCount > 0 || importOverLimit || importMappingIncomplete || busy} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#7656b8] px-4 text-sm font-bold text-white hover:bg-[#6848a9] disabled:opacity-55" data-testid="button-confirm-import">
+            {importWorkspace && <button type="button" onClick={() => void commitImport()} disabled={!validImportRows.length || invalidSelectedImportCount > 0 || importTotalTooLarge || importOverLimit || importMappingIncomplete || busy} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#7656b8] px-4 text-sm font-bold text-white hover:bg-[#6848a9] disabled:opacity-55" data-testid="button-confirm-import">
               {importSales.isPending ? 'Importando…' : <><Check size={14} /> Confirmar importação</>}
             </button>}
           </DialogFooter>

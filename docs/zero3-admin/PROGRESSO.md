@@ -154,3 +154,33 @@
 - A coluna `customer_name` foi adicionada como texto anulável somente ao banco de desenvolvimento. Nenhuma migração ou alteração foi aplicada ao banco de produção.
 - `pnpm --filter @workspace/api-spec run codegen`, `pnpm run typecheck`, `pnpm --filter @workspace/db run verify-sales-schema`, `pnpm --filter @workspace/api-server run verify-sales-backup` e o build do app passaram.
 - Os testes de banco e restauração usaram dados fictícios, tabelas temporárias e rollback. A interface após autenticação não foi validada neste navegador.
+
+## Correção da importação de planilhas — 22/10/2026
+
+### Diagnóstico
+
+- O leitor anterior usava somente a primeira aba, considerava a primeira linha como cabeçalho e exigia produto, quantidade e valor unitário. Uma origem com apenas cliente, Data de início e valor total era rejeitada pelo próprio contrato e mapeamento.
+- Nos testes de correção, CSV UTF-8 lido diretamente como bytes corrompia cabeçalhos acentuados. O CSV agora é decodificado explicitamente como texto, com alternativa Windows-1252 quando necessário.
+- Nenhum arquivo original XLSX/CSV estava disponível nos anexos ou no ZIP; os testes abaixo usam fixtures isoladas. Não é possível afirmar que a planilha real foi reproduzida.
+
+### Entrega
+
+- Importação de XLSX e CSV com três campos obrigatórios: nome do cliente, Data de início/data da venda e valor total. Produto/categoria é opcional. Cada linha importada representa uma venda de quantidade 1 e valor unitário igual ao total informado.
+- Todas as abas são lidas, com seleção individual, identificação de abas ocultas, cabeçalho após títulos/linhas vazias, mapeamento por aba e exemplos. Abas ocultas e abas sem mapeamento completo começam desmarcadas, sem impedir o uso das outras.
+- Datas brasileiras, ISO e seriais dos sistemas Excel 1900/1904 são convertidas em dias sem deslocamento de fuso. A API também verifica o texto original da data antes da coerção do validador gerado.
+- Valores brasileiros e células numéricas são convertidos para centavos inteiros. Valor vazio, negativo, inválido ou sem precisão de centavos não vira zero. O total da prévia é acumulado com precisão inteira.
+- A prévia mostra aba, linha física, cliente, data, produto, valor e status, inclusive os valores originais das linhas inválidas. Linhas selecionadas com erro bloqueiam a confirmação até corrigir o mapeamento ou desmarcá-las. Linhas vazias e totais/subtotais são contados e ignorados.
+- O hash original mantém a proteção contra reenvio do mesmo arquivo. Duas vendas legítimas com os mesmos campos, mas em linhas distintas, permanecem separadas. Arquivo, aba, linha e lote ficam na trilha de importação.
+- Sem categoria, a venda tem vínculo de produto nulo e aparece como **Não categorizado**, sem criar item fictício no catálogo. Editar outros campos preserva essa condição; escolher um produto permite a classificação posterior.
+- Scoreboard, relatório Excel e backup/restauração V2 aceitam e incluem vendas não categorizadas. A importação invalida as consultas de vendas e Scoreboard.
+- A única alteração de esquema nesta correção foi permitir `product_id` nulo no banco de desenvolvimento. Registros existentes foram preservados; produção não foi consultada, migrada nem publicada.
+
+### Verificações
+
+- Geração dos contratos, typecheck da API e do app e build com `PORT=19851 BASE_PATH=/`: passaram. O build mantém os avisos já existentes de source map e tamanho do bundle.
+- Testes do leitor: múltiplas abas, aba oculta, preâmbulo, cabeçalho na linha 3, preferência por Data de início, nomes acentuados, CSV com aspas, ausência de cabeçalho sem perder a primeira venda, valores brasileiros/numéricos, datas Excel e rejeição de datas/valores inválidos.
+- Integração HTTP em esquema PostgreSQL isolado: importação só com os três campos, duas vendas legítimas idênticas preservadas, reenvio sem duplicação, ausência de produto fictício, nome e origem preservados, conciliação na Scoreboard, edição de cliente sem criar produto e rejeição de data/valor inválidos.
+- Verificador de Excel/backup: venda não categorizada validada pelo servidor e cliente, incluída no XLSX e restaurada sem produto fictício. As tabelas privadas e o rollback mantiveram inalteradas a quantidade e a soma das vendas compartilhadas.
+- Limites mantidos e informados na interface: XLSX/CSV, 10 MB por arquivo e 500 linhas selecionadas por importação. A proteção por hash é do arquivo inteiro; importar abas adicionais desse mesmo arquivo em outro momento não é um fluxo separado nesta versão.
+- Navegador autenticado: prévia do CSV com cabeçalho na linha 3, total da linha 6 ignorado, cliente/data/valor corretos e produto opcional. Linha inválida manteve seus valores originais e bloqueou confirmação; desmarcá-la, remapear data e selecionar/desmarcar aba atualizaram a disponibilidade corretamente. Em 390 px, botões alcançáveis por rolagem e nenhuma largura extra na página. Nenhuma confirmação foi acionada nem requisição de importação enviada.
+- Após a inspeção visual, ajustado o resumo para mostrar a quantidade selecionada explicitamente e não contar uma linha inválida ainda selecionada como se já estivesse excluída. Essa correção de contagem foi conferida no código e pelo typecheck, sem repetir a sessão do navegador.

@@ -44,6 +44,13 @@ export type MappedSalesImportRow = {
 export type SalesImportRowResult = {
   value: MappedSalesImportRow | null;
   errors: string[];
+  preview: {
+    customerName: string;
+    saleDate: string;
+    totalCents: number | null;
+    amountText: string;
+    productName: string | null;
+  };
 };
 
 const emptyMapping = (): SalesImportMapping => ({
@@ -103,11 +110,14 @@ function isBlankRow(row: unknown[]): boolean {
   return row.every((value) => value === null || value === undefined || String(value).trim() === "");
 }
 
-function isSummaryRow(row: unknown[]): boolean {
+function isSummaryRow(row: unknown[], mapping: SalesImportMapping, date1904: boolean): boolean {
   const firstText = row.find((value) => typeof value === "string" && value.trim()) as string | undefined;
   if (!firstText) return false;
   const normalized = normalizeHeader(firstText);
-  return /^(sub ?total|total( geral| do periodo| final)?|grand total|resumo)(\b|$)/.test(normalized);
+  const summaryLabel = /^(sub ?total|total|total geral|total do periodo|total final|total de vendas|total vendas|grand total|resumo)$/.test(normalized);
+  const hasSaleDate = mapping.saleDate !== null
+    && parseImportDate(row[mapping.saleDate], date1904) !== null;
+  return summaryLabel && !hasSaleDate;
 }
 
 function excelColumnName(index: number): string {
@@ -142,7 +152,17 @@ export async function parseSalesSpreadsheet(
 
   let workbook: XLSX.WorkBook;
   try {
-    workbook = XLSX.read(fileBytes, { type: "array", cellDates: false, raw: true });
+    if (extension === "csv") {
+      let text: string;
+      try {
+        text = new TextDecoder("utf-8", { fatal: true }).decode(fileBytes);
+      } catch {
+        text = new TextDecoder("windows-1252").decode(fileBytes);
+      }
+      workbook = XLSX.read(text, { type: "string", cellDates: false, raw: true });
+    } else {
+      workbook = XLSX.read(fileBytes, { type: "array", cellDates: false, raw: true });
+    }
   } catch {
     throw new Error("Não foi possível ler o arquivo. Verifique se o XLSX ou CSV está íntegro.");
   }
@@ -162,7 +182,7 @@ export async function parseSalesSpreadsheet(
           range: 0,
         }) as unknown[][]
       : [];
-    const headerLimit = Math.min(grid.length, 1000);
+    const headerLimit = grid.length;
     let headerRow: number | null = null;
     let bestScore = 0;
     for (let rowIndex = 0; rowIndex < headerLimit; rowIndex += 1) {
@@ -177,7 +197,7 @@ export async function parseSalesSpreadsheet(
       if (score === 3) break;
     }
 
-    const width = Math.max(0, ...grid.map((row) => row.length));
+    const width = grid.reduce((maximum, row) => Math.max(maximum, row.length), 0);
     const rawHeader = headerRow === null ? [] : (grid[headerRow] ?? []);
     const labels = uniqueColumnLabels(Array.from({ length: width }, (_, index) => {
       const value = String(rawHeader[index] ?? "").trim();
@@ -199,7 +219,7 @@ export async function parseSalesSpreadsheet(
         ignoredBlankRows += 1;
         continue;
       }
-      if (isSummaryRow(cells)) {
+      if (isSummaryRow(cells, mapping, date1904)) {
         ignoredSummaryRows += 1;
         continue;
       }
@@ -294,6 +314,13 @@ export function mapSalesImportRow(
   if (sheet.mapping.totalAmount === null) errors.push("Coluna do valor da venda não identificada.");
   if (rawProduct.length > 120) errors.push("Produto acima de 120 caracteres.");
   return {
+    preview: {
+      customerName,
+      saleDate: saleDate ?? String(cell("saleDate") ?? "").trim(),
+      totalCents,
+      amountText: String(cell("totalAmount") ?? "").trim(),
+      productName: rawProduct || null,
+    },
     value: customerName
       && customerName.length <= 120
       && saleDate
@@ -339,8 +366,6 @@ export function parseImportMoney(value: unknown): number | null {
   } else if (text.includes(",")) {
     if (/^\d+,\d{1,2}$/.test(text)) {
       text = text.replace(",", ".");
-    } else if (/^\d{1,3}(?:,\d{3})+$/.test(text)) {
-      text = text.replace(/,/g, "");
     } else {
       return null;
     }
