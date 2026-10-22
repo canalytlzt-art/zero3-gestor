@@ -12,7 +12,7 @@ type ExportFilters = {
 };
 
 type ProductTotals = {
-  productId: string;
+  productId: string | null;
   productName: string;
   quantity: bigint;
   salesCents: bigint;
@@ -75,10 +75,14 @@ function monthsBetween(start: string, end: string): string[] {
   return months;
 }
 
-function selected(saleDate: string, productId: string, name: string, filters: ExportFilters, productIds: Set<string>) {
+function selected(saleDate: string, productId: string | null, name: string, filters: ExportFilters, productIds: Set<string>) {
   return (!filters.fromDate || saleDate >= filters.fromDate)
     && (!filters.toDate || saleDate <= filters.toDate)
-    && (!filters.productName || (productIds.size > 0 ? productIds.has(productId) : productNameKey(name) === productNameKey(filters.productName)));
+    && (!filters.productName || (productId !== null && productIds.has(productId)) || productNameKey(name) === productNameKey(filters.productName));
+}
+
+function productTotalsKey(productId: string | null) {
+  return productId ?? '__uncategorized__';
 }
 
 export function createSalesWorkbook(
@@ -91,7 +95,9 @@ export function createSalesWorkbook(
   const salesById = new Map(sales.map((sale) => [sale.id, sale]));
   const selectedProductIds = new Set([
     ...products.filter((product) => productNameKey(product.name) === productNameKey(filters.productName)).map(({ id }) => id),
-    ...sales.filter((sale) => productNameKey(sale.productName) === productNameKey(filters.productName)).map(({ productId }) => productId),
+    ...sales
+      .filter((sale) => sale.productId !== null && productNameKey(sale.productName) === productNameKey(filters.productName))
+      .map(({ productId }) => productId as string),
   ]);
   const activeSales = sales.filter((sale) => sale.status === 'active' && selected(sale.saleDate, sale.productId, sale.productName, filters, selectedProductIds));
   const activeRefunds = refunds.filter((refund) => refund.status === 'active'
@@ -108,7 +114,7 @@ export function createSalesWorkbook(
       sale.id,
       sale.saleDate.split('-').reverse().join('/'),
       sale.productId,
-      currentNames.get(sale.productId) ?? sale.productName,
+      currentNames.get(sale.productId ?? '') ?? sale.productName,
       sale.productName,
       sale.quantity,
       moneyForWorkbook(BigInt(sale.unitAmountCents)),
@@ -125,7 +131,7 @@ export function createSalesWorkbook(
       refund.saleId,
       refund.saleDate.split('-').reverse().join('/'),
       refund.productId,
-      currentNames.get(refund.productId) ?? refund.productName,
+      currentNames.get(refund.productId ?? '') ?? refund.productName,
       refund.productName,
       null,
       null,
@@ -154,11 +160,12 @@ export function createSalesWorkbook(
   const byProduct = new Map<string, ProductTotals>();
   const byMonth = new Map<string, MonthTotals>();
   for (const sale of activeSales) {
-    const currentName = currentNames.get(sale.productId) ?? sale.productName;
-    const product = byProduct.get(sale.productId) ?? { productId: sale.productId, productName: currentName, quantity: 0n, salesCents: 0n, refundsCents: 0n };
+    const currentName = currentNames.get(sale.productId ?? '') ?? sale.productName;
+    const key = productTotalsKey(sale.productId);
+    const product = byProduct.get(key) ?? { productId: sale.productId, productName: currentName, quantity: 0n, salesCents: 0n, refundsCents: 0n };
     product.quantity += BigInt(sale.quantity);
     product.salesCents += BigInt(sale.totalCents);
-    byProduct.set(sale.productId, product);
+    byProduct.set(key, product);
     const month = monthKey(sale.saleDate);
     const monthly = byMonth.get(month) ?? { month, quantity: 0n, salesCents: 0n, refundsCents: 0n };
     monthly.quantity += BigInt(sale.quantity);
@@ -166,10 +173,11 @@ export function createSalesWorkbook(
     byMonth.set(month, monthly);
   }
   for (const refund of activeRefunds) {
-    const currentName = currentNames.get(refund.productId) ?? refund.productName;
-    const product = byProduct.get(refund.productId) ?? { productId: refund.productId, productName: currentName, quantity: 0n, salesCents: 0n, refundsCents: 0n };
+    const currentName = currentNames.get(refund.productId ?? '') ?? refund.productName;
+    const key = productTotalsKey(refund.productId);
+    const product = byProduct.get(key) ?? { productId: refund.productId, productName: currentName, quantity: 0n, salesCents: 0n, refundsCents: 0n };
     product.refundsCents += BigInt(refund.amountCents);
-    byProduct.set(refund.productId, product);
+    byProduct.set(key, product);
     const month = monthKey(refund.refundDate);
     const monthly = byMonth.get(month) ?? { month, quantity: 0n, salesCents: 0n, refundsCents: 0n };
     monthly.refundsCents += BigInt(refund.amountCents);

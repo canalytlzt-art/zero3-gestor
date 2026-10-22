@@ -19,7 +19,8 @@ export const SaleStatus = {
 
 export interface Sale {
   id: string;
-  productId: string;
+  /** @nullable */
+  productId: string | null;
   saleDate: string;
   productName: string;
   quantity: number;
@@ -191,30 +192,30 @@ export interface SalesHistoryEntry {
 export interface SalesImportRow {
   saleDate: string;
   /**
-     * @minLength 1
-     * @maxLength 120
-     */
-  productName: string;
-  /**
-     * @minimum 1
-     * @maximum 2147483647
-     */
-  quantity: number;
-  /**
-     * @minimum 0
-     * @maximum 9007199254740991
-     */
-  unitAmountCents: number;
-  /**
      * @maxLength 120
      * @nullable
      */
-  customerName?: string | null;
+  productName?: string | null;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  customerName: string;
   /**
      * @maxLength 1000
      * @nullable
      */
-  notes: string | null;
+  notes?: string | null;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  totalCents: number;
+  /**
+     * @minLength 1
+     * @maxLength 255
+     */
+  sourceSheet: string;
   /** @minimum 1 */
   sourceRow: number;
 }
@@ -273,7 +274,8 @@ export interface SalesRefund {
 export interface SalesRefundCandidate {
   saleId: string;
   saleDate: string;
-  productId: string;
+  /** @nullable */
+  productId: string | null;
   productName: string;
   /** @minimum 1 */
   quantity: number;
@@ -304,9 +306,10 @@ export const SalesRefundRecordSaleStatus = {
   cancelled: 'cancelled',
 } as const;
 
-export type SalesRefundRecord = SalesRefund & {
+export type SalesRefundRecord = SalesRefund & ({
   saleDate: string;
-  productId: string;
+  /** @nullable */
+  productId: string | null;
   productName: string;
   /** @minimum 1 */
   quantity: number;
@@ -321,7 +324,7 @@ export type SalesRefundRecord = SalesRefund & {
      */
   totalCents: number;
   saleStatus: SalesRefundRecordSaleStatus;
-};
+});
 
 export interface SalesScoreboardTotals {
   /**
@@ -346,10 +349,11 @@ export interface SalesScoreboardTotals {
   netCents: number;
 }
 
-export type SalesScoreboardProduct = SalesScoreboardTotals & {
-  productId: string;
+export type SalesScoreboardProduct = SalesScoreboardTotals & ({
+  /** @nullable */
+  productId: string | null;
   productName: string;
-};
+});
 
 export type SalesScoreboardMonth = SalesScoreboardTotals & {
   /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */

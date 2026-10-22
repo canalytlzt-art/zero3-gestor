@@ -7,7 +7,8 @@
  */
 import type { SalesScoreboardTotals } from './salesScoreboardTotals';
 
-export type SalesScoreboardProduct = SalesScoreboardTotals & {
-  productId: string;
+export type SalesScoreboardProduct = SalesScoreboardTotals & ({
+  /** @nullable */
+  productId: string | null;
   productName: string;
-};
+});

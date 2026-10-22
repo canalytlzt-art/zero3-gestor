@@ -49,7 +49,7 @@ before(async () => {
     );
     CREATE TABLE sales (
       id uuid PRIMARY KEY,
-      product_id uuid NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+      product_id uuid REFERENCES products(id) ON DELETE RESTRICT,
       sale_date date NOT NULL,
       product_name text NOT NULL,
       quantity integer NOT NULL,
@@ -85,6 +85,30 @@ before(async () => {
       before_data jsonb,
       after_data jsonb,
       created_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE TABLE sales_import_batches (
+      id uuid PRIMARY KEY,
+      actor_id text NOT NULL,
+      source text NOT NULL,
+      file_hash text NOT NULL,
+      status text NOT NULL DEFAULT 'previewed',
+      row_count integer NOT NULL DEFAULT 0,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      completed_at timestamptz
+    );
+    CREATE TABLE sales_refunds (
+      id uuid PRIMARY KEY,
+      sale_id uuid NOT NULL REFERENCES sales(id) ON DELETE RESTRICT,
+      refund_date date NOT NULL,
+      amount_cents bigint NOT NULL,
+      reason text NOT NULL,
+      status text NOT NULL DEFAULT 'active',
+      void_reason text,
+      version integer NOT NULL DEFAULT 1,
+      created_by text,
+      updated_by text,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
     );
     CREATE TABLE idempotency_keys (
       id uuid PRIMARY KEY,
@@ -313,6 +337,133 @@ function databaseThatFailsGoalReads(database: typeof db): typeof db {
     },
   }) as typeof db;
 }
+
+test("imports customer, date, and exact total without creating a product or deduplicating legitimate equal sales", async () => {
+  const fileHash = randomUUID().replaceAll("-", "").repeat(2);
+  createdIdempotencyKeys.push(fileHash);
+  const productCountBefore = Number(
+    (await testPool!.query("SELECT count(*)::text AS count FROM products")).rows[0]?.count ?? 0,
+  );
+  const rows = [
+    {
+      customerName: "Cliente de teste",
+      saleDate: "2098-11-15",
+      totalCents: 123456,
+      sourceSheet: "Vendas",
+      sourceRow: 8,
+    },
+    {
+      customerName: "Cliente de teste",
+      saleDate: "2098-11-15",
+      totalCents: 123456,
+      sourceSheet: "Vendas",
+      sourceRow: 9,
+    },
+  ];
+  const requestBody = {
+    fileHash,
+    filename: "vendas-teste.xlsx",
+    rows,
+  };
+
+  await withSalesApi(getTestDatabase(), async (baseUrl) => {
+    const response = await apiRequest(baseUrl, "/sales/import", {
+      method: "POST",
+      body: requestBody,
+    });
+    assert.equal(response.status, 201);
+    const imported = (await response.json()) as {
+      batchId: string;
+      replayed: boolean;
+      importedCount: number;
+      sales: Array<{
+        id: string;
+        productId: string | null;
+        productName: string;
+        customerName: string | null;
+        quantity: number;
+        unitAmountCents: number;
+        totalCents: number;
+      }>;
+    };
+    assert.equal(imported.importedCount, 2);
+    assert.equal(imported.replayed, false);
+    assert.equal(imported.sales[0].id === imported.sales[1].id, false);
+    for (const sale of imported.sales) {
+      createdSaleIds.push(sale.id);
+      assert.equal(sale.productId, null);
+      assert.equal(sale.productName, "Não categorizado");
+      assert.equal(sale.customerName, "Cliente de teste");
+      assert.equal(sale.quantity, 1);
+      assert.equal(sale.unitAmountCents, 123456);
+      assert.equal(sale.totalCents, 123456);
+    }
+
+    const replay = await apiRequest(baseUrl, "/sales/import", {
+      method: "POST",
+      body: requestBody,
+    });
+    assert.equal(replay.status, 200);
+    const replayed = (await replay.json()) as typeof imported;
+    assert.equal(replayed.replayed, true);
+    assert.equal(replayed.importedCount, 2);
+    assert.deepEqual(
+      replayed.sales.map(({ id }) => id),
+      imported.sales.map(({ id }) => id),
+    );
+
+    const scoreboardResponse = await apiRequest(
+      baseUrl,
+      "/sales/scoreboard?fromDate=2098-11-01&toDate=2098-11-30",
+    );
+    assert.equal(scoreboardResponse.status, 200);
+    const scoreboard = (await scoreboardResponse.json()) as {
+      totals: { quantity: number; salesCents: number };
+      products: Array<{
+        productId: string | null;
+        productName: string;
+        quantity: number;
+        salesCents: number;
+      }>;
+    };
+    assert.equal(scoreboard.totals.quantity, 2);
+    assert.equal(scoreboard.totals.salesCents, 246912);
+    assert.deepEqual(
+      scoreboard.products.map(({ productId, productName, quantity, salesCents }) => ({
+        productId,
+        productName,
+        quantity,
+        salesCents,
+      })),
+      [{
+        productId: null,
+        productName: "Não categorizado",
+        quantity: 2,
+        salesCents: 246912,
+      }],
+    );
+
+    const historyResponse = await apiRequest(
+      baseUrl,
+      `/sales/${imported.sales[0].id}/history`,
+    );
+    assert.equal(historyResponse.status, 200);
+    const history = (await historyResponse.json()) as Array<{
+      afterData: Record<string, unknown> | null;
+    }>;
+    assert.equal(history[0]?.afterData?.sourceSheet, "Vendas");
+    assert.equal(history[0]?.afterData?.sourceRow, 8);
+    assert.equal(
+      history[0]?.afterData?.sourceFileName,
+      "vendas-teste.xlsx",
+    );
+  });
+
+  const productCountAfter = Number(
+    (await testPool!.query("SELECT count(*)::text AS count FROM products")).rows[0]?.count ?? 0,
+  );
+  assert.equal(productCountAfter, productCountBefore);
+});
 
 test("monthly goals persist by month and plan, enforce access, and don't block sales", async () => {
   const suffix = randomUUID();

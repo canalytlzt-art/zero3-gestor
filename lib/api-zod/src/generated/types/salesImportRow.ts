@@ -9,30 +9,30 @@
 export interface SalesImportRow {
   saleDate: Date;
   /**
-     * @minLength 1
-     * @maxLength 120
-     */
-  productName: string;
-  /**
-     * @minimum 1
-     * @maximum 2147483647
-     */
-  quantity: number;
-  /**
-     * @minimum 0
-     * @maximum 9007199254740991
-     */
-  unitAmountCents: number;
-  /**
      * @maxLength 120
      * @nullable
      */
-  customerName?: string | null;
+  productName?: string | null;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  customerName: string;
   /**
      * @maxLength 1000
      * @nullable
      */
-  notes: string | null;
+  notes?: string | null;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  totalCents: number;
+  /**
+     * @minLength 1
+     * @maxLength 255
+     */
+  sourceSheet: string;
   /** @minimum 1 */
   sourceRow: number;
 }

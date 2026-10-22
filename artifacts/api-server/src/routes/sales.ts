@@ -141,7 +141,7 @@ const backupProductSchema = z
 const backupSaleSchema = z
   .object({
     id: z.string().uuid(),
-    productId: z.string().uuid(),
+    productId: z.string().uuid().nullable(),
     saleDate: z
       .string()
       .refine((value) => parseSaleDate(value) !== null, "Invalid sale date"),
@@ -160,6 +160,7 @@ const backupSaleSchema = z
     updatedAt: z.string().datetime(),
   })
   .passthrough();
+const UNCATEGORIZED_SALE_LABEL = "Não categorizado";
 const backupRefundSchema = z
   .object({
     id: z.string().uuid(),
@@ -328,7 +329,9 @@ const monthlyBackupV2RuntimeSchema = z
       if (
         total === null ||
         total !== record.totalCents ||
-        !products.has(record.productId)
+        (record.productId !== null && !products.has(record.productId)) ||
+        (record.productId === null &&
+          record.productName !== UNCATEGORIZED_SALE_LABEL)
       ) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
@@ -675,10 +678,10 @@ async function analyzeMonthlyBackupRestore(
   ]);
   let blocked = blockedProductIds.size > 0;
   for (const sale of rows.sales) {
-    if (
+    if (sale.productId !== null && (
       !restorableProductIds.has(sale.productId) ||
       blockedProductIds.has(sale.productId)
-    ) {
+    )) {
       blocked = true;
       conflicts.push({
         entityType: "sale",
@@ -989,7 +992,9 @@ export async function buildMonthlySalesBackup(
       : [];
     const allProductIds = [
       ...new Set([
-        ...allSales.map(({ productId }) => productId),
+        ...allSales.flatMap(({ productId }) =>
+          productId ? [productId] : [],
+        ),
         ...periodGoals.flatMap(({ productId }) =>
           productId ? [productId] : [],
         ),
@@ -1423,32 +1428,42 @@ export function createSalesRouter(
     const saleRows = await db
       .select({
         productId: salesTable.productId,
-        productName: productsTable.name,
+        productName: sql<string>`coalesce(${productsTable.name}, ${salesTable.productName}, 'Não categorizado')`,
         month: saleMonth,
         quantity: sql<string>`coalesce(sum(${salesTable.quantity}), 0)::text`,
         salesCents: sql<string>`coalesce(sum(${salesTable.totalCents}), 0)::text`,
       })
       .from(salesTable)
-      .innerJoin(productsTable, eq(productsTable.id, salesTable.productId))
+      .leftJoin(productsTable, eq(productsTable.id, salesTable.productId))
       .where(and(...saleFilters))
-      .groupBy(salesTable.productId, productsTable.name, saleMonth);
+      .groupBy(
+        salesTable.productId,
+        productsTable.name,
+        salesTable.productName,
+        saleMonth,
+      );
 
     const refundMonth = sql<string>`to_char(${salesRefundsTable.refundDate}, 'YYYY-MM')`;
     const refundRows = await db
       .select({
         productId: salesTable.productId,
-        productName: productsTable.name,
+        productName: sql<string>`coalesce(${productsTable.name}, ${salesTable.productName}, 'Não categorizado')`,
         month: refundMonth,
         refundCents: sql<string>`coalesce(sum(${salesRefundsTable.amountCents}), 0)::text`,
       })
       .from(salesRefundsTable)
       .innerJoin(salesTable, eq(salesTable.id, salesRefundsTable.saleId))
-      .innerJoin(productsTable, eq(productsTable.id, salesTable.productId))
+      .leftJoin(productsTable, eq(productsTable.id, salesTable.productId))
       .where(and(...refundFilters))
-      .groupBy(salesTable.productId, productsTable.name, refundMonth);
+      .groupBy(
+        salesTable.productId,
+        productsTable.name,
+        salesTable.productName,
+        refundMonth,
+      );
 
     type ProductAggregate = {
-      productId: string;
+      productId: string | null;
       productName: string;
       quantity: bigint;
       salesCents: bigint;
@@ -1462,10 +1477,11 @@ export function createSalesRouter(
     const productTotals = new Map<string, ProductAggregate>();
     const monthTotals = new Map<string, MonthAggregate>();
     const getProduct = (
-      productId: string,
+      productId: string | null,
       productName: string,
     ): ProductAggregate => {
-      const current = productTotals.get(productId);
+      const key = productId ?? "__uncategorized__";
+      const current = productTotals.get(key);
       if (current) return current;
       const created = {
         productId,
@@ -1474,7 +1490,7 @@ export function createSalesRouter(
         salesCents: 0n,
         refundCents: 0n,
       };
-      productTotals.set(productId, created);
+      productTotals.set(key, created);
       return created;
     };
     const getMonth = (month: string): MonthAggregate => {
@@ -1541,7 +1557,7 @@ export function createSalesRouter(
         (a, b) =>
           a.productName.localeCompare(b.productName, "pt-BR", {
             sensitivity: "base",
-          }) || a.productId.localeCompare(b.productId),
+          }) || (a.productId ?? "").localeCompare(b.productId ?? ""),
       )
       .map((row) => ({
         productId: row.productId,
@@ -1729,11 +1745,12 @@ export function createSalesRouter(
     }
     const normalizedRows: Array<{
       saleDate: string;
-      productName: string;
+      productName: string | null;
       quantity: number;
       unitAmountCents: number;
-      customerName: string | null;
+      customerName: string;
       notes: string | null;
+      sourceSheet: string;
       sourceRow: number;
       totalCents: number;
     }> = [];
@@ -1742,37 +1759,39 @@ export function createSalesRouter(
         row.saleDate instanceof Date
           ? row.saleDate.toISOString().slice(0, 10)
           : parseSaleDate(row.saleDate);
-      const productName = normalizeProductName(row.productName);
-      const totalCents = calculateSaleTotalCents(
-        row.quantity,
-        row.unitAmountCents,
-      );
+      const rawProductName = row.productName?.trim().replace(/\s+/g, " ") || "";
+      const productName = rawProductName
+        ? normalizeProductName(rawProductName)
+        : null;
+      const customerName =
+        row.customerName?.trim().replace(/\s+/g, " ") || "";
+      const totalCents = row.totalCents;
+      const sourceSheet = row.sourceSheet.trim().replace(/\s+/g, " ");
       if (
         !saleDate ||
-        !productName ||
-        productName.length > 120 ||
-        totalCents === null
+        (productName !== null && productName.length > 120) ||
+        !customerName ||
+        customerName.length > 120 ||
+        !sourceSheet ||
+        sourceSheet.length > 255
       ) {
         res
           .status(400)
-          .json({ error: `Invalid import data in row ${row.sourceRow}` });
-        return;
-      }
-      const customerName =
-        row.customerName?.trim().replace(/\s+/g, " ") || null;
-      if (customerName && customerName.length > 120) {
-        res.status(400).json({
-          error: `Customer name exceeds 120 characters in row ${row.sourceRow}`,
-        });
+          .json({
+            error: `Invalid import data in ${sourceSheet || "Planilha"}, row ${row.sourceRow}`,
+          });
         return;
       }
       normalizedRows.push({
-        ...row,
         saleDate,
         productName,
+        quantity: 1,
+        unitAmountCents: totalCents,
         totalCents,
         customerName,
         notes: row.notes?.trim() || null,
+        sourceSheet,
+        sourceRow: row.sourceRow,
       });
     }
     const actorId = getAuth(req).userId!;
@@ -1802,18 +1821,20 @@ export function createSalesRouter(
 
             const importedSales = [];
             for (const row of normalizedRows) {
-              const product = await getOrCreateProduct(
-                tx,
-                row.productName,
-                row.unitAmountCents,
-                actorId,
-              );
+              const product = row.productName
+                ? await getOrCreateProduct(
+                    tx,
+                    row.productName,
+                    row.unitAmountCents,
+                    actorId,
+                  )
+                : null;
               const [sale] = await tx
                 .insert(salesTable)
                 .values({
-                  productId: product.id,
+                  productId: product?.id ?? null,
                   saleDate: row.saleDate,
-                  productName: product.name,
+                  productName: product?.name ?? UNCATEGORIZED_SALE_LABEL,
                   quantity: row.quantity,
                   unitAmountCents: row.unitAmountCents,
                   totalCents: row.totalCents,
@@ -1833,6 +1854,8 @@ export function createSalesRouter(
                 afterData: {
                   ...sale,
                   importBatchId: batch.id,
+                  sourceFileName: parsed.data.filename,
+                  sourceSheet: row.sourceSheet,
                   sourceRow: row.sourceRow,
                 },
               });
@@ -2313,17 +2336,16 @@ export function createSalesRouter(
       const preparedSales = [];
       for (let index = 0; index < backup.sales.length; index += 1) {
         const sale = backup.sales[index];
-        const product = await getBackupProduct(
-          sale.productName,
-          sale.unitAmountCents,
-        );
+        const product = sale.productId === null
+          ? null
+          : await getBackupProduct(sale.productName, sale.unitAmountCents);
         preparedSales.push({
           sale,
           saleDate: parseSaleDate(
             (rawSales[index] as { saleDate?: unknown }).saleDate,
           )!,
-          productId: product.id,
-          productName: normalizeProductName(sale.productName),
+          productId: product?.id ?? null,
+          productName: product?.name ?? UNCATEGORIZED_SALE_LABEL,
         });
       }
 
@@ -2586,20 +2608,40 @@ export function createSalesRouter(
               throw new VersionConflictError();
             }
 
-            let product = await getOrCreateProduct(
-              tx,
-              productName,
-              parsed.data.unitAmountCents,
-              actorId,
-            );
-            const refundSummary = await lockSaleForRefund(tx, current.id);
-            if (current.productId === product.id) {
-              const [currentProduct] = await tx
+            let product: typeof productsTable.$inferSelect | null;
+            if (
+              current.productId === null &&
+              productName === UNCATEGORIZED_SALE_LABEL
+            ) {
+              const [existingUncategorizedProduct] = await tx
                 .select()
                 .from(productsTable)
-                .where(eq(productsTable.id, current.productId))
+                .where(
+                  eq(
+                    productsTable.normalizedName,
+                    productNameKey(UNCATEGORIZED_SALE_LABEL),
+                  ),
+                )
                 .limit(1);
-              if (currentProduct) product = currentProduct;
+              product = existingUncategorizedProduct ?? null;
+            } else {
+              product = await getOrCreateProduct(
+                tx,
+                productName,
+                parsed.data.unitAmountCents,
+                actorId,
+              );
+            }
+            const refundSummary = await lockSaleForRefund(tx, current.id);
+            if (current.productId === (product?.id ?? null)) {
+              if (product) {
+                const [currentProduct] = await tx
+                  .select()
+                  .from(productsTable)
+                  .where(eq(productsTable.id, product.id))
+                  .limit(1);
+                if (currentProduct) product = currentProduct;
+              }
             } else if (refundSummary.activeRefundCount > 0) {
               throw new Error(
                 "A sale with an active refund cannot be moved to another product",
@@ -2618,9 +2660,9 @@ export function createSalesRouter(
             const [updated] = await tx
               .update(salesTable)
               .set({
-                productId: product.id,
+                productId: product?.id ?? null,
                 saleDate,
-                productName: product.name,
+                productName: product?.name ?? UNCATEGORIZED_SALE_LABEL,
                 quantity: parsed.data.quantity,
                 unitAmountCents: parsed.data.unitAmountCents,
                 totalCents,

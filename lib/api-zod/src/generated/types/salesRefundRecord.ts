@@ -8,9 +8,10 @@
 import type { SalesRefund } from './salesRefund';
 import type { SalesRefundRecordSaleStatus } from './salesRefundRecordSaleStatus';
 
-export type SalesRefundRecord = SalesRefund & {
+export type SalesRefundRecord = SalesRefund & ({
   saleDate: Date;
-  productId: string;
+  /** @nullable */
+  productId: string | null;
   productName: string;
   /** @minimum 1 */
   quantity: number;
@@ -25,4 +26,4 @@ export type SalesRefundRecord = SalesRefund & {
      */
   totalCents: number;
   saleStatus: SalesRefundRecordSaleStatus;
-};
+});

@@ -21,9 +21,9 @@ export const salesTable = pgTable(
     id: uuid("id")
       .primaryKey()
       .$defaultFn(() => randomUUID()),
-    productId: uuid("product_id")
-      .notNull()
-      .references(() => productsTable.id, { onDelete: "restrict" }),
+    productId: uuid("product_id").references(() => productsTable.id, {
+      onDelete: "restrict",
+    }),
     saleDate: date("sale_date", { mode: "string" }).notNull(),
     productName: text("product_name").notNull(),
     quantity: integer("quantity").notNull(),

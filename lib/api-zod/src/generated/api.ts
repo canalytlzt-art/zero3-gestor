@@ -136,7 +136,7 @@ export const getSalesResponseCustomerNameMax = 120;
 
 export const GetSalesResponseItem = zod.object({
   "id": zod.string().uuid(),
-  "productId": zod.string().uuid(),
+  "productId": zod.string().uuid().nullable(),
   "saleDate": zod.string(),
   "productName": zod.string(),
   "quantity": zod.number().int(),
@@ -187,7 +187,7 @@ export const createSaleResponseCustomerNameMax = 120;
 
 export const CreateSaleResponse = zod.object({
   "id": zod.string().uuid(),
-  "productId": zod.string().uuid(),
+  "productId": zod.string().uuid().nullable(),
   "saleDate": zod.string(),
   "productName": zod.string(),
   "quantity": zod.number().int(),
@@ -211,14 +211,14 @@ export const importSalesBodyFilenameMax = 255;
 
 export const importSalesBodyRowsItemProductNameMax = 120;
 
-export const importSalesBodyRowsItemQuantityMax = 2147483647;
-
-export const importSalesBodyRowsItemUnitAmountCentsMin = 0;
-export const importSalesBodyRowsItemUnitAmountCentsMax = 9007199254740991;
-
 export const importSalesBodyRowsItemCustomerNameMax = 120;
 
 export const importSalesBodyRowsItemNotesMax = 1000;
+
+export const importSalesBodyRowsItemTotalCentsMin = 0;
+export const importSalesBodyRowsItemTotalCentsMax = 9007199254740991;
+
+export const importSalesBodyRowsItemSourceSheetMax = 255;
 
 
 export const importSalesBodyRowsMax = 500;
@@ -230,11 +230,11 @@ export const ImportSalesBody = zod.object({
   "filename": zod.string().min(1).max(importSalesBodyFilenameMax),
   "rows": zod.array(zod.object({
   "saleDate": zod.coerce.date(),
-  "productName": zod.string().min(1).max(importSalesBodyRowsItemProductNameMax),
-  "quantity": zod.number().int().min(1).max(importSalesBodyRowsItemQuantityMax),
-  "unitAmountCents": zod.number().int().min(importSalesBodyRowsItemUnitAmountCentsMin).max(importSalesBodyRowsItemUnitAmountCentsMax),
-  "customerName": zod.string().max(importSalesBodyRowsItemCustomerNameMax).nullish(),
-  "notes": zod.string().max(importSalesBodyRowsItemNotesMax).nullable(),
+  "productName": zod.string().max(importSalesBodyRowsItemProductNameMax).nullish(),
+  "customerName": zod.string().min(1).max(importSalesBodyRowsItemCustomerNameMax),
+  "notes": zod.string().max(importSalesBodyRowsItemNotesMax).nullish(),
+  "totalCents": zod.number().int().min(importSalesBodyRowsItemTotalCentsMin).max(importSalesBodyRowsItemTotalCentsMax),
+  "sourceSheet": zod.string().min(1).max(importSalesBodyRowsItemSourceSheetMax),
   "sourceRow": zod.number().int().min(1)
 })).min(1).max(importSalesBodyRowsMax)
 })
@@ -253,7 +253,7 @@ export const ImportSalesResponse = zod.object({
   "importedCount": zod.number().int().min(importSalesResponseImportedCountMin),
   "sales": zod.array(zod.object({
   "id": zod.string().uuid(),
-  "productId": zod.string().uuid(),
+  "productId": zod.string().uuid().nullable(),
   "saleDate": zod.string(),
   "productName": zod.string(),
   "quantity": zod.number().int(),
@@ -280,7 +280,7 @@ export const getSalesHistoryResponseCustomerNameMax = 120;
 
 export const GetSalesHistoryResponseItem = zod.object({
   "id": zod.string().uuid(),
-  "productId": zod.string().uuid(),
+  "productId": zod.string().uuid().nullable(),
   "saleDate": zod.string(),
   "productName": zod.string(),
   "quantity": zod.number().int(),
@@ -362,7 +362,7 @@ export const GetSalesScoreboardResponse = zod.object({
   "refundCents": zod.number().int().min(getSalesScoreboardResponseProductsItemOneRefundCentsMin).max(getSalesScoreboardResponseProductsItemOneRefundCentsMax),
   "netCents": zod.number().int().min(getSalesScoreboardResponseProductsItemOneNetCentsMin).max(getSalesScoreboardResponseProductsItemOneNetCentsMax)
 }).and(zod.object({
-  "productId": zod.string().uuid(),
+  "productId": zod.string().uuid().nullable(),
   "productName": zod.string()
 }))),
   "months": zod.array(zod.object({
@@ -395,7 +395,7 @@ export const getSalesRefundCandidatesResponseRemainingCentsMax = 900719925474099
 export const GetSalesRefundCandidatesResponseItem = zod.object({
   "saleId": zod.string().uuid(),
   "saleDate": zod.coerce.date(),
-  "productId": zod.string().uuid(),
+  "productId": zod.string().uuid().nullable(),
   "productName": zod.string(),
   "quantity": zod.number().int().min(1),
   "totalCents": zod.number().int().min(getSalesRefundCandidatesResponseTotalCentsMin).max(getSalesRefundCandidatesResponseTotalCentsMax),
@@ -434,7 +434,7 @@ export const GetSalesRefundsResponseItem = zod.object({
   "updatedAt": zod.coerce.date()
 }).and(zod.object({
   "saleDate": zod.coerce.date(),
-  "productId": zod.string().uuid(),
+  "productId": zod.string().uuid().nullable(),
   "productName": zod.string(),
   "quantity": zod.number().int().min(1),
   "unitAmountCents": zod.number().int().min(getSalesRefundsResponseTwoUnitAmountCentsMin).max(getSalesRefundsResponseTwoUnitAmountCentsMax),
@@ -1103,7 +1103,7 @@ export const updateSaleResponseCustomerNameMax = 120;
 
 export const UpdateSaleResponse = zod.object({
   "id": zod.string().uuid(),
-  "productId": zod.string().uuid(),
+  "productId": zod.string().uuid().nullable(),
   "saleDate": zod.string(),
   "productName": zod.string(),
   "quantity": zod.number().int(),
@@ -1144,7 +1144,7 @@ export const cancelSaleResponseCustomerNameMax = 120;
 
 export const CancelSaleResponse = zod.object({
   "id": zod.string().uuid(),
-  "productId": zod.string().uuid(),
+  "productId": zod.string().uuid().nullable(),
   "saleDate": zod.string(),
   "productName": zod.string(),
   "quantity": zod.number().int(),

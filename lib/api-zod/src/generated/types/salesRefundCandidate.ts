@@ -9,7 +9,8 @@
 export interface SalesRefundCandidate {
   saleId: string;
   saleDate: Date;
-  productId: string;
+  /** @nullable */
+  productId: string | null;
   productName: string;
   /** @minimum 1 */
   quantity: number;

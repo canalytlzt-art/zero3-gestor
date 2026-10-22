@@ -924,7 +924,7 @@ components:
           type: string
           format: uuid
         productId:
-          type: string
+          type: ["string", "null"]
           format: uuid
         saleDate:
           type: string
@@ -1192,27 +1192,27 @@ components:
           type: string
           format: date
         productName:
+          type: ["string", "null"]
+          maxLength: 120
+        customerName:
           type: string
           minLength: 1
-          maxLength: 120
-        quantity:
-          type: integer
-          minimum: 1
-          maximum: 2147483647
-        unitAmountCents:
-          type: integer
-          minimum: 0
-          maximum: 9007199254740991
-        customerName:
-          type: ["string", "null"]
           maxLength: 120
         notes:
           type: ["string", "null"]
           maxLength: 1000
+        totalCents:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        sourceSheet:
+          type: string
+          minLength: 1
+          maxLength: 255
         sourceRow:
           type: integer
           minimum: 1
-      required: [saleDate, productName, quantity, unitAmountCents, notes, sourceRow]
+      required: [saleDate, customerName, totalCents, sourceSheet, sourceRow]
     SalesImportInput:
       type: object
       properties:
@@ -1301,7 +1301,7 @@ components:
           type: string
           format: date
         productId:
-          type: string
+          type: ["string", "null"]
           format: uuid
         productName:
           type: string
@@ -1333,7 +1333,7 @@ components:
               type: string
               format: date
             productId:
-              type: string
+              type: ["string", "null"]
               format: uuid
             productName:
               type: string
@@ -1378,7 +1378,7 @@ components:
         - type: object
           properties:
             productId:
-              type: string
+              type: ["string", "null"]
               format: uuid
             productName:
               type: string

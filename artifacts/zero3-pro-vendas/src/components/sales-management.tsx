@@ -28,11 +28,12 @@ import {
   useUpdateProduct,
   useUpdateSale,
 } from '@workspace/api-client-react';
-import type { CreateProductInput, MonthlySalesBackupInput, Product, Sale, SaleInput, SalesImportRow, SalesRestorePreview, SalesRestoreResult, UpdateProductInput } from '@workspace/api-client-react';
+import type { CreateProductInput, MonthlySalesBackupInput, Product, Sale, SaleInput, SalesRestorePreview, SalesRestoreResult, UpdateProductInput } from '@workspace/api-client-react';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { downloadMonthlyBackup, parseMonthlySalesBackup } from '@/lib/sales-export';
 import { formatCents, formatMonthKey, getSaoPauloMonthKey, normalizeProductName, productNameKey } from '@/lib/sales-utils';
+import { mapSalesImportRow, parseSalesSpreadsheet, type SalesImportField, type SalesImportSheet } from '@/lib/sales-import';
 
 const MAX_BACKUP_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_IMPORT_ROWS = 500;
@@ -60,14 +61,10 @@ const productFormSchema = z.object({
 });
 type ProductFormValues = z.infer<typeof productFormSchema>;
 
-type ImportMappingKey = 'saleDate' | 'productName' | 'quantity' | 'unitAmount' | 'customerName' | 'notes';
-type ImportLine = { sourceRow: number; cells: unknown[]; value: SalesImportRow | null; errors: string[]; possibleMatches: Sale[] };
 type ImportWorkspace = {
   filename: string;
   fileHash: string;
-  headers: string[];
-  lines: { sourceRow: number; cells: unknown[] }[];
-  mappings: Record<ImportMappingKey, string>;
+  sheets: SalesImportSheet[];
 };
 
 function todayLocal() {
@@ -104,64 +101,6 @@ function parseBrlCents(value: string): number | null {
   const [whole, fraction = ''] = normalized.split('.');
   const cents = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
   return Number.isSafeInteger(cents) ? cents : null;
-}
-
-function parseImportDate(value: unknown): string | null {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    const date = new Date(Date.UTC(1899, 11, 30) + Math.floor(value) * 86_400_000);
-    if (!Number.isNaN(date.getTime())) return date.toISOString().slice(0, 10);
-  }
-  const text = String(value ?? '').trim();
-  if (isValidCalendarDate(text)) return text;
-  const br = /^(\d{1,2})[/.](\d{1,2})[/.](\d{4})$/.exec(text);
-  if (br) {
-    const normalized = `${br[3]}-${br[2].padStart(2, '0')}-${br[1].padStart(2, '0')}`;
-    return isValidCalendarDate(normalized) ? normalized : null;
-  }
-  const isoSlash = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/.exec(text);
-  if (isoSlash) {
-    const normalized = `${isoSlash[1]}-${isoSlash[2].padStart(2, '0')}-${isoSlash[3].padStart(2, '0')}`;
-    return isValidCalendarDate(normalized) ? normalized : null;
-  }
-  return null;
-}
-
-function parseImportQuantity(value: unknown): number | null {
-  const text = String(value ?? '').trim();
-  if (!/^[1-9]\d*$/.test(text)) return null;
-  const parsed = Number(text);
-  return Number.isSafeInteger(parsed) && parsed <= 2147483647 ? parsed : null;
-}
-
-function rowByMapping(workspace: ImportWorkspace, line: { sourceRow: number; cells: unknown[] }): Omit<ImportLine, 'possibleMatches'> {
-  const cell = (key: ImportMappingKey) => line.cells[workspace.headers.indexOf(workspace.mappings[key])];
-  const productName = normalizeProductName(String(cell('productName') ?? ''));
-  const saleDate = parseImportDate(cell('saleDate'));
-  const quantity = parseImportQuantity(cell('quantity'));
-  const unitAmountCents = parseBrlCents(String(cell('unitAmount') ?? ''));
-  const customerName = workspace.mappings.customerName
-    ? String(cell('customerName') ?? '').trim().replace(/\s+/g, ' ')
-    : '';
-  const noteRaw = workspace.mappings.notes ? String(cell('notes') ?? '').trim().replace(/\s+/g, ' ') : '';
-  const errors: string[] = [];
-  if (!saleDate) errors.push('Data inválida.');
-  if (!productName) errors.push('Produto obrigatório.');
-  else if (productName.length > 120) errors.push('Produto acima de 120 caracteres.');
-  if (quantity === null) errors.push('Quantidade deve ser um inteiro positivo.');
-  if (unitAmountCents === null) errors.push('Valor deve ter no máximo duas casas decimais.');
-  if (customerName.length > 120) errors.push('Nome acima de 120 caracteres.');
-  if (noteRaw.length > 1000) errors.push('Observação acima de 1.000 caracteres.');
-  if (![saleDate, productName, quantity, unitAmountCents].some(Boolean) && !customerName && !noteRaw) {
-    return { sourceRow: line.sourceRow, cells: line.cells, value: null, errors: ['Linha vazia; será ignorada.'] };
-  }
-  return {
-    sourceRow: line.sourceRow,
-    cells: line.cells,
-    value: saleDate && productName && quantity !== null && unitAmountCents !== null && customerName.length <= 120 && noteRaw.length <= 1000
-      ? { saleDate, productName, quantity, unitAmountCents, customerName: customerName || null, notes: noteRaw || null, sourceRow: line.sourceRow }
-      : null,
-    errors,
-  };
 }
 
 function formatDate(value: string, options: Intl.DateTimeFormatOptions = { day: '2-digit', month: 'short', year: 'numeric' }) {
@@ -291,7 +230,7 @@ export default function SalesManagement() {
   const [importWorkspace, setImportWorkspace] = useState<ImportWorkspace | null>(null);
   const [importError, setImportError] = useState('');
   const [importFeedback, setImportFeedback] = useState('');
-  const [skippedImportRows, setSkippedImportRows] = useState<Set<number>>(new Set());
+  const [skippedImportRows, setSkippedImportRows] = useState<Set<string>>(new Set());
   const importFileRef = useRef<HTMLInputElement>(null);
   const [backupMonth, setBackupMonth] = useState(getSaoPauloMonthKey());
   const [backupDialogOpen, setBackupDialogOpen] = useState(false);
@@ -352,26 +291,45 @@ export default function SalesManagement() {
     resolver: zodResolver(productFormSchema),
     defaultValues: { name: '', suggestedPrice: '', isActive: true },
   });
-  const importedLines = useMemo(() => importWorkspace ? importWorkspace.lines
-    .map((line) => rowByMapping(importWorkspace, line))
-    .map((line) => ({
-      ...line,
-      possibleMatches: line.value ? (historySales ?? []).filter((sale) =>
-        sale.saleDate === line.value?.saleDate
-        && productNameKey(sale.productName) === productNameKey(line.value.productName)
-        && sale.quantity === line.value.quantity
-        && sale.unitAmountCents === line.value.unitAmountCents) : [],
-    })) : [], [importWorkspace, historySales]);
-  const validImportRows = useMemo(() => importedLines.flatMap((line) => {
+  const importedLines = useMemo(() => (importWorkspace?.sheets ?? []).flatMap((sheet) =>
+    sheet.rows.map((source) => ({
+      ...mapSalesImportRow(sheet, source),
+      key: source.key,
+      sourceSheet: sheet.name,
+      sourceRow: source.sourceRow,
+      sheetSelected: sheet.selected,
+    })),
+  ), [importWorkspace]);
+  const selectedImportLines = useMemo(() => {
+    const selectedSheets = new Set((importWorkspace?.sheets ?? []).filter((sheet) => sheet.selected).map((sheet) => sheet.name));
+    return importedLines.filter((line) => selectedSheets.has(line.sourceSheet) && !skippedImportRows.has(line.key));
+  }, [importWorkspace, importedLines, skippedImportRows]);
+  const validImportRows = useMemo(() => selectedImportLines.flatMap((line) => {
     if (!line.value) return [];
-    const canonical = products.find((product) => productNameKey(product.name) === productNameKey(line.value!.productName));
-    return skippedImportRows.has(line.sourceRow) ? [] : [{ ...line.value, productName: canonical?.name ?? line.value.productName }];
-  }), [importedLines, products, skippedImportRows]);
-  const possibleDuplicateCount = importedLines.filter((line) => line.value && line.possibleMatches.length > 0).length;
-  const skippedImportCount = importedLines.filter((line) => !line.value || skippedImportRows.has(line.sourceRow)).length;
-  const importOverLimit = validImportRows.length > MAX_IMPORT_ROWS;
-  const importMappingIncomplete = !importWorkspace || (['saleDate', 'productName', 'quantity', 'unitAmount'] as const)
-    .some((key) => !importWorkspace.mappings[key]);
+    const normalizedName = line.value.productName ? normalizeProductName(line.value.productName) : null;
+    const canonical = normalizedName
+      ? products.find((product) => productNameKey(product.name) === productNameKey(normalizedName))
+      : null;
+    return [{
+      customerName: line.value.customerName,
+      saleDate: line.value.saleDate,
+      totalCents: line.value.totalCents,
+      productName: canonical?.name ?? normalizedName ?? null,
+      sourceSheet: line.value.sourceSheet,
+      sourceRow: line.value.sourceRow,
+    }];
+  }), [selectedImportLines, products]);
+  const invalidSelectedImportCount = selectedImportLines.filter((line) => !line.value).length;
+  const skippedImportCount = importedLines.filter((line) =>
+    !line.sheetSelected || !line.value || skippedImportRows.has(line.key),
+  ).length;
+  const importOverLimit = selectedImportLines.length > MAX_IMPORT_ROWS;
+  const selectedImportSheets = (importWorkspace?.sheets ?? []).filter((sheet) => sheet.selected);
+  const importMappingIncomplete = !importWorkspace || !selectedImportSheets.length
+    || selectedImportSheets.some((sheet) => (
+      (["customerName", "saleDate", "totalAmount"] as const).some((field) => sheet.mapping[field] === null)
+    ));
+  const importTotalCents = selectedImportLines.reduce((sum, line) => sum + (line.value?.totalCents ?? 0), 0);
 
   async function invalidateSalesRelated() {
     await Promise.all([
@@ -456,7 +414,7 @@ export default function SalesManagement() {
     setSkippedImportRows(new Set());
     if (!file) return;
     if (!/\.(csv|xlsx)$/i.test(file.name)) {
-      setImportError('Selecione um arquivo CSV ou XLSX.');
+      setImportError('Formato não suportado. Aceitamos apenas arquivos .xlsx e .csv; arquivos .xls não são compatíveis.');
       setImportOpen(true);
       return;
     }
@@ -474,30 +432,11 @@ export default function SalesManagement() {
         setImportOpen(false);
         return;
       }
-      const XLSX = await import('xlsx');
-      const workbook = XLSX.read(bytes, { type: 'array', cellDates: false });
-      const sheetName = workbook.SheetNames[0];
-      if (!sheetName) throw new Error('O arquivo não contém uma planilha.');
-      const grid = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[sheetName], { header: 1, raw: true, defval: '' }) as unknown[][];
-      if (grid.length < 2 || !grid[0]?.length) throw new Error('Inclua uma linha de cabeçalhos e ao menos uma linha de dados.');
-      const headers = grid[0].map((value, index) => String(value ?? '').trim() || `Coluna ${index + 1}`);
-      const uniqueHeaders = headers.map((header, index) => headers.slice(0, index).includes(header) ? `${header} (${index + 1})` : header);
-      const normalized = uniqueHeaders.map((header) => header.toLocaleLowerCase('pt-BR').normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
-      const findHeader = (patterns: RegExp[]) => uniqueHeaders[normalized.findIndex((header) => patterns.some((pattern) => pattern.test(header)))] ?? '';
-      const mappings: ImportWorkspace['mappings'] = {
-        saleDate: findHeader([/^data$/, /data.*venda/, /sale.?date/]),
-        productName: findHeader([/produto/, /plano/, /product/]),
-        quantity: findHeader([/^qtd/, /quantidade/, /quantity/]),
-        unitAmount: findHeader([/valor.*unit/, /preco.*unit/, /unit.*price/, /^valor$/]),
-        customerName: findHeader([/cliente/, /comprador/, /nome/]),
-        notes: findHeader([/observ/, /nota/, /note/]),
-      };
+      const parsed = await parseSalesSpreadsheet(bytes, file.name);
       setImportWorkspace({
         filename: file.name,
         fileHash,
-        headers: uniqueHeaders,
-        lines: grid.slice(1).map((cells, index) => ({ sourceRow: index + 2, cells })),
-        mappings,
+        sheets: parsed.sheets,
       });
       setImportOpen(true);
     } catch (error) {
@@ -507,7 +446,8 @@ export default function SalesManagement() {
   }
 
   async function commitImport() {
-    if (!importWorkspace || importMappingIncomplete || !validImportRows.length || importOverLimit || isHistoryLoading || isHistoryError || importSales.isPending || operationLock.current) return;
+    if (!importWorkspace || importMappingIncomplete || !validImportRows.length || invalidSelectedImportCount > 0
+      || importOverLimit || importSales.isPending || operationLock.current) return;
     const workspace = importWorkspace;
     operationLock.current = true;
     setImportError('');
@@ -1065,71 +1005,113 @@ export default function SalesManagement() {
           {!importWorkspace ? <div className="rounded-2xl border border-dashed border-[#ded7e7] p-6 text-center">
             <FileSpreadsheet className="mx-auto text-[#7656b8]" size={24} />
             <p className="mt-3 text-sm font-bold text-[#40374e]">Selecione um arquivo CSV ou XLSX</p>
-            <p className="mt-1 text-xs text-[#817b89]">O arquivo original é conferido por hash para impedir importações repetidas.</p>
+            <p className="mt-1 text-xs text-[#817b89]">Lemos todas as abas e evitamos repetir o mesmo arquivo. XLS e outros formatos não são aceitos.</p>
             <button type="button" onClick={() => importFileRef.current?.click()} className="mt-4 inline-flex h-10 items-center gap-2 rounded-xl bg-[#d7f500] px-4 text-xs font-extrabold text-[#262b15]" data-testid="button-select-import-file"><Upload size={14} /> Escolher arquivo</button>
           </div> : <>
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[#f8f6fa] px-3.5 py-3">
-              <div className="min-w-0"><p className="truncate text-sm font-bold text-[#40374e]" data-testid="text-import-filename">{importWorkspace.filename}</p><p className="mt-0.5 text-[10px] text-[#817b89]">Hash SHA-256 calculado a partir dos bytes originais.</p></div>
-              <span className="rounded-full bg-white px-3 py-1.5 text-[10px] font-bold text-[#5d4a78]" data-testid="text-import-valid-count">{validImportRows.length} para importar · {skippedImportCount} ignoradas</span>
+              <div className="min-w-0"><p className="truncate text-sm font-bold text-[#40374e]" data-testid="text-import-filename">{importWorkspace.filename}</p><p className="mt-0.5 text-[10px] text-[#817b89]">{importWorkspace.sheets.length} aba(s) · hash SHA-256 do arquivo original.</p></div>
+              <span className="rounded-full bg-white px-3 py-1.5 text-[10px] font-bold text-[#5d4a78]" data-testid="text-import-valid-count">{validImportRows.length} prontas · {invalidSelectedImportCount} com erro · {skippedImportCount} fora da importação · {formatCents(importTotalCents)}</span>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
-              {([
-                ['saleDate', 'Data da venda', true],
-                ['productName', 'Produto', true],
-                ['quantity', 'Quantidade', true],
-                ['unitAmount', 'Valor unitário', true],
-                ['customerName', 'Nome', false],
-                ['notes', 'Observação', false],
-              ] as const).map(([key, label, required]) => <label key={key} className="min-w-0 text-[10px] font-bold text-[#665f70]">{label}{required ? ' *' : ''}
-                <select value={importWorkspace.mappings[key]} onChange={(event) => setImportWorkspace({ ...importWorkspace, mappings: { ...importWorkspace.mappings, [key]: event.target.value } })} data-testid={`select-import-map-${key}`} className="mt-1 h-10 w-full rounded-lg border border-[#e7e2ea] bg-white px-2 text-xs font-medium text-[#443d50] outline-none focus:border-[#9477bf]">
-                  <option value="">{required ? 'Selecione a coluna' : 'Não importar'}</option>
-                  {importWorkspace.headers.map((header) => <option key={header} value={header}>{header}</option>)}
-                </select>
-              </label>)}
+            <div className="max-h-[340px] space-y-3 overflow-auto pr-1" data-testid="panel-import-sheets">
+              {importWorkspace.sheets.map((sheet, sheetIndex) => <section key={sheet.name} className="rounded-xl border border-[#e9e4ec] p-3" data-testid={`panel-import-sheet-${sheetIndex}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="flex min-h-8 items-center gap-2 text-xs font-bold text-[#40374e]">
+                    <input
+                      type="checkbox"
+                      checked={sheet.selected}
+                      onChange={(event) => setImportWorkspace((current) => current ? {
+                        ...current,
+                        sheets: current.sheets.map((item) => item.name === sheet.name
+                          ? { ...item, selected: event.target.checked }
+                          : item),
+                      } : current)}
+                      data-testid={`checkbox-import-sheet-${sheetIndex}`}
+                      className="h-4 w-4 accent-[#7656b8]"
+                    />
+                    {sheet.name}
+                    {sheet.hidden && <span className="rounded-full bg-[#fff2db] px-2 py-0.5 text-[9px] font-bold text-[#805824]">Oculta</span>}
+                  </label>
+                  <span className="text-[10px] text-[#817b89]">
+                    {sheet.rows.length} linhas · cabeçalho {sheet.headerRow ? `na linha ${sheet.headerRow}` : 'não detectado'} · {sheet.ignoredBlankRows} vazias e {sheet.ignoredSummaryRows} totais ignoradas
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                  {([
+                    { field: 'customerName', label: 'Nome do cliente', required: true },
+                    { field: 'saleDate', label: 'Data de início', required: true },
+                    { field: 'totalAmount', label: 'Valor da venda', required: true },
+                    { field: 'productName', label: 'Plano/produto', required: false },
+                  ] as Array<{ field: SalesImportField; label: string; required: boolean }>).map(({ field, label, required }) => {
+                    const selectedColumn = sheet.mapping[field];
+                    const sample = selectedColumn === null ? '' : String(sheet.rows[0]?.cells[selectedColumn] ?? '').trim();
+                    return <label key={field} className="min-w-0 text-[10px] font-bold text-[#665f70]">{label}{required ? ' *' : ''}
+                      <select
+                        value={selectedColumn === null ? '' : String(selectedColumn)}
+                        onChange={(event) => {
+                          const column = event.target.value === '' ? null : Number(event.target.value);
+                          setImportWorkspace((current) => current ? {
+                            ...current,
+                            sheets: current.sheets.map((item) => item.name === sheet.name
+                              ? { ...item, mapping: { ...item.mapping, [field]: column } }
+                              : item),
+                          } : current);
+                        }}
+                        data-testid={`select-import-map-${sheetIndex}-${field}`}
+                        className="mt-1 h-9 w-full rounded-lg border border-[#e7e2ea] bg-white px-2 text-xs font-medium text-[#443d50] outline-none focus:border-[#9477bf]"
+                      >
+                        <option value="">{required ? 'Selecione a coluna' : 'Não categorizar'}</option>
+                        {sheet.columns.map((column) => <option key={column.index} value={column.index}>{column.label}</option>)}
+                      </select>
+                      {sample && <span className="mt-1 block truncate font-normal text-[#8a8491]" title={sample}>Exemplo: {sample}</span>}
+                    </label>;
+                  })}
+                </div>
+              </section>)}
             </div>
-            {importMappingIncomplete && <p className="rounded-xl bg-[#fff5e8] px-3.5 py-2.5 text-xs font-semibold text-[#805824]" role="alert" data-testid="status-import-mapping-required">Mapeie as quatro colunas obrigatórias para validar as linhas.</p>}
-            {importOverLimit && <p className="rounded-xl bg-[#fff5e8] px-3.5 py-2.5 text-xs font-semibold text-[#805824]" role="alert" data-testid="status-import-limit">Este arquivo tem mais de 500 linhas válidas. Divida o arquivo para importar sem omitir vendas.</p>}
+            {importMappingIncomplete && <p className="rounded-xl bg-[#fff5e8] px-3.5 py-2.5 text-xs font-semibold text-[#805824]" role="alert" data-testid="status-import-mapping-required">Selecione ao menos uma aba e mapeie nome do cliente, data de início e valor da venda. Produto e quantidade não são obrigatórios.</p>}
+            {invalidSelectedImportCount > 0 && <p className="rounded-xl bg-[#fff0ed] px-3.5 py-2.5 text-xs font-semibold text-[#9c483f]" role="alert" data-testid="status-import-invalid-rows">{invalidSelectedImportCount} linha(s) selecionada(s) têm dados inválidos. Corrija o mapeamento ou desmarque cada linha com erro.</p>}
+            {importOverLimit && <p className="rounded-xl bg-[#fff5e8] px-3.5 py-2.5 text-xs font-semibold text-[#805824]" role="alert" data-testid="status-import-limit">O limite é de 500 linhas por importação. Desmarque abas/linhas ou divida o arquivo.</p>}
             <div className="max-h-[300px] overflow-auto rounded-xl border border-[#e9e4ec]" data-testid="table-import-preview">
-              <table className="w-full min-w-[660px] border-collapse text-left text-xs">
-                <thead className="sticky top-0 bg-[#f1edf7] text-[10px] font-bold uppercase tracking-[.08em] text-[#655579]"><tr><th className="px-3 py-2.5">Linha</th><th className="px-3 py-2.5">Data</th><th className="px-3 py-2.5">Produto</th><th className="px-3 py-2.5">Qtd.</th><th className="px-3 py-2.5">Valor</th><th className="px-3 py-2.5">Resultado</th></tr></thead>
+              <table className="w-full min-w-[760px] border-collapse text-left text-xs">
+                <thead className="sticky top-0 bg-[#f1edf7] text-[10px] font-bold uppercase tracking-[.08em] text-[#655579]"><tr><th className="px-3 py-2.5">Importar</th><th className="px-3 py-2.5">Aba / linha</th><th className="px-3 py-2.5">Cliente</th><th className="px-3 py-2.5">Data</th><th className="px-3 py-2.5">Plano/produto</th><th className="px-3 py-2.5">Valor</th><th className="px-3 py-2.5">Resultado</th></tr></thead>
                 <tbody className="divide-y divide-[#f0edf2]">
-                  {importedLines.map((line) => <tr key={line.sourceRow} className={line.value ? 'bg-white' : 'bg-[#fffaf9]'} data-testid={`row-import-${line.sourceRow}`}>
-                    <td className="px-3 py-2.5 tabular-nums text-[#817b89]">{line.sourceRow}</td>
-                    <td className="px-3 py-2.5 text-[#4b4356]">{line.value ? formatDate(line.value.saleDate) : '—'}</td>
-                    <td className="max-w-[180px] truncate px-3 py-2.5 text-[#4b4356]">{line.value?.productName ?? '—'}</td>
-                    <td className="px-3 py-2.5 tabular-nums text-[#4b4356]">{line.value?.quantity ?? '—'}</td>
-                    <td className="px-3 py-2.5 tabular-nums text-[#4b4356]">{line.value ? formatCents(line.value.unitAmountCents) : '—'}</td>
-                    <td className="px-3 py-2.5">
-                      {line.value && (line.possibleMatches.length > 0 || skippedImportRows.has(line.sourceRow)) ? <div className="space-y-1.5">
-                        <span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-bold ${skippedImportRows.has(line.sourceRow) ? 'bg-[#f2ecec] text-[#796565]' : 'bg-[#fcf3df] text-[#805824]'}`} data-testid={`status-import-row-${line.sourceRow}`}>
-                          {skippedImportRows.has(line.sourceRow) ? 'Marcada para ignorar' : `Possível duplicidade · ${line.possibleMatches.length} venda(s) coincidente(s)`}
-                        </span>
-                        <label className="flex min-h-8 items-center gap-1.5 text-[10px] font-medium text-[#6f6879]">
-                          <input type="checkbox" checked={!skippedImportRows.has(line.sourceRow)} onChange={(event) => setSkippedImportRows((current) => {
-                            const next = new Set(current);
-                            if (event.target.checked) next.delete(line.sourceRow);
-                            else next.add(line.sourceRow);
-                            return next;
-                          })} data-testid={`checkbox-import-include-${line.sourceRow}`} className="h-4 w-4 accent-[#7656b8]" />
-                          Incluir esta linha
-                        </label>
-                        {line.possibleMatches.length > 0 && <ul className="space-y-0.5 text-[9px] leading-4 text-[#807763]" aria-label={`Vendas coincidentes da linha ${line.sourceRow}`}>
-                          {line.possibleMatches.slice(0, 2).map((match, index) => <li key={`${match.saleDate}-${index}`} data-testid={`text-import-match-${line.sourceRow}-${index}`}>No histórico: {match.status === 'cancelled' ? 'cancelada' : 'ativa'} · {match.quantity} un. · {formatCents(match.unitAmountCents)} / un.</li>)}
-                          {line.possibleMatches.length > 2 && <li>Mais {line.possibleMatches.length - 2} correspondências.</li>}
-                        </ul>}
-                      </div> : <span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-bold ${line.value ? 'bg-[#eff6e5] text-[#55772c]' : 'bg-[#fff0ed] text-[#9c483f]'}`} data-testid={`status-import-row-${line.sourceRow}`}>{line.value ? 'Será importada' : line.errors.join(' ') || 'Linha vazia'}</span>}
-                    </td>
+                  {importedLines.map((line) => {
+                    const excluded = skippedImportRows.has(line.key);
+                    const idSuffix = `${encodeURIComponent(line.sourceSheet)}-${line.sourceRow}`;
+                    return <tr key={line.key} className={line.value ? 'bg-white' : 'bg-[#fffaf9]'} data-testid={`row-import-${idSuffix}`}>
+                      <td className="px-3 py-2.5">
+                        <input type="checkbox" checked={!excluded} onChange={(event) => setSkippedImportRows((current) => {
+                          const next = new Set(current);
+                          if (event.target.checked) next.delete(line.key);
+                          else next.add(line.key);
+                          return next;
+                        })} aria-label={`Incluir linha ${line.sourceRow} da aba ${line.sourceSheet}`} data-testid={`checkbox-import-include-${idSuffix}`} className="h-4 w-4 accent-[#7656b8]" />
+                      </td>
+                      <td className="px-3 py-2.5 text-[#4b4356]">{line.sourceSheet} · {line.sourceRow}</td>
+                      <td className="px-3 py-2.5 text-[#4b4356]">{line.value?.customerName ?? '—'}</td>
+                      <td className="px-3 py-2.5 text-[#4b4356]">{line.value ? formatDate(line.value.saleDate) : '—'}</td>
+                      <td className="px-3 py-2.5 text-[#4b4356]">{line.value?.productName ?? 'Não categorizado'}</td>
+                      <td className="px-3 py-2.5 tabular-nums text-[#4b4356]">{line.value ? formatCents(line.value.totalCents) : '—'}</td>
+                      <td className="px-3 py-2.5">
+                        {!line.sheetSelected
+                          ? <span className="text-[10px] text-[#817b89]">Aba fora da seleção</span>
+                          : excluded
+                            ? <span className="text-[10px] font-semibold text-[#817b89]">Linha desmarcada</span>
+                            : <span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-bold ${line.value ? 'bg-[#eff6e5] text-[#55772c]' : 'bg-[#fff0ed] text-[#9c483f]'}`} data-testid={`status-import-row-${idSuffix}`}>
+                              {line.value ? 'Pronta para importar' : line.errors.join(' ')}
+                            </span>}
+                      </td>
                   </tr>)}
                 </tbody>
               </table>
             </div>
             <div className="rounded-xl border border-[#e9e0c8] bg-[#fcf8ed] px-3.5 py-3 text-[10px] leading-5 text-[#725d2d]">
-              {possibleDuplicateCount > 0 ? `${possibleDuplicateCount} linha(s) com possível duplicidade sinalizada(s); nenhuma é removida automaticamente e elas permanecem incluídas até você desmarcá-las.` : 'Nenhuma possível duplicidade encontrada nos registros existentes.'} Serão enviadas {importOverLimit || importMappingIncomplete ? '0' : validImportRows.length} linhas; {skippedImportCount} linhas inválidas, vazias ou desmarcadas serão ignoradas. Nenhum dado é salvo até você confirmar.
+              A prévia inclui as linhas de cada aba, com nome, data, valor e status. {selectedImportLines.length - invalidSelectedImportCount} linha(s) válida(s) somam {formatCents(importTotalCents)}; {invalidSelectedImportCount} linha(s) selecionada(s) precisam ser corrigidas ou desmarcadas. Linhas vazias e subtotais/totais são ignorados. A repetição do arquivo é impedida pelo hash, não por semelhança entre cliente e valor. Nenhum dado é salvo até confirmar.
             </div>
           </>}
           <DialogFooter className="gap-2">
             <button type="button" onClick={() => { setImportOpen(false); setImportWorkspace(null); setImportError(''); }} disabled={importSales.isPending} className="h-10 rounded-xl border border-[#e3dfe7] px-4 text-sm font-bold text-[#716a79] hover:bg-[#f8f6fa] disabled:opacity-50" data-testid="button-cancel-import">Cancelar</button>
-            {importWorkspace && <button type="button" onClick={() => void commitImport()} disabled={!validImportRows.length || importOverLimit || importMappingIncomplete || busy} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#7656b8] px-4 text-sm font-bold text-white hover:bg-[#6848a9] disabled:opacity-55" data-testid="button-confirm-import">
+            {importWorkspace && <button type="button" onClick={() => void commitImport()} disabled={!validImportRows.length || invalidSelectedImportCount > 0 || importOverLimit || importMappingIncomplete || busy} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#7656b8] px-4 text-sm font-bold text-white hover:bg-[#6848a9] disabled:opacity-55" data-testid="button-confirm-import">
               {importSales.isPending ? 'Importando…' : <><Check size={14} /> Confirmar importação</>}
             </button>}
           </DialogFooter>

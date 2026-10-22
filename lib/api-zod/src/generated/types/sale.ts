@@ -9,7 +9,8 @@ import type { SaleStatus } from './saleStatus';
 
 export interface Sale {
   id: string;
-  productId: string;
+  /** @nullable */
+  productId: string | null;
   saleDate: string;
   productName: string;
   quantity: number;
