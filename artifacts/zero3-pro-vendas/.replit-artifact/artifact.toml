@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Zero3 PRO - Gestão de Vendas"
+description = "Aplicativo privado para acompanhar vendas de planos e produtos Zero3 PRO, com lançamentos persistentes e resultados por período."
+version = "1.0.0"
+id = "artifacts/zero3-pro-vendas"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19851
+
+[services.development]
+run = "pnpm --filter @workspace/zero3-pro-vendas run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/zero3-pro-vendas", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/zero3-pro-vendas/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19851"
+BASE_PATH = "/"

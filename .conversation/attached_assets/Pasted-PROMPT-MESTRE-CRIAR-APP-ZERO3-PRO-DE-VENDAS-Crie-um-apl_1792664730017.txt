@@ -1,0 +1,101 @@
+PROMPT MESTRE - CRIAR APP ZERO3 PRO DE VENDAS
+Crie um aplicativo web independente chamado Zero3 PRO - Gestão de Vendas, simples de usar no computador e no celular, com a identidade visual da Zero3 PRO.
+
+O objetivo é registrar vendas de planos/produtos e visualizar quantidade vendida e faturamento por período, para acompanhar os resultados e definir metas.
+
+Use a imagem de referência já enviada. A navegação interna terá somente duas abas: Lançamentos e Scoreboard. Crie um sistema funcional com armazenamento persistente e acesso restrito aos usuários autorizados. Os dados reais começam vazios; exemplos ficam apenas no ambiente de teste.
+1. Identidade e simplicidade
+Use o logo oficial da Zero3 PRO, lilás e verde-lima, fundo claro, títulos legíveis e números em destaque. Reutilize os arquivos da marca anexados ou disponíveis no projeto. Se faltar o arquivo oficial do logo, use temporariamente o nome Zero3 PRO e informe a pendência.
+
+Aproveite a organização mensal da referência DECK 03. Apresente os resultados em números e tabelas, sem exigir gráficos. Produtos, metas e exportações ficam dentro das duas abas existentes, sem criar outras páginas de gestão.
+2. Aba Lançamentos
+Formulário com:
+- Data da venda, editável.
+- Nome do plano/produto.
+- Quantidade, inteira e maior que zero.
+- Valor unitário em reais, numérico e não negativo.
+- Total calculado automaticamente: quantidade x valor unitário.
+- Observação opcional.
+O campo Plano/produto permite escolher um nome existente ou digitar um novo. Ao salvar, o novo nome aparece automaticamente nas sugestões e no filtro da Scoreboard. A lista de planos vem da própria coluna dos lançamentos: não exigir um cadastro separado.
+
+Remova espaços sobrando e trate diferenças apenas de maiúsculas/minúsculas para evitar duplicidades de escrita. Mantenha nomes comercialmente diferentes separados.
+
+Não solicitar ID Stone nem códigos manuais. Gere apenas um ID interno invisível, quando necessário, para identificar cada lançamento, editar, excluir e restaurar backups corretamente.
+
+Abaixo do formulário, mostre o histórico com filtros por data e plano, edição e exclusão com confirmação. Após qualquer alteração, recalcule os resultados. Evite duplo envio ao clicar em Salvar.
+
+Grave valores monetários com precisão de centavos e preserve os dados ao recarregar ou acessar de outro dispositivo. O armazenamento do navegador não pode ser a única base dos registros.
+3. Aba Scoreboard
+Apresente:
+- Faturamento total do período selecionado.
+- Quantidade de planos/produtos vendidos.
+- Tabela: Plano/produto | Quantidade vendida | Faturamento.
+- Total geral da tabela.
+- Resumo: Mês/ano | Quantidade vendida | Faturamento.
+Quantidade vendida é a soma do campo Quantidade. Um Plano 12 aulas vendido em quantidade 2 representa dois planos vendidos.
+
+Faturamento é a soma dos totais das vendas válidas do período e plano selecionados. Os números, a tabela por plano e o resumo mensal devem conciliar entre si.
+
+Atualize a Scoreboard depois de salvar, editar ou excluir lançamentos e quando a aba for aberta. Disponibilize um botão Atualizar para reler a base.
+4. Filtros por data e plano
+Permita consultar:
+- Mês atual.
+- Um mês específico.
+- Vários meses selecionados, somando somente esses meses.
+- Intervalo entre data inicial e final.
+- Todos os planos ou um plano específico.
+O seletor de planos deve ser alimentado automaticamente pelos nomes dos lançamentos.
+
+Use a data da venda, com fuso America/Sao_Paulo, e identifique os meses por ano e mês. Inclua as datas inicial e final no intervalo. Escolher intervalo personalizado substitui a seleção de meses, evitando filtros conflitantes.
+
+Mês sem vendas mostra zero. Novos meses e novos produtos entram automaticamente, sem alterar código.
+5. Metas simples dentro da Scoreboard
+Inclua um botão discreto Definir meta, abrindo uma janela na mesma aba.
+
+Permita informar uma meta mensal de faturamento para:
+- Todos os planos, como meta geral.
+- Um plano específico.
+Mostre realizado, meta, valor que falta e percentual atingido. Acima da meta, mostre o excedente.
+
+A meta deve corresponder ao mesmo plano e período dos resultados. Metas gerais e metas por plano não são somadas entre si. Ao selecionar vários meses completos, some as metas mensais correspondentes apenas se todas estiverem cadastradas. Se faltar alguma, identifique a cobertura parcial, sem apresentar um percentual como se a meta estivesse completa.
+
+Sem meta, mostre “Meta não definida”. Para intervalos com partes de meses, mantenha o faturamento filtrado e sinalize que a comparação com meta mensal não se aplica automaticamente.
+
+Essa função é opcional para o uso: deve ser possível lançar e consultar vendas sem cadastrar metas.
+6. Planilha e backup mensal
+Dentro de Lançamentos, inclua um menu Exportar com:
+
+Planilha do período: arquivo Excel (.xlsx) respeitando os filtros selecionados, com duas abas:
+- Lançamentos: data, plano, quantidade, valor unitário, total e observação.
+- Resumo por plano: quantidade, faturamento por plano e total do período.
+Backup mensal: exportação de todos os lançamentos do mês escolhido, independentemente do filtro de produto, preservando IDs internos e informações necessárias à recuperação. Inclua também as metas daquele mês. Identifique mês/ano, data de geração e quantidade de registros.
+
+Pode usar um arquivo de backup JSON, mantendo a planilha Excel como relatório legível. Ofereça restauração dentro da própria aba, com prévia dos registros e confirmação. Reimportar o mesmo backup não pode duplicar vendas; use IDs internos, pois duas vendas legítimas podem ter a mesma data, plano e valor.
+
+Backups são cópias para recuperação e não entram novamente na soma da Scoreboard. Para mês vazio, informe a ausência de registros, sem criar vendas fictícias. A geração mensal pode ser manual nesta versão.
+7. Base técnica
+Use uma estrutura simples, armazenamento persistente e bibliotecas adequadas ao ambiente, evitando serviços pagos adicionais e módulos desnecessários.
+
+A integração com Google Sheets é opcional para este novo app. Se for utilizada, escolha uma única fonte oficial dos lançamentos e preserve a consistência entre gravação e consulta. Não torne um conector pago obrigatório para as funções básicas.
+8. Execução em quatro tarefas
+Tarefa 1/4 - Estrutura e identidade
+Criar o app, acesso restrito, armazenamento persistente e as duas abas. Aplicar a estrutura visual da referência, com os campos e espaços necessários.
+
+Tarefa 2/4 - Lançamentos
+Implementar salvar, editar, excluir, total automático, nomes de planos criados no próprio lançamento, histórico e validações. Conferir persistência após recarregar.
+
+Tarefa 3/4 - Scoreboard e metas
+Implementar totais, tabelas, filtros de datas/meses/planos e metas mensais. Conferir que todos os resultados usam os mesmos registros filtrados.
+
+Tarefa 4/4 - Exportações e conferência
+Implementar planilha, backup mensal e restauração. Validar em uma base isolada:
+- Outubro/2026: R$ 1.320,00 e 6 unidades.
+- Novembro/2026: R$ 1.240,00 e 6 unidades.
+- Dois meses: R$ 2.560,00 e 12 unidades.
+- Plano 12 aulas nos dois meses: R$ 1.500,00 e 5 planos.
+- Realizado de R$ 3.000,00 e meta de R$ 4.000,00: 75% e R$ 1.000,00 a atingir.
+- Edição de valor/data, exclusão, produto novo e mês vazio.
+- Backup restaurado sem duplicar lançamentos e com os mesmos totais.
+Use os exemplos somente para testes. Entregue a prévia funcional, instruções curtas e resultados dos testes. Não declare funcionalidades prontas sem verificar gravação, leitura e exportação reais.
+
+Comece executando somente a Tarefa 1/4. Ao terminar, informe o resultado em poucas linhas e aguarde o comando da próxima tarefa.

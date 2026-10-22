@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: sales
+    description: Private sales data
 paths:
   /healthz:
     get:
@@ -24,6 +26,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /sales:
+    get:
+      operationId: getSales
+      tags: [sales]
+      summary: List sales for the current workspace
+      description: Returns the persisted sales records visible to the signed-in user.
+      responses:
+        "200":
+          description: Sales records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Sale"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +56,40 @@ components:
           type: string
       required:
         - status
+    Sale:
+      type: object
+      properties:
+        id:
+          type: string
+        saleDate:
+          type: string
+        productName:
+          type: string
+        quantity:
+          type: integer
+        unitAmountCents:
+          type: integer
+        totalCents:
+          type: integer
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - saleDate
+        - productName
+        - quantity
+        - unitAmountCents
+        - totalCents
+        - notes
+        - createdAt
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
 
