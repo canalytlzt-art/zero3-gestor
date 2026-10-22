@@ -2830,7 +2830,7 @@ export function createSalesRouter(
 
     const actorId = getAuth(req).userId!;
     try {
-      const result = await db.transaction(async (tx) =>
+      const result = await database.transaction(async (tx) =>
         runIdempotent(
           tx,
           {

@@ -14,3 +14,9 @@ Route handlers created with an injected database dependency must use that inject
 **Why:** Endpoints that bypassed the injected database could read and write outside the isolated test schema, hiding failures and breaking integration tests.
 
 **How to apply:** Use the router factory's captured database for route queries and transactions, including refund list, candidate, and mutation endpoints.
+
+When a router accepts an injected user resolver, mutation handlers must use the captured `getUserId(req)` for the actor instead of calling Clerk's `getAuth(req)` directly.
+
+**Why:** Direct Clerk context access can fail in injected-router environments even after the route's access check succeeds, preventing backup restoration from being tested or reused with alternate auth adapters.
+
+**How to apply:** Resolve the actor once through the router dependency after access is verified, and use that ID for audit records and restore operations.

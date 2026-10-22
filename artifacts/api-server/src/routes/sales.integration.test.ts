@@ -797,6 +797,176 @@ test("monthly goals persist by month and plan, enforce access, and don't block s
   );
 });
 
+test("monthly backup export and restore preserve states, links, goals, and scoreboard totals", async () => {
+  const month = "2197-04";
+  const productName = `Plano backup ${randomUUID()}`;
+
+  await withSalesApi(getTestDatabase(), async (baseUrl) => {
+    const saleId = await recordSale(baseUrl, productName, `${month}-05`);
+    const cancelledSaleId = await recordSale(
+      baseUrl,
+      `${productName} cancelado`,
+      `${month}-06`,
+    );
+    const database = getTestDatabase();
+    const [saleToCancel] = await database
+      .select()
+      .from(salesTable)
+      .where(eq(salesTable.id, cancelledSaleId));
+    await database
+      .update(salesTable)
+      .set({
+        status: "cancelled",
+        cancellationReason: "Venda de teste cancelada",
+        version: saleToCancel.version + 1,
+      })
+      .where(eq(salesTable.id, cancelledSaleId));
+
+    const refundKey = randomUUID();
+    createdIdempotencyKeys.push(refundKey);
+    const refundResponse = await apiRequest(
+      baseUrl,
+      `/sales/${saleId}/refunds`,
+      {
+        method: "POST",
+        body: {
+          refundDate: `${month}-18`,
+          amountCents: 1200,
+          reason: "Estorno parcial de teste",
+          idempotencyKey: refundKey,
+        },
+      },
+    );
+    assert.equal(refundResponse.status, 201);
+    const refund = (await refundResponse.json()) as { id: string };
+    createdRefundIds.push(refund.id);
+
+    const goal = await saveGoal(baseUrl, month, productName, 9000);
+    const backupResponse = await apiRequest(
+      baseUrl,
+      `/sales/backup?month=${month}`,
+    );
+    assert.equal(backupResponse.status, 200);
+    const backup = (await backupResponse.json()) as {
+      schemaVersion: number;
+      period: string;
+      counts: { totalRecords: number; periodSales: number; periodRefunds: number };
+      products: Array<{ record: { id: string } }>;
+      sales: Array<{ record: { id: string; status: string; cancellationReason: string | null } }>;
+      refunds: Array<{ record: { id: string; saleId: string; status: string } }>;
+      goals: Array<{ record: { id: string; targetCents: number } }>;
+      histories: Array<{ record: { id: string } }>;
+    };
+    assert.equal(backup.schemaVersion, 2);
+    assert.equal(backup.period, month);
+    assert.equal(backup.counts.periodSales, 2);
+    assert.equal(backup.counts.periodRefunds, 1);
+    assert.equal(backup.sales.find(({ record }) => record.id === cancelledSaleId)?.record.status, "cancelled");
+    assert.equal(backup.sales.find(({ record }) => record.id === cancelledSaleId)?.record.cancellationReason, "Venda de teste cancelada");
+    assert.deepEqual(
+      backup.refunds.map(({ record }) => ({ id: record.id, saleId: record.saleId, status: record.status })),
+      [{ id: refund.id, saleId, status: "active" }],
+    );
+    assert.equal(backup.goals.find(({ record }) => record.id === goal.id)?.record.targetCents, 9000);
+
+    const emptyResponse = await apiRequest(
+      baseUrl,
+      "/sales/backup?month=2197-05",
+    );
+    assert.equal(emptyResponse.status, 200);
+    const emptyBackup = (await emptyResponse.json()) as {
+      counts: { totalRecords: number };
+      products: unknown[];
+      sales: unknown[];
+      refunds: unknown[];
+      goals: unknown[];
+      histories: unknown[];
+    };
+    assert.equal(emptyBackup.counts.totalRecords, 0);
+    assert.deepEqual(
+      [emptyBackup.products, emptyBackup.sales, emptyBackup.refunds, emptyBackup.goals, emptyBackup.histories],
+      [[], [], [], [], []],
+    );
+
+    const saleIds = backup.sales.map(({ record }) => record.id);
+    const refundIds = backup.refunds.map(({ record }) => record.id);
+    const goalIds = backup.goals.map(({ record }) => record.id);
+    const productIds = backup.products.map(({ record }) => record.id);
+    const entityIds = [...saleIds, ...refundIds, ...goalIds, ...productIds];
+    await database.delete(salesRefundsTable).where(inArray(salesRefundsTable.id, refundIds));
+    await database.delete(salesHistoryTable).where(inArray(salesHistoryTable.entityId, entityIds));
+    await database.delete(salesGoalsTable).where(inArray(salesGoalsTable.id, goalIds));
+    await database.delete(salesTable).where(inArray(salesTable.id, saleIds));
+    await database.delete(productsTable).where(inArray(productsTable.id, productIds));
+
+    const previewResponse = await apiRequest(baseUrl, "/sales/restore/preview", {
+      method: "POST",
+      body: backup,
+    });
+    assert.equal(previewResponse.status, 200);
+    const preview = (await previewResponse.json()) as {
+      toInsert: { sales: number; refunds: number; goals: number; products: number };
+      blocked: boolean;
+    };
+    assert.equal(preview.blocked, false);
+    assert.equal(preview.toInsert.sales, 2);
+    assert.equal(preview.toInsert.refunds, 1);
+    assert.equal(preview.toInsert.goals, 1);
+    assert.equal(preview.toInsert.products, 2);
+
+    const restoreResponse = await apiRequest(baseUrl, "/sales/restore", {
+      method: "POST",
+      body: backup,
+    });
+    assert.equal(restoreResponse.status, 200);
+    const firstRestore = (await restoreResponse.json()) as {
+      inserted: { sales: number; refunds: number; goals: number };
+    };
+    assert.equal(firstRestore.inserted.sales, 2);
+    assert.equal(firstRestore.inserted.refunds, 1);
+    assert.equal(firstRestore.inserted.goals, 1);
+
+    const scoreboardResponse = await apiRequest(
+      baseUrl,
+      `/sales/scoreboard?fromDate=${month}-01&toDate=${month}-30`,
+    );
+    assert.equal(scoreboardResponse.status, 200);
+    const scoreboard = (await scoreboardResponse.json()) as {
+      totals: { quantity: number; salesCents: number; refundCents: number; netCents: number };
+    };
+    assert.deepEqual(scoreboard.totals, {
+      quantity: 1,
+      salesCents: 5000,
+      refundCents: 1200,
+      netCents: 3800,
+    });
+
+    const repeatResponse = await apiRequest(baseUrl, "/sales/restore", {
+      method: "POST",
+      body: backup,
+    });
+    assert.equal(repeatResponse.status, 200);
+    const repeat = (await repeatResponse.json()) as {
+      inserted: { sales: number; refunds: number; goals: number; products: number };
+      identical: { sales: number; refunds: number; goals: number; products: number };
+    };
+    assert.deepEqual(repeat.inserted, { sales: 0, refunds: 0, goals: 0, products: 0, histories: 0 });
+    assert.equal(repeat.identical.sales, 2);
+    assert.equal(repeat.identical.refunds, 1);
+    assert.equal(repeat.identical.goals, 1);
+
+    const scoreboardAfterRepeatResponse = await apiRequest(
+      baseUrl,
+      `/sales/scoreboard?fromDate=${month}-01&toDate=${month}-30`,
+    );
+    assert.equal(scoreboardAfterRepeatResponse.status, 200);
+    const scoreboardAfterRepeat = (await scoreboardAfterRepeatResponse.json()) as {
+      totals: { quantity: number; salesCents: number; refundCents: number; netCents: number };
+    };
+    assert.deepEqual(scoreboardAfterRepeat.totals, scoreboard.totals);
+  });
+});
+
 test("refunds validate input, replay idempotently, and serialize concurrent balance checks", async () => {
   await withSalesApi(getTestDatabase(), async (baseUrl) => {
     const saleId = await recordSale(baseUrl, `Plano estorno ${randomUUID()}`, "2099-11-05");
