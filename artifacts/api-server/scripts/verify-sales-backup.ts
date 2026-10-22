@@ -37,6 +37,7 @@ try {
       id: saleIds[i], productId: productIds[i % 3], productName: names[i % 3], saleDate,
       quantity: [2, 3, 1, 3, 1, 2][i], unitAmountCents: [30000, 22000, 6000][i % 3],
       totalCents: [60000, 66000, 6000, 90000, 22000, 12000][i],
+      customerName: i === 3 ? "Ana Exemplo" : null,
       notes: i === 3 ? '=HYPERLINK("https://example.invalid")' : null,
     })));
     await tx.insert(salesRefundsTable).values([
@@ -67,6 +68,7 @@ try {
     assert.equal(backup.counts.dependencySales, 1);
     assert.equal(backup.counts.dependencyRefunds, 1);
     assert.equal(backup.sales.find(({ record }) => record.id === saleIds[1])?.record.saleDate, "2026-10-12");
+    assert.equal(backup.sales.find(({ record }) => record.id === saleIds[3])?.record.customerName, "Ana Exemplo");
     assert.equal(backup.refunds.find(({ record }) => record.id === refundIds[3])?.record.status, "voided");
     assert.equal(backup.histories.length, 1);
     check("November backup preserves October sale, voided dependency, IDs, and history");
@@ -79,6 +81,8 @@ try {
     assert.deepEqual(opened.SheetNames, ["Lançamentos", "Resumo por plano"]);
     const detail = XLSX.utils.sheet_to_json(opened.Sheets["Lançamentos"], { header: 1, raw: true }) as unknown[][];
     assert.equal(detail.length, 6); // Three November sales plus two active November refunds.
+    assert.equal(detail.find((row) => row[1] === saleIds[3])?.[14], "Ana Exemplo");
+    assert.equal(detail.find((row) => row[1] === refundIds[2])?.[14], "Ana Exemplo");
     const octoberRefund = detail.find((row) => row[1] === refundIds[1])!;
     assert.equal(octoberRefund[10], 0);
     assert.equal(octoberRefund[11], 660);
@@ -97,7 +101,7 @@ try {
     const renamed = createSalesWorkbook(sourceSales as never, sourceRefunds as never, renamedProducts as never, { ...exportFilters, productName: "Oito aulas Premium" });
     assert.equal(renamed.Sheets["Resumo por plano"].B9.v, -440);
     const empty = createSalesWorkbook(sourceSales as never, sourceRefunds as never, sourceProducts as never, { ...exportFilters, fromDate: "2026-12-01", toDate: "2026-12-31" });
-    assert.equal(empty.Sheets["Lançamentos"]["!ref"], "A1:N1");
+    assert.equal(empty.Sheets["Lançamentos"]["!ref"], "A1:O1");
     assert.equal(empty.Sheets["Resumo por plano"].B9.v, 0);
     check("real XLSX round-trip: numeric money, literal text, refund dates, negative net, and empty period");
 
@@ -108,6 +112,8 @@ try {
     const restored = await applyMonthlyBackupRestore(tx, backup as never, "isolated-test");
     assert.equal(restored.inserted.sales, 4);
     assert.equal(restored.inserted.refunds, 3);
+    const [restoredNamedSale] = await tx.select().from(salesTable).where(eq(salesTable.id, saleIds[3]));
+    assert.equal(restoredNamedSale.customerName, "Ana Exemplo");
     const totals = await tx.execute(sql`
       select
       (select sum(total_cents) from sales where status='active' and sale_date between '2026-11-01' and '2026-11-30')::text as sales,
@@ -117,6 +123,29 @@ try {
     assert.equal(Object.values(repeat.inserted).reduce((sum, count) => sum + count, 0), 0);
     assert.equal(repeat.identical.sales, 4);
     check("restore into empty isolated tables preserves November net R$ 380; repeat creates no duplicate");
+
+    const legacyWithoutName = clone(backup);
+    for (const sale of legacyWithoutName.sales) delete sale.record.customerName;
+    const legacyRecord = clone(legacyWithoutName.sales.find(({ record }) => record.id === saleIds[4])!.record);
+    const legacyNewSaleId = randomUUID();
+    legacyRecord.id = legacyNewSaleId;
+    legacyWithoutName.sales.push({ scope: "period", record: legacyRecord });
+    legacyWithoutName.counts.periodSales += 1;
+    legacyWithoutName.counts.totalRecords += 1;
+    monthlyBackupV2RuntimeSchema.parse(legacyWithoutName);
+    const legacyRollback = new Error("ROLLBACK_LEGACY_BACKUP_CASE");
+    try {
+      await tx.transaction(async (nested) => {
+        const restoredLegacy = await applyMonthlyBackupRestore(nested, legacyWithoutName as never, "isolated-test");
+        assert.equal(restoredLegacy.inserted.sales, 1);
+        const [sale] = await nested.select().from(salesTable).where(eq(salesTable.id, legacyNewSaleId));
+        assert.equal(sale.customerName, null);
+        throw legacyRollback;
+      });
+    } catch (error) {
+      if (error !== legacyRollback) throw error;
+    }
+    check("legacy V2 backup without customer name restores with a null name");
 
     const duplicateFields = clone(backup);
     const original = duplicateFields.sales.find(({ record }) => record.id === saleIds[4])!;

@@ -24,6 +24,11 @@ export interface SalesImportRow {
      */
   unitAmountCents: number;
   /**
+     * @maxLength 120
+     * @nullable
+     */
+  customerName?: string | null;
+  /**
      * @maxLength 1000
      * @nullable
      */

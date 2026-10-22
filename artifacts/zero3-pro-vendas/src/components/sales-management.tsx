@@ -42,6 +42,7 @@ const saleFormSchema = z.object({
   productName: z.string().max(120, 'Use até 120 caracteres.').refine((value) => normalizeProductName(value).length > 0, 'Informe o produto.'),
   quantity: z.string().regex(/^[1-9]\d*$/, 'Use uma quantidade inteira maior que zero.').refine((value) => Number(value) <= 2147483647, 'Quantidade muito alta.'),
   unitAmount: z.string().min(1, 'Informe o valor unitário.').refine((value) => parseBrlCents(value) !== null, 'Informe um valor em reais válido.').refine((value) => (parseBrlCents(value) ?? -1) >= 0, 'O valor não pode ser negativo.').refine((value) => (parseBrlCents(value) ?? Number.MAX_SAFE_INTEGER + 1) <= Number.MAX_SAFE_INTEGER, 'Valor muito alto.'),
+  customerName: z.string().max(120, 'Use até 120 caracteres.'),
   notes: z.string().max(1000, 'Use até 1.000 caracteres.'),
 }).superRefine((values, context) => {
   const totalCents = Number(values.quantity) * (parseBrlCents(values.unitAmount) ?? 0);
@@ -59,7 +60,7 @@ const productFormSchema = z.object({
 });
 type ProductFormValues = z.infer<typeof productFormSchema>;
 
-type ImportMappingKey = 'saleDate' | 'productName' | 'quantity' | 'unitAmount' | 'notes';
+type ImportMappingKey = 'saleDate' | 'productName' | 'quantity' | 'unitAmount' | 'customerName' | 'notes';
 type ImportLine = { sourceRow: number; cells: unknown[]; value: SalesImportRow | null; errors: string[]; possibleMatches: Sale[] };
 type ImportWorkspace = {
   filename: string;
@@ -138,6 +139,9 @@ function rowByMapping(workspace: ImportWorkspace, line: { sourceRow: number; cel
   const saleDate = parseImportDate(cell('saleDate'));
   const quantity = parseImportQuantity(cell('quantity'));
   const unitAmountCents = parseBrlCents(String(cell('unitAmount') ?? ''));
+  const customerName = workspace.mappings.customerName
+    ? String(cell('customerName') ?? '').trim().replace(/\s+/g, ' ')
+    : '';
   const noteRaw = workspace.mappings.notes ? String(cell('notes') ?? '').trim().replace(/\s+/g, ' ') : '';
   const errors: string[] = [];
   if (!saleDate) errors.push('Data inválida.');
@@ -145,15 +149,16 @@ function rowByMapping(workspace: ImportWorkspace, line: { sourceRow: number; cel
   else if (productName.length > 120) errors.push('Produto acima de 120 caracteres.');
   if (quantity === null) errors.push('Quantidade deve ser um inteiro positivo.');
   if (unitAmountCents === null) errors.push('Valor deve ter no máximo duas casas decimais.');
+  if (customerName.length > 120) errors.push('Nome acima de 120 caracteres.');
   if (noteRaw.length > 1000) errors.push('Observação acima de 1.000 caracteres.');
-  if (![saleDate, productName, quantity, unitAmountCents].some(Boolean) && !noteRaw) {
+  if (![saleDate, productName, quantity, unitAmountCents].some(Boolean) && !customerName && !noteRaw) {
     return { sourceRow: line.sourceRow, cells: line.cells, value: null, errors: ['Linha vazia; será ignorada.'] };
   }
   return {
     sourceRow: line.sourceRow,
     cells: line.cells,
-    value: saleDate && productName && quantity !== null && unitAmountCents !== null && noteRaw.length <= 1000
-      ? { saleDate, productName, quantity, unitAmountCents, notes: noteRaw || null, sourceRow: line.sourceRow }
+    value: saleDate && productName && quantity !== null && unitAmountCents !== null && customerName.length <= 120 && noteRaw.length <= 1000
+      ? { saleDate, productName, quantity, unitAmountCents, customerName: customerName || null, notes: noteRaw || null, sourceRow: line.sourceRow }
       : null,
     errors,
   };
@@ -219,7 +224,7 @@ type RestorePreview = {
 
 function Field({ label, name, type = 'text', placeholder, testId, onChange, ...props }: {
   label: string;
-  name: 'saleDate' | 'productName' | 'quantity' | 'unitAmount' | 'notes';
+  name: 'saleDate' | 'productName' | 'quantity' | 'unitAmount' | 'customerName' | 'notes';
   type?: string;
   placeholder?: string;
   testId: string;
@@ -484,6 +489,7 @@ export default function SalesManagement() {
         productName: findHeader([/produto/, /plano/, /product/]),
         quantity: findHeader([/^qtd/, /quantidade/, /quantity/]),
         unitAmount: findHeader([/valor.*unit/, /preco.*unit/, /unit.*price/, /^valor$/]),
+        customerName: findHeader([/cliente/, /comprador/, /nome/]),
         notes: findHeader([/observ/, /nota/, /note/]),
       };
       setImportWorkspace({
@@ -650,7 +656,7 @@ export default function SalesManagement() {
 
   const form = useForm<SaleFormValues>({
     resolver: zodResolver(saleFormSchema),
-    defaultValues: { saleDate: todayLocal(), productName: '', quantity: '1', unitAmount: '', notes: '' },
+    defaultValues: { saleDate: todayLocal(), productName: '', quantity: '1', unitAmount: '', customerName: '', notes: '' },
   });
   const quantityInput = form.watch('quantity') || '';
   const quantity = /^\d+$/.test(quantityInput) ? BigInt(quantityInput) : 0n;
@@ -660,7 +666,7 @@ export default function SalesManagement() {
   function resetForm() {
     pendingSaleKey.current = null;
     setEditing(null);
-    form.reset({ saleDate: todayLocal(), productName: '', quantity: '1', unitAmount: '', notes: '' });
+    form.reset({ saleDate: todayLocal(), productName: '', quantity: '1', unitAmount: '', customerName: '', notes: '' });
   }
 
   function startEditing(sale: Sale) {
@@ -672,6 +678,7 @@ export default function SalesManagement() {
       productName: sale.productName,
       quantity: String(sale.quantity),
       unitAmount: `${Math.floor(sale.unitAmountCents / 100)},${String(sale.unitAmountCents % 100).padStart(2, '0')}`,
+      customerName: sale.customerName ?? '',
       notes: sale.notes ?? '',
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -688,6 +695,7 @@ export default function SalesManagement() {
       productName: canonical?.name ?? cleanedName,
       quantity: Number(values.quantity),
       unitAmountCents: parseBrlCents(values.unitAmount) ?? 0,
+      customerName: values.customerName.trim().replace(/\s+/g, ' ') || null,
       notes: values.notes.trim().replace(/\s+/g, ' ') || null,
     };
     const fingerprint = `${editing ? `${editing.id}:${editing.version}` : 'new'}:${JSON.stringify(input)}`;
@@ -824,6 +832,9 @@ export default function SalesManagement() {
                 </div>
                 <Field name="quantity" label="Quantidade" type="number" min="1" step="1" inputMode="numeric" placeholder="1" testId="input-sale-quantity" />
                 <Field name="unitAmount" label="Valor unitário" type="text" inputMode="decimal" placeholder="0,00" testId="input-sale-unit-amount" />
+                <div className="col-span-2">
+                  <Field name="customerName" label="Nome" placeholder="Nome do cliente ou identificação (opcional)" testId="input-sale-customer-name" autoComplete="off" />
+                </div>
               </div>
               <div className="rounded-[16px] border border-[#e9e3ef] bg-[#f8f6fa] px-4 py-3.5">
                 <div className="flex items-center justify-between gap-3"><span className="text-[11px] font-bold uppercase tracking-[.1em] text-[#81798b]">Total da venda</span><span className="font-[family-name:var(--app-font-serif)] text-[25px] font-extrabold tracking-[-.05em] text-[#423354]" data-testid="text-sale-total">{formatCents(total)}</span></div>
@@ -1061,12 +1072,13 @@ export default function SalesManagement() {
               <div className="min-w-0"><p className="truncate text-sm font-bold text-[#40374e]" data-testid="text-import-filename">{importWorkspace.filename}</p><p className="mt-0.5 text-[10px] text-[#817b89]">Hash SHA-256 calculado a partir dos bytes originais.</p></div>
               <span className="rounded-full bg-white px-3 py-1.5 text-[10px] font-bold text-[#5d4a78]" data-testid="text-import-valid-count">{validImportRows.length} para importar · {skippedImportCount} ignoradas</span>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
               {([
                 ['saleDate', 'Data da venda', true],
                 ['productName', 'Produto', true],
                 ['quantity', 'Quantidade', true],
                 ['unitAmount', 'Valor unitário', true],
+                ['customerName', 'Nome', false],
                 ['notes', 'Observação', false],
               ] as const).map(([key, label, required]) => <label key={key} className="min-w-0 text-[10px] font-bold text-[#665f70]">{label}{required ? ' *' : ''}
                 <select value={importWorkspace.mappings[key]} onChange={(event) => setImportWorkspace({ ...importWorkspace, mappings: { ...importWorkspace.mappings, [key]: event.target.value } })} data-testid={`select-import-map-${key}`} className="mt-1 h-10 w-full rounded-lg border border-[#e7e2ea] bg-white px-2 text-xs font-medium text-[#443d50] outline-none focus:border-[#9477bf]">
@@ -1160,6 +1172,7 @@ function SaleRow({ sale, onEdit, onHistory, onCancel, busy }: { sale: Sale; onEd
     <span className="col-start-2 row-start-1 justify-self-end text-[10px] font-bold text-[#81798b] lg:order-2">{cancelled ? 'Cancelamento' : 'Venda'}</span>
     <div className="col-span-2 row-start-2 min-w-0 lg:col-span-1 lg:row-auto lg:order-3">
       <p className={`truncate text-sm font-bold ${cancelled ? 'text-[#77717f]' : 'text-[#353044]'}`} data-testid={`text-sale-product-${sale.id}`}>{sale.productName}</p>
+      {sale.customerName && <p className="mt-1 truncate text-[10px] font-medium text-[#5d4a78]" title={sale.customerName} data-testid={`text-sale-customer-name-${sale.id}`}>Nome: {sale.customerName}</p>}
       {sale.notes && <p className="mt-1 truncate text-[10px] text-[#81798b]" title={sale.notes}>{sale.notes}</p>}
       {cancelled && sale.cancellationReason && <p className="mt-1 truncate text-[10px] text-[#9a625b]" title={sale.cancellationReason} data-testid={`text-sale-cancellation-reason-${sale.id}`}>Motivo: {sale.cancellationReason}</p>}
     </div>
@@ -1201,6 +1214,7 @@ function SaleHistoryDialog({ sale, onClose }: { sale: Sale; onClose: () => void 
       </DialogHeader>
       <div className="rounded-xl bg-[#f8f6fa] px-3.5 py-3" data-testid={`panel-sale-history-${sale.id}`}>
         <p className="text-sm font-bold text-[#40374e]">{sale.productName}</p>
+        {sale.customerName && <p className="mt-1 text-xs font-semibold text-[#5d4a78]" data-testid="text-sale-history-customer-name">Nome: {sale.customerName}</p>}
         <p className="mt-1 text-xs text-[#817b89]">{formatDate(sale.saleDate)} · {sale.quantity} un. · {formatCents(sale.totalCents)}</p>
         {sale.status === 'cancelled' && sale.cancellationReason && <p className="mt-2 text-xs text-[#9a625b]">Motivo do cancelamento: {sale.cancellationReason}</p>}
       </div>

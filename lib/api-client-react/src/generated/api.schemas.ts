@@ -25,6 +25,11 @@ export interface Sale {
   quantity: number;
   unitAmountCents: number;
   totalCents: number;
+  /**
+     * @maxLength 120
+     * @nullable
+     */
+  customerName: string | null;
   /** @nullable */
   notes: string | null;
   status: SaleStatus;
@@ -53,6 +58,11 @@ export interface SaleInput {
      * @maximum 9007199254740991
      */
   unitAmountCents: number;
+  /**
+     * @maxLength 120
+     * @nullable
+     */
+  customerName?: string | null;
   /**
      * @maxLength 1000
      * @nullable
@@ -195,6 +205,11 @@ export interface SalesImportRow {
      * @maximum 9007199254740991
      */
   unitAmountCents: number;
+  /**
+     * @maxLength 120
+     * @nullable
+     */
+  customerName?: string | null;
   /**
      * @maxLength 1000
      * @nullable
@@ -413,6 +428,11 @@ export interface SalesBackupV1Record {
      * @maximum 9007199254740991
      */
   totalCents: number;
+  /**
+     * @maxLength 120
+     * @nullable
+     */
+  customerName?: string | null;
   /**
      * @maxLength 1000
      * @nullable

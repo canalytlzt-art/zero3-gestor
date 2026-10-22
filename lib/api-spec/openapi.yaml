@@ -936,6 +936,9 @@ components:
           type: integer
         totalCents:
           type: integer
+        customerName:
+          type: ["string", "null"]
+          maxLength: 120
         notes:
           type: ["string", "null"]
         status:
@@ -960,6 +963,7 @@ components:
         - quantity
         - unitAmountCents
         - totalCents
+        - customerName
         - notes
         - status
         - cancellationReason
@@ -984,6 +988,9 @@ components:
           type: integer
           minimum: 0
           maximum: 9007199254740991
+        customerName:
+          type: ["string", "null"]
+          maxLength: 120
         notes:
           type: ["string", "null"]
           maxLength: 1000
@@ -1196,6 +1203,9 @@ components:
           type: integer
           minimum: 0
           maximum: 9007199254740991
+        customerName:
+          type: ["string", "null"]
+          maxLength: 120
         notes:
           type: ["string", "null"]
           maxLength: 1000
@@ -1474,6 +1484,9 @@ components:
           type: integer
           minimum: 0
           maximum: 9007199254740991
+        customerName:
+          type: ["string", "null"]
+          maxLength: 120
         notes:
           type: ["string", "null"]
           maxLength: 1000

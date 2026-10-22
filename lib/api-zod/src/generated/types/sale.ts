@@ -15,6 +15,11 @@ export interface Sale {
   quantity: number;
   unitAmountCents: number;
   totalCents: number;
+  /**
+     * @maxLength 120
+     * @nullable
+     */
+  customerName: string | null;
   /** @nullable */
   notes: string | null;
   status: SaleStatus;

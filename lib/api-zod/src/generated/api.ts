@@ -129,6 +129,8 @@ export const UpdateProductResponse = zod.object({
  * Returns active persisted sales records visible to the signed-in user.
  * @summary List sales for the current workspace
  */
+export const getSalesResponseCustomerNameMax = 120;
+
 
 
 
@@ -140,6 +142,7 @@ export const GetSalesResponseItem = zod.object({
   "quantity": zod.number().int(),
   "unitAmountCents": zod.number().int(),
   "totalCents": zod.number().int(),
+  "customerName": zod.string().max(getSalesResponseCustomerNameMax).nullable(),
   "notes": zod.string().nullable(),
   "status": zod.enum(['active', 'cancelled']),
   "cancellationReason": zod.string().nullable(),
@@ -160,6 +163,8 @@ export const createSaleBodyOneQuantityMax = 2147483647;
 export const createSaleBodyOneUnitAmountCentsMin = 0;
 export const createSaleBodyOneUnitAmountCentsMax = 9007199254740991;
 
+export const createSaleBodyOneCustomerNameMax = 120;
+
 export const createSaleBodyOneNotesMax = 1000;
 
 
@@ -169,10 +174,13 @@ export const CreateSaleBody = zod.object({
   "productName": zod.string().min(1).max(createSaleBodyOneProductNameMax),
   "quantity": zod.number().int().min(1).max(createSaleBodyOneQuantityMax),
   "unitAmountCents": zod.number().int().min(createSaleBodyOneUnitAmountCentsMin).max(createSaleBodyOneUnitAmountCentsMax),
+  "customerName": zod.string().max(createSaleBodyOneCustomerNameMax).nullish(),
   "notes": zod.string().max(createSaleBodyOneNotesMax).nullable()
 }).and(zod.object({
   "idempotencyKey": zod.string().uuid()
 }))
+
+export const createSaleResponseCustomerNameMax = 120;
 
 
 
@@ -185,6 +193,7 @@ export const CreateSaleResponse = zod.object({
   "quantity": zod.number().int(),
   "unitAmountCents": zod.number().int(),
   "totalCents": zod.number().int(),
+  "customerName": zod.string().max(createSaleResponseCustomerNameMax).nullable(),
   "notes": zod.string().nullable(),
   "status": zod.enum(['active', 'cancelled']),
   "cancellationReason": zod.string().nullable(),
@@ -207,6 +216,8 @@ export const importSalesBodyRowsItemQuantityMax = 2147483647;
 export const importSalesBodyRowsItemUnitAmountCentsMin = 0;
 export const importSalesBodyRowsItemUnitAmountCentsMax = 9007199254740991;
 
+export const importSalesBodyRowsItemCustomerNameMax = 120;
+
 export const importSalesBodyRowsItemNotesMax = 1000;
 
 
@@ -222,12 +233,15 @@ export const ImportSalesBody = zod.object({
   "productName": zod.string().min(1).max(importSalesBodyRowsItemProductNameMax),
   "quantity": zod.number().int().min(1).max(importSalesBodyRowsItemQuantityMax),
   "unitAmountCents": zod.number().int().min(importSalesBodyRowsItemUnitAmountCentsMin).max(importSalesBodyRowsItemUnitAmountCentsMax),
+  "customerName": zod.string().max(importSalesBodyRowsItemCustomerNameMax).nullish(),
   "notes": zod.string().max(importSalesBodyRowsItemNotesMax).nullable(),
   "sourceRow": zod.number().int().min(1)
 })).min(1).max(importSalesBodyRowsMax)
 })
 
 export const importSalesResponseImportedCountMin = 0;
+
+export const importSalesResponseSalesItemCustomerNameMax = 120;
 
 
 
@@ -245,6 +259,7 @@ export const ImportSalesResponse = zod.object({
   "quantity": zod.number().int(),
   "unitAmountCents": zod.number().int(),
   "totalCents": zod.number().int(),
+  "customerName": zod.string().max(importSalesResponseSalesItemCustomerNameMax).nullable(),
   "notes": zod.string().nullable(),
   "status": zod.enum(['active', 'cancelled']),
   "cancellationReason": zod.string().nullable(),
@@ -258,6 +273,8 @@ export const ImportSalesResponse = zod.object({
 /**
  * @summary List active and cancelled sales for the launch history
  */
+export const getSalesHistoryResponseCustomerNameMax = 120;
+
 
 
 
@@ -269,6 +286,7 @@ export const GetSalesHistoryResponseItem = zod.object({
   "quantity": zod.number().int(),
   "unitAmountCents": zod.number().int(),
   "totalCents": zod.number().int(),
+  "customerName": zod.string().max(getSalesHistoryResponseCustomerNameMax).nullable(),
   "notes": zod.string().nullable(),
   "status": zod.enum(['active', 'cancelled']),
   "cancellationReason": zod.string().nullable(),
@@ -743,6 +761,8 @@ export const previewMonthlySalesBackupRestoreBodyTwoSalesItemUnitAmountCentsMax 
 export const previewMonthlySalesBackupRestoreBodyTwoSalesItemTotalCentsMin = 0;
 export const previewMonthlySalesBackupRestoreBodyTwoSalesItemTotalCentsMax = 9007199254740991;
 
+export const previewMonthlySalesBackupRestoreBodyTwoSalesItemCustomerNameMax = 120;
+
 export const previewMonthlySalesBackupRestoreBodyTwoSalesItemNotesMax = 1000;
 
 export const previewMonthlySalesBackupRestoreBodyTwoSalesMax = 10000;
@@ -806,6 +826,7 @@ export const PreviewMonthlySalesBackupRestoreBody = zod.union([zod.object({
   "quantity": zod.number().int().min(1).max(previewMonthlySalesBackupRestoreBodyTwoSalesItemQuantityMax),
   "unitAmountCents": zod.number().int().min(previewMonthlySalesBackupRestoreBodyTwoSalesItemUnitAmountCentsMin).max(previewMonthlySalesBackupRestoreBodyTwoSalesItemUnitAmountCentsMax),
   "totalCents": zod.number().int().min(previewMonthlySalesBackupRestoreBodyTwoSalesItemTotalCentsMin).max(previewMonthlySalesBackupRestoreBodyTwoSalesItemTotalCentsMax),
+  "customerName": zod.string().max(previewMonthlySalesBackupRestoreBodyTwoSalesItemCustomerNameMax).nullish(),
   "notes": zod.string().max(previewMonthlySalesBackupRestoreBodyTwoSalesItemNotesMax).nullable(),
   "createdAt": zod.coerce.date()
 })).max(previewMonthlySalesBackupRestoreBodyTwoSalesMax),
@@ -916,6 +937,8 @@ export const restoreMonthlySalesBackupBodyTwoSalesItemUnitAmountCentsMax = 90071
 export const restoreMonthlySalesBackupBodyTwoSalesItemTotalCentsMin = 0;
 export const restoreMonthlySalesBackupBodyTwoSalesItemTotalCentsMax = 9007199254740991;
 
+export const restoreMonthlySalesBackupBodyTwoSalesItemCustomerNameMax = 120;
+
 export const restoreMonthlySalesBackupBodyTwoSalesItemNotesMax = 1000;
 
 export const restoreMonthlySalesBackupBodyTwoSalesMax = 10000;
@@ -979,6 +1002,7 @@ export const RestoreMonthlySalesBackupBody = zod.union([zod.object({
   "quantity": zod.number().int().min(1).max(restoreMonthlySalesBackupBodyTwoSalesItemQuantityMax),
   "unitAmountCents": zod.number().int().min(restoreMonthlySalesBackupBodyTwoSalesItemUnitAmountCentsMin).max(restoreMonthlySalesBackupBodyTwoSalesItemUnitAmountCentsMax),
   "totalCents": zod.number().int().min(restoreMonthlySalesBackupBodyTwoSalesItemTotalCentsMin).max(restoreMonthlySalesBackupBodyTwoSalesItemTotalCentsMax),
+  "customerName": zod.string().max(restoreMonthlySalesBackupBodyTwoSalesItemCustomerNameMax).nullish(),
   "notes": zod.string().max(restoreMonthlySalesBackupBodyTwoSalesItemNotesMax).nullable(),
   "createdAt": zod.coerce.date()
 })).max(restoreMonthlySalesBackupBodyTwoSalesMax),
@@ -1053,6 +1077,8 @@ export const updateSaleBodyOneQuantityMax = 2147483647;
 export const updateSaleBodyOneUnitAmountCentsMin = 0;
 export const updateSaleBodyOneUnitAmountCentsMax = 9007199254740991;
 
+export const updateSaleBodyOneCustomerNameMax = 120;
+
 export const updateSaleBodyOneNotesMax = 1000;
 
 
@@ -1063,11 +1089,14 @@ export const UpdateSaleBody = zod.object({
   "productName": zod.string().min(1).max(updateSaleBodyOneProductNameMax),
   "quantity": zod.number().int().min(1).max(updateSaleBodyOneQuantityMax),
   "unitAmountCents": zod.number().int().min(updateSaleBodyOneUnitAmountCentsMin).max(updateSaleBodyOneUnitAmountCentsMax),
+  "customerName": zod.string().max(updateSaleBodyOneCustomerNameMax).nullish(),
   "notes": zod.string().max(updateSaleBodyOneNotesMax).nullable()
 }).and(zod.object({
   "idempotencyKey": zod.string().uuid(),
   "expectedVersion": zod.number().int().min(1)
 }))
+
+export const updateSaleResponseCustomerNameMax = 120;
 
 
 
@@ -1080,6 +1109,7 @@ export const UpdateSaleResponse = zod.object({
   "quantity": zod.number().int(),
   "unitAmountCents": zod.number().int(),
   "totalCents": zod.number().int(),
+  "customerName": zod.string().max(updateSaleResponseCustomerNameMax).nullable(),
   "notes": zod.string().nullable(),
   "status": zod.enum(['active', 'cancelled']),
   "cancellationReason": zod.string().nullable(),
@@ -1107,6 +1137,8 @@ export const CancelSaleBody = zod.object({
   "idempotencyKey": zod.string().uuid()
 })
 
+export const cancelSaleResponseCustomerNameMax = 120;
+
 
 
 
@@ -1118,6 +1150,7 @@ export const CancelSaleResponse = zod.object({
   "quantity": zod.number().int(),
   "unitAmountCents": zod.number().int(),
   "totalCents": zod.number().int(),
+  "customerName": zod.string().max(cancelSaleResponseCustomerNameMax).nullable(),
   "notes": zod.string().nullable(),
   "status": zod.enum(['active', 'cancelled']),
   "cancellationReason": zod.string().nullable(),

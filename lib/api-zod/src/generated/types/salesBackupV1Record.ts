@@ -30,6 +30,11 @@ export interface SalesBackupV1Record {
      */
   totalCents: number;
   /**
+     * @maxLength 120
+     * @nullable
+     */
+  customerName?: string | null;
+  /**
      * @maxLength 1000
      * @nullable
      */

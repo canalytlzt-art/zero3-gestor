@@ -116,6 +116,7 @@ const backupSaleSchema = z.object({
   quantity: z.number().int().min(1).max(2_147_483_647),
   unitAmountCents: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   totalCents: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  customerName: z.string().max(120).nullable().optional(),
   notes: z.string().max(1000).nullable(),
   status: z.enum(["active", "cancelled"]),
   cancellationReason: z.string().nullable(),
@@ -311,7 +312,10 @@ function uniqueConflicts(conflicts: RestoreConflict[]) {
 
 async function analyzeMonthlyBackupRestore(tx: DatabaseTransaction, backup: MonthlySalesBackupV2): Promise<RestoreAnalysis> {
   const incomingProducts = backup.products.map(({ record }) => record as unknown as typeof productsTable.$inferSelect);
-  const incomingSales = backup.sales.map(({ record }) => record as unknown as typeof salesTable.$inferSelect);
+  const incomingSales = backup.sales.map(({ record }) => ({
+    ...record,
+    customerName: record.customerName ?? null,
+  }) as unknown as typeof salesTable.$inferSelect);
   const incomingRefunds = backup.refunds.map(({ record }) => record as unknown as typeof salesRefundsTable.$inferSelect);
   const incomingGoals = backup.goals.map(({ record }) => record as unknown as typeof salesGoalsTable.$inferSelect);
   const incomingHistories = backup.histories.map(({ record }) => record as unknown as typeof salesHistoryTable.$inferSelect);
@@ -1009,6 +1013,7 @@ router.post("/sales/import", async (req, res): Promise<void> => {
     productName: string;
     quantity: number;
     unitAmountCents: number;
+    customerName: string | null;
     notes: string | null;
     sourceRow: number;
     totalCents: number;
@@ -1023,7 +1028,12 @@ router.post("/sales/import", async (req, res): Promise<void> => {
       res.status(400).json({ error: `Invalid import data in row ${row.sourceRow}` });
       return;
     }
-    normalizedRows.push({ ...row, saleDate, productName, totalCents, notes: row.notes?.trim() || null });
+    const customerName = row.customerName?.trim().replace(/\s+/g, " ") || null;
+    if (customerName && customerName.length > 120) {
+      res.status(400).json({ error: `Customer name exceeds 120 characters in row ${row.sourceRow}` });
+      return;
+    }
+    normalizedRows.push({ ...row, saleDate, productName, totalCents, customerName, notes: row.notes?.trim() || null });
   }
   const actorId = getAuth(req).userId!;
   try {
@@ -1056,6 +1066,7 @@ router.post("/sales/import", async (req, res): Promise<void> => {
             quantity: row.quantity,
             unitAmountCents: row.unitAmountCents,
             totalCents: row.totalCents,
+            customerName: row.customerName,
             notes: row.notes,
             createdBy: actorId,
             updatedBy: actorId,
@@ -1525,6 +1536,7 @@ router.post("/sales/restore", async (req, res): Promise<void> => {
         unitAmountCents: sale.unitAmountCents,
         totalCents: sale.totalCents,
         notes: sale.notes,
+        customerName: sale.customerName?.trim().replace(/\s+/g, " ") || null,
         createdAt: sale.createdAt,
         updatedAt: sale.createdAt,
       }));
@@ -1649,6 +1661,7 @@ router.post("/sales", async (req, res): Promise<void> => {
             quantity: parsed.data.quantity,
             unitAmountCents: parsed.data.unitAmountCents,
             totalCents,
+            customerName: parsed.data.customerName?.trim().replace(/\s+/g, " ") || null,
             notes: parsed.data.notes?.trim() || null,
             status: "active",
             createdBy: actorId,
@@ -1761,6 +1774,7 @@ router.patch("/sales/:id", async (req, res): Promise<void> => {
             quantity: parsed.data.quantity,
             unitAmountCents: parsed.data.unitAmountCents,
             totalCents,
+            customerName: parsed.data.customerName?.trim().replace(/\s+/g, " ") || null,
             notes: parsed.data.notes?.trim() || null,
             version: current.version + 1,
             updatedBy: actorId,

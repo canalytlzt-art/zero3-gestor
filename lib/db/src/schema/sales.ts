@@ -13,6 +13,7 @@ export const salesTable = pgTable("sales", {
   quantity: integer("quantity").notNull(),
   unitAmountCents: bigint("unit_amount_cents", { mode: "number" }).notNull(),
   totalCents: bigint("total_cents", { mode: "number" }).notNull(),
+  customerName: text("customer_name"),
   notes: text("notes"),
   status: text("status").$type<"active" | "cancelled">().notNull().default("active"),
   cancellationReason: text("cancellation_reason"),

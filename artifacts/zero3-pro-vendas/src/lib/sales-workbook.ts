@@ -88,6 +88,7 @@ export function createSalesWorkbook(
   filters: ExportFilters,
 ): XLSX.WorkBook {
   const currentNames = new Map(products.map((product) => [product.id, product.name]));
+  const salesById = new Map(sales.map((sale) => [sale.id, sale]));
   const selectedProductIds = new Set([
     ...products.filter((product) => productNameKey(product.name) === productNameKey(filters.productName)).map(({ id }) => id),
     ...sales.filter((sale) => productNameKey(sale.productName) === productNameKey(filters.productName)).map(({ productId }) => productId),
@@ -99,7 +100,7 @@ export function createSalesWorkbook(
 
   const workbook = XLSX.utils.book_new();
   const launchRows: (string | number | null)[][] = [
-    ['Tipo', 'ID interno', 'Data da movimentação', 'Venda original', 'Data da venda original', 'ID do produto', 'Nome atual', 'Nome na venda', 'Quantidade', 'Valor unitário (R$)', 'Vendas (R$)', 'Estornos (R$)', 'Impacto após estornos (R$)', 'Observação/motivo'],
+    ['Tipo', 'ID interno', 'Data da movimentação', 'Venda original', 'Data da venda original', 'ID do produto', 'Nome atual', 'Nome na venda', 'Quantidade', 'Valor unitário (R$)', 'Vendas (R$)', 'Estornos (R$)', 'Impacto após estornos (R$)', 'Observação/motivo', 'Nome'],
     ...activeSales.map((sale) => [
       'Venda',
       sale.id,
@@ -115,6 +116,7 @@ export function createSalesWorkbook(
       0,
       moneyForWorkbook(BigInt(sale.totalCents)),
       sale.notes ?? '',
+      sale.customerName ?? '',
     ]),
     ...activeRefunds.map((refund) => [
       'Estorno',
@@ -131,6 +133,7 @@ export function createSalesWorkbook(
       moneyForWorkbook(BigInt(refund.amountCents)),
       moneyForWorkbook(-BigInt(refund.amountCents)),
       refund.reason,
+      salesById.get(refund.saleId)?.customerName ?? '',
     ]),
   ];
   launchRows.splice(1, launchRows.length - 1, ...launchRows.slice(1).sort((a, b) => {
@@ -139,13 +142,13 @@ export function createSalesWorkbook(
     return secondDate.localeCompare(firstDate) || String(a[1]).localeCompare(String(b[1]));
   }));
   const launches = XLSX.utils.aoa_to_sheet(launchRows);
-  launches['!cols'] = [{ wch: 13 }, { wch: 38 }, { wch: 18 }, { wch: 38 }, { wch: 18 }, { wch: 38 }, { wch: 28 }, { wch: 28 }, { wch: 13 }, { wch: 19 }, { wch: 17 }, { wch: 17 }, { wch: 24 }, { wch: 42 }];
-  launches['!autofilter'] = { ref: `A1:N${Math.max(1, launchRows.length)}` };
+  launches['!cols'] = [{ wch: 13 }, { wch: 38 }, { wch: 18 }, { wch: 38 }, { wch: 18 }, { wch: 38 }, { wch: 28 }, { wch: 28 }, { wch: 13 }, { wch: 19 }, { wch: 17 }, { wch: 17 }, { wch: 24 }, { wch: 42 }, { wch: 28 }];
+  launches['!autofilter'] = { ref: `A1:O${Math.max(1, launchRows.length)}` };
   setCurrencyFormat(launches, 9, launchRows.length - 1);
   setCurrencyFormat(launches, 10, launchRows.length - 1);
   setCurrencyFormat(launches, 11, launchRows.length - 1);
   setCurrencyFormat(launches, 12, launchRows.length - 1);
-  setTextCells(launches, launchRows.length, [0, 1, 2, 3, 4, 5, 6, 7, 13]);
+  setTextCells(launches, launchRows.length, [0, 1, 2, 3, 4, 5, 6, 7, 13, 14]);
   XLSX.utils.book_append_sheet(workbook, launches, 'Lançamentos');
 
   const byProduct = new Map<string, ProductTotals>();

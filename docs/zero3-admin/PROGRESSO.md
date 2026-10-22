@@ -146,3 +146,11 @@
 - Reversão automática do snapshot privado e agendamento automático de backups não fazem parte desta versão.
 - Teste simultâneo de duas requisições HTTP autenticadas de restauração não foi executado. A reanálise sob bloqueio de tabelas e a transação protegem a gravação concorrente; a idempotência sequencial foi executada.
 - A gravação pelo botão final de restauração no navegador não foi executada para preservar os dados compartilhados. O mesmo procedimento transacional foi executado pelo verificador em tabelas temporárias, incluindo falha SQL com rollback.
+
+## Nome no registro de venda — 22/10/2026
+
+- **Nome** é opcional e permite identificar o cliente ou registrar outra informação curta sobre quem comprou. O campo tem limite de 120 caracteres; espaços externos e repetições são normalizados.
+- O valor é salvo na base compartilhada, reaparece ao editar e fica visível no histórico. Também é mantido em importações, planilhas Excel e backups mensais; backups antigos sem esse campo continuam válidos e restauram o nome como vazio.
+- A coluna `customer_name` foi adicionada como texto anulável somente ao banco de desenvolvimento. Nenhuma migração ou alteração foi aplicada ao banco de produção.
+- `pnpm --filter @workspace/api-spec run codegen`, `pnpm run typecheck`, `pnpm --filter @workspace/db run verify-sales-schema`, `pnpm --filter @workspace/api-server run verify-sales-backup` e o build do app passaram.
+- Os testes de banco e restauração usaram dados fictícios, tabelas temporárias e rollback. A interface após autenticação não foi validada neste navegador.
