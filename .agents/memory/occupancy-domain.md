@@ -1,25 +1,31 @@
 ---
 name: Domínio de ocupação ZERO3 PRO
-description: Regras de negócio fornecidas para ocupação e sua separação das vendas.
+description: Regras atuais para registrar aulas, calcular ocupação e preservar dados antigos.
 ---
 
-O controle de presença e capacidade das aulas já acontece em outro sistema. Neste aplicativo são registrados ou importados somente os percentuais de ocupação. Não exigir alunos, professores, capacidade ou lista de presença; não converter percentuais em quantidade de pessoas.
+Cada novo registro representa uma aula com modalidade, data, horário inicial, horário final opcional, presenças e capacidade total. Calcular ocupação como soma das presenças dividida pela soma das vagas; não limitar resultados acima de 100%. Presenças somadas são participações em aulas, não clientes únicos.
 
-**Why:** O usuário definiu o ZERO3 PRO como ferramenta de consulta e comparação dos percentuais fornecidos pelo outro sistema, sem dados suficientes para calcular pessoas ou vagas.
+**Why:** A especificação atual do produto substituiu o modelo anterior que recebia somente percentuais e não tinha capacidade ou presença.
 
-**How to apply:** Manter ocupação separada dos lançamentos financeiros. Zero e cem por cento são válidos; ausência de informação é “Sem dados”, não zero.
+**How to apply:** Usar presenças e vagas para os novos cálculos por dia, mês, trimestre, modalidade e horário. Aceitar 0 presenças e ocupação acima de 100%; nunca converter as participações em pessoas distintas.
 
-Percentuais de ocupação nunca são somados. O consolidado mensal informado tem precedência no mesmo escopo para meses completos; sem consolidado, usar média simples dos percentuais diários disponíveis, identificada como “Média dos percentuais informados”. Intervalos parciais usam somente registros diários. Comparações de taxas usam pontos percentuais.
+Preservar registros legados que só têm percentual sem inventar presenças ou capacidade; mantê-los identificados à parte quando não puderem integrar o cálculo ponderado. Percentual informado na planilha serve para conferência: diferenças de arredondamento são aceitáveis, divergências relevantes precisam ser sinalizadas.
 
-**Why:** O usuário proibiu misturar o resumo mensal com os diários que ele resume e apresentar média simples como taxa ponderada de vagas.
+**Why:** O histórico antigo não contém dados de capacidade suficientes para reconstruir presenças ou vagas. O novo modelo exige cálculo ponderado, não média simples de taxas.
 
-**How to apply:** Não preencher dias ausentes com zero nem repetir o consolidado em cada dia. Vários meses são exibidos individualmente; um indicador único deve ser a média simples dos resultados mensais exibidos, com o critério informado.
+**How to apply:** Manter dados antigos e novos compatíveis durante a migração; ausência de registros nunca significa aula com zero presenças. Calcular taxas novas sempre com somas de presenças e vagas.
 
-A ocupação independe de vendas. O vínculo de produto/plano com modalidade deve ser explícito; não deduzir pelo nome. Vendas sem modalidade continuam nos totais como “Não classificado”.
+O modelo de aula não exige cliente, professor, venda ou cadastro individual de participantes. “Vagas” é capacidade total, não vagas restantes. Horário inicial distingue aulas da mesma modalidade no mesmo dia; horário final pode faltar.
 
-**Why:** O usuário separou a classificação comercial da medição de ocupação e exigiu a preservação dos totais financeiros.
+**Why:** A ocupação é uma medida operacional por aula, e a mesma turma pode ter várias sessões no mesmo dia.
 
-**How to apply:** Reutilizar as regras da Scoreboard para gráficos financeiros, sem excluir vendas não vinculadas ou somar metas gerais e metas por produto.
+**How to apply:** Não vincular aulas a clientes ou vendas. Identificar duplicidades principalmente por modalidade, data e horário inicial, preservando aulas em horários diferentes.
+
+CrossFit deve ser a modalidade inicial, mas filtros, importações e gráficos precisam continuar dinâmicos para outras modalidades. Associar nomes equivalentes como “CrossFit” e “CROSSFIT PRESENCIAL” somente após confirmação explícita.
+
+**Why:** A especificação nova define CrossFit como início, sem tornar a aplicação exclusiva dessa modalidade.
+
+**How to apply:** Reutilizar modalidades existentes e preservar registros ao renomeá-las; não inferir equivalência comercial apenas por semelhança textual.
 
 Dados de teste não entram na base real.
 

@@ -14,6 +14,7 @@ import {
 } from '@workspace/api-client-react';
 import type { GetOccupancyRecordsParams, GetSalesScoreboardParams, OccupancyModality } from '@workspace/api-client-react';
 import { ChartContainer } from '@/components/ui/chart';
+import { PurpleSelect } from '@/components/ui/purple-select';
 import { buildFinancialChartAnalytics } from '@/lib/financial-chart-data';
 import { buildOccupancyChartAnalytics, type OccupancyChartSupportRow } from '@/lib/occupancy-chart-data';
 import { formatCents, formatMonthKey, getSaoPauloMonthKey, getSalesGoalComparison, isCompleteCalendarMonthRange, monthKeysBetween } from '@/lib/sales-utils';
@@ -224,10 +225,28 @@ function FinancialCharts({ onOccupancy }: { onOccupancy: () => void }) {
             {periodMode === 'all' && <div className="pt-5 text-xs text-[#716879]" data-testid="text-financial-all-time">Todo o histórico registrado</div>}
           </div>
           <label className={labelClass}>Produto
-            <select value={productId} onChange={(event) => setProductId(event.target.value)} className={fieldClass} data-testid="select-financial-product"><option value="">Todos os produtos</option>{products.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+            <PurpleSelect
+              value={productId || '__all_products__'}
+              onValueChange={(value) => setProductId(value === '__all_products__' ? '' : value)}
+              className="mt-1.5 rounded-xl"
+              testId="select-financial-product"
+              options={[
+                { value: '__all_products__', label: 'Todos os produtos' },
+                ...products.map((item) => ({ value: item.id, label: item.name })),
+              ]}
+            />
           </label>
           <label className={labelClass}>Modalidade
-            <select value={modalityId} onChange={(event) => setModalityId(event.target.value)} className={fieldClass} data-testid="select-financial-modality"><option value="">Todas as modalidades</option>{modalities.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+            <PurpleSelect
+              value={modalityId || '__all_modalities__'}
+              onValueChange={(value) => setModalityId(value === '__all_modalities__' ? '' : value)}
+              className="mt-1.5 rounded-xl"
+              testId="select-financial-modality"
+              options={[
+                { value: '__all_modalities__', label: 'Todas as modalidades' },
+                ...modalities.map((item) => ({ value: item.id, label: item.name })),
+              ]}
+            />
           </label>
         </div>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
@@ -427,11 +446,16 @@ export default function OccupancyChartsPage() {
           </div>}
           <div>
             <label className={labelClass} htmlFor="occupancy-chart-modality">Modalidade</label>
-            <div className="relative">
-              <select id="occupancy-chart-modality" className={fieldClass} value={modalityId} onChange={(event) => setModalityId(event.target.value)} data-testid="select-occupancy-chart-modality">
-                <option value="">Selecione uma modalidade</option>{modalities.map((modality) => <option key={modality.id} value={modality.id}>{modality.name}</option>)}
-              </select><ChevronDown size={14} className="pointer-events-none absolute right-3 top-4 text-[#857a90]" />
-            </div>
+            <PurpleSelect
+              value={modalityId || '__all_modalities__'}
+              onValueChange={(value) => setModalityId(value === '__all_modalities__' ? '' : value)}
+              className="mt-1.5 rounded-xl"
+              testId="select-occupancy-chart-modality"
+              options={[
+                { value: '__all_modalities__', label: 'Selecione uma modalidade' },
+                ...modalities.map((modality) => ({ value: modality.id, label: modality.name })),
+              ]}
+            />
           </div>
           <div>
             <label className={labelClass} htmlFor="occupancy-chart-class">Turma / horário <span className="font-medium normal-case tracking-normal">(opcional)</span></label>

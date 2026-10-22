@@ -15,6 +15,8 @@ import {
 import type { GetOccupancyRecordsParams, OccupancyModality, OccupancyRecord, OccupancyRecordInput } from '@workspace/api-client-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { PurpleSelect } from '@/components/ui/purple-select';
+import { SuggestionInput } from '@/components/ui/suggestion-input';
 import { formatMonthKey, getSaoPauloMonthKey } from '@/lib/sales-utils';
 import OccupancyImportDialog from '@/components/occupancy-import-dialog';
 
@@ -317,8 +319,17 @@ export default function OccupancyManagement() {
           </div>
 
           <label className={`${labelClass} mt-3`}>Modalidade
-            <input list="occupancy-modality-options" value={form.modalityName} onChange={(e) => setField('modalityName', e.target.value)} placeholder="Escolha ou digite" className={fieldClass} data-testid="input-occupancy-modality" aria-invalid={!!showErr(validation.modality)} />
-            <datalist id="occupancy-modality-options">{modalities.map((m) => <option key={m.id} value={m.name} />)}</datalist>
+            <SuggestionInput
+              value={form.modalityName}
+              onValueChange={(value) => setField('modalityName', value)}
+              suggestions={modalities.map((modality) => modality.name)}
+              suggestionTitle="Modalidades cadastradas"
+              placeholder="Escolha ou digite"
+              className={fieldClass}
+              testId="input-occupancy-modality"
+              aria-invalid={!!showErr(validation.modality)}
+              autoComplete="off"
+            />
             {showErr(validation.modality) && <span className="mt-1 block text-[10px] normal-case tracking-normal text-[#a24f45]" data-testid="error-occupancy-modality">{validation.modality}</span>}
             {form.modalityName.trim() && !(editing && normalizeModalityName(form.modalityName) === normalizeModalityName(editing.modalityName)) && !modalities.some((m) => normalizeModalityName(m.name) === normalizeModalityName(form.modalityName)) && (
               <span className="mt-1 block text-[10px] font-medium normal-case tracking-normal text-[#6e9d31]" data-testid="text-occupancy-new-modality">Nova modalidade, será cadastrada ao salvar.</span>
@@ -375,10 +386,16 @@ export default function OccupancyManagement() {
                 </select>
               </label>
               <label className={labelClass}>Modalidade
-                <select value={filterModality} onChange={(e) => setFilterModality(e.target.value)} className={fieldClass} data-testid="filter-occupancy-modality">
-                  <option value="">Todas</option>
-                  {modalities.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                </select>
+                <PurpleSelect
+                  value={filterModality || '__all_modalities__'}
+                  onValueChange={(value) => setFilterModality(value === '__all_modalities__' ? '' : value)}
+                  className="mt-1.5 rounded-lg"
+                  testId="filter-occupancy-modality"
+                  options={[
+                    { value: '__all_modalities__', label: 'Todas' },
+                    ...modalities.map((modality) => ({ value: modality.id, label: modality.name })),
+                  ]}
+                />
               </label>
               <label className={labelClass}>Turma / horário
                 <input value={filterClass} onChange={(e) => setFilterClass(e.target.value)} placeholder="Todas" className={fieldClass} data-testid="filter-occupancy-class" />

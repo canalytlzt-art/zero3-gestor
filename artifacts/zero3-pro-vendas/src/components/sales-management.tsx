@@ -36,6 +36,8 @@ import {
 } from '@workspace/api-client-react';
 import type { CreateProductInput, MonthlySalesBackupInput, Product, Sale, SaleInput, SalesRestorePreview, SalesRestoreResult, UpdateProductInput } from '@workspace/api-client-react';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { PurpleSelect } from '@/components/ui/purple-select';
+import { SuggestionInput } from '@/components/ui/suggestion-input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { downloadMonthlyBackup, parseMonthlySalesBackup } from '@/lib/sales-export';
 import { formatCents, formatMonthKey, getSaoPauloMonthKey, normalizeProductName, productNameKey } from '@/lib/sales-utils';
@@ -171,19 +173,35 @@ type RestorePreview = {
   refundsCents: bigint;
 };
 
-function Field({ label, name, type = 'text', placeholder, testId, onChange, ...props }: {
+function Field({ label, name, type = 'text', placeholder, testId, onValueChange, suggestions, suggestionTitle, ...props }: {
   label: string;
   name: 'saleDate' | 'productName' | 'quantity' | 'unitAmount' | 'customerName' | 'notes';
   type?: string;
   placeholder?: string;
   testId: string;
-} & InputHTMLAttributes<HTMLInputElement>) {
+  onValueChange?: (value: string) => void;
+  suggestions?: string[];
+  suggestionTitle?: string;
+} & Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange'>) {
   return <FormField name={name} render={({ field }) => (
     <FormItem className="min-w-0 space-y-1.5">
       <FormLabel className="text-[11px] font-bold text-[#665f70]">{label}</FormLabel>
       <FormControl>
-        <input {...field} {...props} onChange={(event) => { field.onChange(event); onChange?.(event); }} type={type} placeholder={placeholder} data-testid={testId}
-          className="h-11 w-full rounded-xl border border-[#e7e2ea] bg-[#fcfbfd] px-3.5 text-sm text-[#342d43] outline-none transition placeholder:text-[#aaa4b0] focus:border-[#9477bf] focus:bg-white focus:ring-2 focus:ring-[#7656b8]/10" />
+        {suggestions ? (
+          <SuggestionInput
+            {...props}
+            value={field.value}
+            onValueChange={(value) => { field.onChange(value); onValueChange?.(value); }}
+            suggestions={suggestions}
+            suggestionTitle={suggestionTitle ?? 'Opções cadastradas'}
+            type={type}
+            placeholder={placeholder}
+            testId={testId}
+          />
+        ) : (
+          <input {...field} {...props} onChange={field.onChange} type={type} placeholder={placeholder} data-testid={testId}
+            className="h-11 w-full rounded-xl border border-[#e7e2ea] bg-[#fcfbfd] px-3.5 text-sm text-[#342d43] outline-none transition placeholder:text-[#aaa4b0] focus:border-[#9477bf] focus:bg-white focus:ring-2 focus:ring-[#7656b8]/10" />
+        )}
       </FormControl>
       <FormMessage className="text-[11px]" />
     </FormItem>
@@ -871,12 +889,11 @@ export default function SalesManagement() {
               <div className="grid grid-cols-2 gap-3">
                 <Field name="saleDate" label="Data da venda" type="date" testId="input-sale-date" />
                 <div className="col-span-2">
-                  <Field name="productName" label="Plano ou produto" placeholder="Ex.: Plano Essencial" testId="input-sale-product" list="sale-product-suggestions" autoComplete="off" onChange={(event) => {
+                  <Field name="productName" label="Plano ou produto" placeholder="Ex.: Plano Essencial" testId="input-sale-product" autoComplete="off" suggestions={activeProducts.map((product) => product.name)} suggestionTitle="Produtos cadastrados" onValueChange={(value) => {
                     if (form.getValues('unitAmount')) return;
-                    const matched = activeProducts.find((product) => productNameKey(product.name) === productNameKey(event.target.value));
+                    const matched = activeProducts.find((product) => productNameKey(product.name) === productNameKey(value));
                     if (matched) form.setValue('unitAmount', formatCentsInput(matched.suggestedPriceCents), { shouldValidate: true });
                   }} />
-                  <datalist id="sale-product-suggestions">{activeProducts.map((product) => <option key={product.id} value={product.name} />)}</datalist>
                 </div>
                 <Field name="quantity" label="Quantidade" type="number" min="1" step="1" inputMode="numeric" placeholder="1" testId="input-sale-quantity" />
                 <Field name="unitAmount" label="Valor unitário" type="text" inputMode="decimal" placeholder="0,00" testId="input-sale-unit-amount" />
@@ -929,10 +946,16 @@ export default function SalesManagement() {
                 <input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} data-testid="filter-sale-to" className="mt-1 h-10 w-full min-w-0 rounded-lg border border-[#e7e2ea] bg-white px-2.5 text-xs text-[#443d50] outline-none focus:border-[#9477bf]" />
               </label>
               <label className="col-span-2 min-w-0 text-[10px] font-semibold text-[#817b89]">Plano ou produto
-                <select value={filterProduct} onChange={(event) => setFilterProduct(event.target.value)} data-testid="filter-sale-product" className="mt-1 h-10 w-full rounded-lg border border-[#e7e2ea] bg-white px-2.5 text-xs text-[#443d50] outline-none focus:border-[#9477bf]">
-                  <option value="">Todos os produtos</option>
-                  {productNames.map((product) => <option key={product} value={product}>{product}</option>)}
-                </select>
+                <PurpleSelect
+                  value={filterProduct ? `product:${encodeURIComponent(filterProduct)}` : 'all-products'}
+                  onValueChange={(value) => setFilterProduct(value === 'all-products' ? '' : decodeURIComponent(value.slice('product:'.length)))}
+                  testId="filter-sale-product"
+                  className="mt-1 rounded-lg bg-white px-2.5"
+                  options={[
+                    { value: 'all-products', label: 'Todos os produtos' },
+                    ...productNames.map((product) => ({ value: `product:${encodeURIComponent(product)}`, label: product })),
+                  ]}
+                />
               </label>
               <label className="col-span-2 min-w-0 text-[10px] font-semibold text-[#817b89]">Situação
                 <select value={filterStatus} onChange={(event) => setFilterStatus(event.target.value as typeof filterStatus)} data-testid="filter-sale-status" className="mt-1 h-10 w-full rounded-lg border border-[#e7e2ea] bg-white px-2.5 text-xs text-[#443d50] outline-none focus:border-[#9477bf]">

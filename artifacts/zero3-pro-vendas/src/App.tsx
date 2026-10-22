@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/reac
 import { ArrowDownRight, ArrowRight, BarChart3, CalendarDays, Check, CircleHelp, ClipboardList, LockKeyhole, LogOut, RefreshCw, Sparkles } from 'lucide-react';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
+import { PurpleSelect } from '@/components/ui/purple-select';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import {
   getGetAccessStatusQueryKey,
@@ -404,10 +405,16 @@ function ScoreboardContent() {
           </div>
 
           <label className="block text-[10px] font-bold uppercase tracking-[.1em] text-[#817b89]">Plano ou produto
-            <select value={filterProduct} onChange={(event) => setFilterProduct(event.target.value)} data-testid="filter-scoreboard-product" className="mt-1.5 h-10 w-full rounded-lg border border-[#e7e2ea] bg-[#fffefc] px-3 text-xs font-medium normal-case tracking-normal text-[#443d50] outline-none focus:border-[#9477bf]">
-              <option value="">Todos os produtos</option>
-              {products.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
-            </select>
+            <PurpleSelect
+              value={filterProduct || '__all_products__'}
+              onValueChange={(value) => setFilterProduct(value === '__all_products__' ? '' : value)}
+              testId="filter-scoreboard-product"
+              className="mt-1.5 rounded-lg"
+              options={[
+                { value: '__all_products__', label: 'Todos os produtos' },
+                ...products.map(({ id, name }) => ({ value: id, label: name })),
+              ]}
+            />
           </label>
           <button type="button" onClick={clearFilters} className="h-10 rounded-lg px-3 text-xs font-semibold text-[#766d83] transition hover:bg-[#f6f3f8] xl:whitespace-nowrap" data-testid="button-clear-scoreboard-filters">Limpar filtros</button>
         </div>
