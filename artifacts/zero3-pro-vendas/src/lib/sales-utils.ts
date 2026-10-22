@@ -73,3 +73,69 @@ export function isCompleteCalendarMonthRange(fromDate: string, toDate: string): 
   const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][end.month - 1];
   return end.day === daysInMonth;
 }
+
+export type SalesGoalComparison =
+  | {
+      status: 'partial-range' | 'invalid' | 'none' | 'partial';
+      configuredGoalCount: number;
+      monthCount: number;
+    }
+  | {
+      status: 'complete';
+      configuredGoalCount: number;
+      monthCount: number;
+      targetCents: bigint;
+      differenceCents: bigint;
+      achievementTenthsPercent: bigint;
+      attainment: 'below' | 'equal' | 'above';
+    };
+
+type SalesGoalForComparison = {
+  month: string;
+  productName: string | null;
+  targetCents: number;
+};
+
+export function getSalesGoalComparison(
+  actualRevenueCents: bigint,
+  monthKeys: string[],
+  comparisonMode: 'complete' | 'partial-range' | 'invalid',
+  selectedProductName: string | null,
+  goals: SalesGoalForComparison[],
+): SalesGoalComparison {
+  const activeGoals = monthKeys.map((month) => goals.find((goal) => {
+    if (goal.month !== month) return false;
+    if (selectedProductName === null) return goal.productName === null;
+    return goal.productName !== null
+      && productNameKey(goal.productName) === productNameKey(selectedProductName);
+  }));
+  const configuredGoalCount = activeGoals.filter(Boolean).length;
+  const base = { configuredGoalCount, monthCount: monthKeys.length };
+
+  if (comparisonMode === 'partial-range') return { status: 'partial-range', ...base };
+  if (comparisonMode === 'invalid' || monthKeys.length === 0) return { status: 'invalid', ...base };
+  if (configuredGoalCount === 0) return { status: 'none', ...base };
+  if (configuredGoalCount < monthKeys.length) return { status: 'partial', ...base };
+
+  const targetCents = activeGoals.reduce(
+    (total, goal) => total + BigInt(goal!.targetCents),
+    0n,
+  );
+  const differenceCents = actualRevenueCents < targetCents
+    ? targetCents - actualRevenueCents
+    : actualRevenueCents - targetCents;
+  const achievementTenthsPercent = (actualRevenueCents * 1000n + targetCents / 2n) / targetCents;
+
+  return {
+    status: 'complete',
+    ...base,
+    targetCents,
+    differenceCents,
+    achievementTenthsPercent,
+    attainment: actualRevenueCents < targetCents
+      ? 'below'
+      : actualRevenueCents === targetCents
+        ? 'equal'
+        : 'above',
+  };
+}

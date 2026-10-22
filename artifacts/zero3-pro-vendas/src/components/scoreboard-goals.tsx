@@ -17,6 +17,7 @@ import {
 import {
   formatCents,
   formatMonthKey,
+  getSalesGoalComparison,
   getSaoPauloMonthKey,
   productNameKey,
 } from '@/lib/sales-utils';
@@ -52,8 +53,7 @@ function formatTargetInput(targetCents: number): string {
   return `${cents / 100n},${String(cents % 100n).padStart(2, '0')}`;
 }
 
-function formatGoalPercent(actual: bigint, target: bigint): string {
-  const tenthsOfPercent = (actual * 1000n + target / 2n) / target;
+function formatGoalPercent(tenthsOfPercent: bigint): string {
   return `${(tenthsOfPercent / 10n).toLocaleString('pt-BR')},${tenthsOfPercent % 10n}%`;
 }
 
@@ -93,19 +93,16 @@ export default function ScoreboardGoals({
   const [saveError, setSaveError] = useState('');
 
   const selectedScopeProduct = products.find((product) => product.key === goalScope);
-  const activeGoals = monthKeys.map((month) => goals.find(
-    (goal) => goal.month === month && goalMatchesScope(goal, selectedProductName),
-  ));
-  const configuredGoalCount = activeGoals.filter(Boolean).length;
-  const fullCoverage = monthKeys.length > 0 && configuredGoalCount === monthKeys.length;
+  const goalComparison = getSalesGoalComparison(
+    actualRevenueCents,
+    monthKeys,
+    comparisonMode,
+    selectedProductName,
+    goals,
+  );
+  const { configuredGoalCount } = goalComparison;
   const noConfiguredGoals = configuredGoalCount === 0;
-  const targetCents = fullCoverage
-    ? activeGoals.reduce((total, goal) => total + BigInt(goal!.targetCents), 0n)
-    : 0n;
   const actualCents = actualRevenueCents;
-  const amountDifference = actualCents < targetCents
-    ? targetCents - actualCents
-    : actualCents - targetCents;
   const periodLabel = monthKeys.length === 1
     ? formatMonthKey(monthKeys[0])
     : monthKeys.length > 1
@@ -240,45 +237,45 @@ export default function ScoreboardGoals({
                 <RefreshCw size={12} /> Tentar novamente
               </button>
             </div>
-          ) : comparisonMode === 'invalid' || monthKeys.length === 0 ? (
+          ) : goalComparison.status === 'invalid' ? (
             <div className="rounded-xl bg-[#f8f6f9] px-3.5 py-3 text-xs text-[#817b89]" data-testid="status-scoreboard-goal-invalid">
               Selecione um período válido para consultar a meta correspondente.
             </div>
-          ) : noConfiguredGoals ? (
+          ) : goalComparison.status === 'none' ? (
             <div className="rounded-xl bg-[#f8f6f9] px-3.5 py-3" data-testid="status-scoreboard-goal-undefined">
               <p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Meta</p>
               <p className="mt-1 text-sm font-extrabold text-[#625a6d]">Meta não definida</p>
               <p className="mt-1 text-[10px] leading-4 text-[#8a8491]">Defina uma meta mensal para comparar este plano e período.</p>
             </div>
-          ) : !fullCoverage ? (
+          ) : goalComparison.status === 'partial' ? (
             <div className="rounded-xl border border-[#e9e0c8] bg-[#fcf8ed] px-3.5 py-3 sm:col-span-1 xl:col-span-3" data-testid="status-scoreboard-goal-partial-coverage">
               <p className="text-xs font-bold text-[#725d2d]">Cobertura parcial de metas</p>
               <p className="mt-1 text-[11px] leading-5 text-[#827248]">
                 Meta cadastrada para {configuredGoalCount} de {monthKeys.length} meses. Cadastre as metas restantes para comparar o período; o percentual não é exibido com cobertura incompleta.
               </p>
             </div>
-          ) : (
+          ) : goalComparison.status === 'complete' ? (
             <>
               <div className="rounded-xl bg-[#f8f6f9] px-3.5 py-3" data-testid="scoreboard-goal-target">
                 <p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Meta</p>
-                <p className="mt-1 text-sm font-extrabold tabular-nums text-[#40374e]">{formatCents(targetCents)}</p>
+                <p className="mt-1 text-sm font-extrabold tabular-nums text-[#40374e]">{formatCents(goalComparison.targetCents)}</p>
               </div>
               <div className="rounded-xl bg-[#f8f6f9] px-3.5 py-3" data-testid="scoreboard-goal-difference">
-                <p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">{actualCents > targetCents ? 'Excedente' : 'Valor que falta'}</p>
-                <p className="mt-1 text-sm font-extrabold tabular-nums text-[#40374e]">{formatCents(amountDifference)}</p>
+                <p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">{goalComparison.attainment === 'above' ? 'Excedente' : 'Valor que falta'}</p>
+                <p className="mt-1 text-sm font-extrabold tabular-nums text-[#40374e]">{formatCents(goalComparison.differenceCents)}</p>
               </div>
               <div className="rounded-xl bg-[#f0edf4] px-3.5 py-3" data-testid="scoreboard-goal-percent">
                 <p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#777080]">Atingimento</p>
-                <p className="mt-1 text-sm font-extrabold tabular-nums text-[#392f4b]">{formatGoalPercent(actualCents, targetCents)}</p>
+                <p className="mt-1 text-sm font-extrabold tabular-nums text-[#392f4b]">{formatGoalPercent(goalComparison.achievementTenthsPercent)}</p>
               </div>
             </>
-          )}
+          ) : null}
         </div>
 
-        {fullCoverage && actualCents === targetCents && comparisonMode === 'complete' && (
+        {goalComparison.status === 'complete' && goalComparison.attainment === 'equal' && (
           <p className="mt-2 text-[10px] font-semibold text-[#55772c]" data-testid="text-scoreboard-goal-met">Meta atingida.</p>
         )}
-        {fullCoverage && actualCents > targetCents && comparisonMode === 'complete' && (
+        {goalComparison.status === 'complete' && goalComparison.attainment === 'above' && (
           <p className="mt-2 text-[10px] font-semibold text-[#55772c]" data-testid="text-scoreboard-goal-exceeded">O faturamento está acima da meta.</p>
         )}
       </section>

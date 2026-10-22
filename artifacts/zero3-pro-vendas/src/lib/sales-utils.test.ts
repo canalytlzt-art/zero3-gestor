@@ -1,0 +1,132 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  getSalesGoalComparison,
+  isCompleteCalendarMonthRange,
+} from './sales-utils.ts';
+
+const singleMonth = ['2026-01'];
+const twoMonths = ['2026-01', '2026-02'];
+
+function goal(month: string, targetCents: number, productName: string | null = null) {
+  return { month, targetCents, productName };
+}
+
+function assertHasNoComparisonValues(result: ReturnType<typeof getSalesGoalComparison>) {
+  assert.notEqual(result.status, 'complete');
+  assert.equal('targetCents' in result, false);
+  assert.equal('differenceCents' in result, false);
+  assert.equal('achievementTenthsPercent' in result, false);
+}
+
+test('does not calculate target or attainment when the selected scope has no goals', () => {
+  const result = getSalesGoalComparison(12_000n, singleMonth, 'complete', null, []);
+
+  assert.equal(result.status, 'none');
+  assert.equal(result.configuredGoalCount, 0);
+  assertHasNoComparisonValues(result);
+});
+
+test('compares a single month when that month has a goal', () => {
+  const result = getSalesGoalComparison(
+    8_500n,
+    singleMonth,
+    'complete',
+    null,
+    [goal('2026-01', 10_000)],
+  );
+
+  assert.equal(result.status, 'complete');
+  if (result.status !== 'complete') return;
+  assert.equal(result.targetCents, 10_000n);
+  assert.equal(result.differenceCents, 1_500n);
+  assert.equal(result.attainment, 'below');
+});
+
+test('sums goals across multiple months only with complete coverage', () => {
+  const result = getSalesGoalComparison(
+    45_000n,
+    twoMonths,
+    'complete',
+    null,
+    [goal('2026-01', 10_000), goal('2026-02', 20_000)],
+  );
+
+  assert.equal(result.status, 'complete');
+  if (result.status !== 'complete') return;
+  assert.equal(result.configuredGoalCount, 2);
+  assert.equal(result.targetCents, 30_000n);
+  assert.equal(result.achievementTenthsPercent, 1_500n);
+  assert.equal(result.attainment, 'above');
+});
+
+test('does not expose a sum or percentage when any selected month is missing a goal', () => {
+  const result = getSalesGoalComparison(
+    25_000n,
+    twoMonths,
+    'complete',
+    null,
+    [goal('2026-01', 10_000)],
+  );
+
+  assert.equal(result.status, 'partial');
+  assert.equal(result.configuredGoalCount, 1);
+  assert.equal(result.monthCount, 2);
+  assertHasNoComparisonValues(result);
+});
+
+test('matches plan goals separately from general goals', () => {
+  const goals = [
+    goal('2026-01', 90_000),
+    goal('2026-02', 90_000),
+    goal('2026-01', 10_000, 'Plano Alpha'),
+    goal('2026-02', 20_000, ' plano   alpha '),
+  ];
+
+  const planResult = getSalesGoalComparison(30_000n, twoMonths, 'complete', 'Plano Alpha', goals);
+  const generalResult = getSalesGoalComparison(180_000n, twoMonths, 'complete', null, goals);
+
+  assert.equal(planResult.status, 'complete');
+  if (planResult.status === 'complete') assert.equal(planResult.targetCents, 30_000n);
+  assert.equal(generalResult.status, 'complete');
+  if (generalResult.status === 'complete') assert.equal(generalResult.targetCents, 180_000n);
+});
+
+test('distinguishes below, equal, and above target values', () => {
+  const goals = [goal('2026-01', 10_000)];
+  const compare = (actual: bigint) => getSalesGoalComparison(
+    actual,
+    singleMonth,
+    'complete',
+    null,
+    goals,
+  );
+
+  const below = compare(9_000n);
+  const equal = compare(10_000n);
+  const above = compare(11_000n);
+
+  assert.equal(below.status === 'complete' && below.attainment, 'below');
+  assert.equal(equal.status === 'complete' && equal.attainment, 'equal');
+  assert.equal(above.status === 'complete' && above.attainment, 'above');
+  assert.equal(below.status === 'complete' && below.differenceCents, 1_000n);
+  assert.equal(equal.status === 'complete' && equal.differenceCents, 0n);
+  assert.equal(above.status === 'complete' && above.differenceCents, 1_000n);
+});
+
+test('does not compare monthly goals for an interval containing a partial month', () => {
+  assert.equal(isCompleteCalendarMonthRange('2026-01-01', '2026-02-28'), true);
+  assert.equal(isCompleteCalendarMonthRange('2026-01-15', '2026-02-28'), false);
+
+  const result = getSalesGoalComparison(
+    20_000n,
+    twoMonths,
+    'partial-range',
+    null,
+    [goal('2026-01', 10_000), goal('2026-02', 20_000)],
+  );
+
+  assert.equal(result.status, 'partial-range');
+  assert.equal(result.configuredGoalCount, 2);
+  assertHasNoComparisonValues(result);
+});
