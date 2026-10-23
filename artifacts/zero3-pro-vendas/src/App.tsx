@@ -25,7 +25,7 @@ import { Link, Redirect, Route, Switch, useLocation, Router as WouterRouter } fr
 import SalesManagement from '@/components/sales-management';
 import ScoreboardGoals from '@/components/scoreboard-goals';
 import OccupancyManagement from '@/components/occupancy-management';
-import { formatCents, formatMonthKey, getSaoPauloMonthKey, isCompleteCalendarMonthRange, monthKeysBetween, productNameKey } from '@/lib/sales-utils';
+import { buildScoreboardQueryParams, formatCents, formatMonthKey, getSaoPauloMonthKey, isCompleteCalendarMonthRange, monthKeysBetween, productNameKey } from '@/lib/sales-utils';
 
 const queryClient = new QueryClient();
 const OccupancyChartsPage = lazy(() => import('@/components/occupancy-charts-page'));
@@ -224,16 +224,15 @@ function ScoreboardContent() {
   const invalidMonthSelection = (periodMode === 'single' && !selectedMonth)
     || (periodMode === 'multiple' && selectedMonths.length === 0);
   const scoreboardParams = useMemo<GetSalesScoreboardParams>(() => {
-    const params: GetSalesScoreboardParams = {};
-    if (periodMode === 'current') params.months = [currentMonthKey];
-    if (periodMode === 'single' && selectedMonth) params.months = [selectedMonth];
-    if (periodMode === 'multiple' && selectedMonths.length) params.months = [...new Set(selectedMonths)].sort();
-    if (periodMode === 'range' && !invalidRange) {
-      params.fromDate = dateFrom;
-      params.toDate = dateTo;
-    }
-    if (filterProduct) params.productId = filterProduct;
-    return params;
+    return buildScoreboardQueryParams({
+      periodMode,
+      currentMonthKey,
+      selectedMonth,
+      selectedMonths,
+      dateFrom,
+      dateTo,
+      filterProduct,
+    });
   }, [periodMode, currentMonthKey, selectedMonth, selectedMonths, invalidRange, dateFrom, dateTo, filterProduct]);
   const {
     data: scoreboardData,

@@ -1,9 +1,43 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  buildScoreboardQueryParams,
   getSalesGoalComparison,
   isCompleteCalendarMonthRange,
 } from './sales-utils.ts';
+
+test('builds the exact query filters used by the Scoreboard period controls', () => {
+  const common = {
+    currentMonthKey: '2097-11',
+    selectedMonth: '2097-10',
+    selectedMonths: ['2097-12', '2097-10', '2097-12'],
+    dateFrom: '2097-11-01',
+    dateTo: '2097-11-30',
+    filterProduct: '',
+  };
+
+  assert.deepEqual(buildScoreboardQueryParams({ ...common, periodMode: 'current' }), {
+    months: ['2097-11'],
+  });
+  assert.deepEqual(buildScoreboardQueryParams({ ...common, periodMode: 'single' }), {
+    months: ['2097-10'],
+  });
+  assert.deepEqual(buildScoreboardQueryParams({ ...common, periodMode: 'multiple' }), {
+    months: ['2097-10', '2097-12'],
+  });
+  assert.deepEqual(buildScoreboardQueryParams({ ...common, periodMode: 'range' }), {
+    fromDate: '2097-11-01',
+    toDate: '2097-11-30',
+  });
+  assert.deepEqual(buildScoreboardQueryParams({
+    ...common,
+    periodMode: 'range',
+    dateFrom: '2097-11-30',
+    dateTo: '2097-11-01',
+    filterProduct: 'product-id',
+  }), { productId: 'product-id' });
+  assert.deepEqual(buildScoreboardQueryParams({ ...common, periodMode: 'all' }), {});
+});
 
 const singleMonth = ['2026-01'];
 const twoMonths = ['2026-01', '2026-02'];

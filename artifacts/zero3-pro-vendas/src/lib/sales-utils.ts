@@ -44,6 +44,50 @@ export function monthKeysBetween(first: string, last: string): string[] {
   });
 }
 
+export type ScoreboardPeriodMode = 'current' | 'single' | 'multiple' | 'range' | 'all';
+
+export function buildScoreboardQueryParams({
+  periodMode,
+  currentMonthKey,
+  selectedMonth,
+  selectedMonths,
+  dateFrom,
+  dateTo,
+  filterProduct,
+}: {
+  periodMode: ScoreboardPeriodMode;
+  currentMonthKey: string;
+  selectedMonth: string;
+  selectedMonths: string[];
+  dateFrom: string;
+  dateTo: string;
+  filterProduct: string;
+}): {
+  months?: string[];
+  fromDate?: string;
+  toDate?: string;
+  productId?: string;
+} {
+  const params: {
+    months?: string[];
+    fromDate?: string;
+    toDate?: string;
+    productId?: string;
+  } = {};
+
+  if (periodMode === 'current') params.months = [currentMonthKey];
+  if (periodMode === 'single' && selectedMonth) params.months = [selectedMonth];
+  if (periodMode === 'multiple' && selectedMonths.length) {
+    params.months = [...new Set(selectedMonths)].sort();
+  }
+  if (periodMode === 'range' && dateFrom && dateTo && dateFrom <= dateTo) {
+    params.fromDate = dateFrom;
+    params.toDate = dateTo;
+  }
+  if (filterProduct) params.productId = filterProduct;
+  return params;
+}
+
 export function formatMonthKey(monthKey: string): string {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthKey)) return monthKey;
   return new Intl.DateTimeFormat("pt-BR", {

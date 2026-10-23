@@ -1569,3 +1569,117 @@ test("fictional October-November scenario reconciles scoreboard products, months
     assert.equal(octoberGoal.targetCents + novemberGoal.targetCents - 160000, 140000);
   });
 });
+
+test("Scoreboard month and inclusive-range filters use sale and refund movement dates", async () => {
+  await withSalesApi(getTestDatabase(), async (baseUrl) => {
+    const sales = [
+      { saleDate: "2095-10-31", productName: "Plano Outubro", quantity: 2, unitAmountCents: 10000 },
+      { saleDate: "2095-11-01", productName: "Plano Novembro", quantity: 3, unitAmountCents: 20000 },
+      { saleDate: "2095-11-30", productName: "Aula na data final", quantity: 1, unitAmountCents: 9000 },
+    ];
+    const saleIds: string[] = [];
+    for (const sale of sales) {
+      const idempotencyKey = randomUUID();
+      createdIdempotencyKeys.push(idempotencyKey);
+      const response = await apiRequest(baseUrl, "/sales", {
+        method: "POST",
+        body: { ...sale, notes: null, idempotencyKey },
+      });
+      assert.equal(response.status, 201);
+      const saved = await response.json() as { id: string; productId: string };
+      saleIds.push(saved.id);
+      createdSaleIds.push(saved.id);
+      createdProductIds.push(saved.productId);
+    }
+
+    const refunds = [
+      { saleIndex: 0, refundDate: "2095-11-01", amountCents: 5000, reason: "Estorno no início do recorte" },
+      { saleIndex: 1, refundDate: "2095-11-30", amountCents: 60000, reason: "Estorno no fim do recorte" },
+      { saleIndex: 2, refundDate: "2095-12-01", amountCents: 2000, reason: "Estorno fora do recorte" },
+    ];
+    for (const refund of refunds) {
+      const idempotencyKey = randomUUID();
+      createdIdempotencyKeys.push(idempotencyKey);
+      const response = await apiRequest(baseUrl, `/sales/${saleIds[refund.saleIndex]}/refunds`, {
+        method: "POST",
+        body: {
+          refundDate: refund.refundDate,
+          amountCents: refund.amountCents,
+          reason: refund.reason,
+          idempotencyKey,
+        },
+      });
+      assert.equal(response.status, 201);
+      const saved = await response.json() as { id: string };
+      createdRefundIds.push(saved.id);
+    }
+
+    type Totals = { quantity: number; salesCents: number; refundCents: number; netCents: number };
+    type Scoreboard = {
+      totals: Totals;
+      products: Array<Totals & { productName: string }>;
+      months: Array<Totals & { month: string }>;
+    };
+    const getScoreboard = async (query: string): Promise<Scoreboard> => {
+      const response = await apiRequest(baseUrl, `/sales/scoreboard?${query}`);
+      assert.equal(response.status, 200);
+      return await response.json() as Scoreboard;
+    };
+    const assertReconciles = (report: Scoreboard) => {
+      for (const dimension of [report.products, report.months]) {
+        assert.deepEqual(
+          dimension.reduce((totals, row) => ({
+            quantity: totals.quantity + row.quantity,
+            salesCents: totals.salesCents + row.salesCents,
+            refundCents: totals.refundCents + row.refundCents,
+            netCents: totals.netCents + row.netCents,
+          }), { quantity: 0, salesCents: 0, refundCents: 0, netCents: 0 }),
+          report.totals,
+        );
+      }
+      assert.equal(report.totals.salesCents - report.totals.refundCents, report.totals.netCents);
+    };
+
+    const singleMonth = await getScoreboard("months=2095-11");
+    assert.deepEqual(singleMonth.totals, {
+      quantity: 4,
+      salesCents: 69000,
+      refundCents: 65000,
+      netCents: 4000,
+    });
+    assert.deepEqual(
+      Object.fromEntries(singleMonth.products.map(({ productName, quantity, salesCents, refundCents, netCents }) => [
+        productName, [quantity, salesCents, refundCents, netCents],
+      ])),
+      {
+        "Aula na data final": [1, 9000, 0, 9000],
+        "Plano Novembro": [3, 60000, 60000, 0],
+        "Plano Outubro": [0, 0, 5000, -5000],
+      },
+    );
+    assert.deepEqual(singleMonth.months, [
+      { month: "2095-11", quantity: 4, salesCents: 69000, refundCents: 65000, netCents: 4000 },
+    ]);
+    assertReconciles(singleMonth);
+
+    const selectedMonths = await getScoreboard("months=2095-10,2095-12,2096-01");
+    assert.deepEqual(selectedMonths.totals, {
+      quantity: 2,
+      salesCents: 20000,
+      refundCents: 2000,
+      netCents: 18000,
+    });
+    assert.deepEqual(selectedMonths.months, [
+      { month: "2095-10", quantity: 2, salesCents: 20000, refundCents: 0, netCents: 20000 },
+      { month: "2095-12", quantity: 0, salesCents: 0, refundCents: 2000, netCents: -2000 },
+      { month: "2096-01", quantity: 0, salesCents: 0, refundCents: 0, netCents: 0 },
+    ]);
+    assertReconciles(selectedMonths);
+
+    const inclusiveRange = await getScoreboard("fromDate=2095-11-01&toDate=2095-11-30");
+    assert.deepEqual(inclusiveRange.totals, singleMonth.totals);
+    assert.deepEqual(inclusiveRange.products, singleMonth.products);
+    assert.deepEqual(inclusiveRange.months, singleMonth.months);
+    assertReconciles(inclusiveRange);
+  });
+});
