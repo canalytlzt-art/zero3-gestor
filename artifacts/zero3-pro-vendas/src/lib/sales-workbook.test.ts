@@ -78,8 +78,8 @@ test('multi-month workbook and CSV reconcile sales by sale date and refunds by e
   assert.equal(summaryRows.find((row) => row[0] === 'Estornos (R$)')?.[1], 200);
   assert.equal(summaryRows.find((row) => row[0] === 'Faturamento após estornos (R$)')?.[1], 1300);
   assert.equal(summaryRows.find((row) => row[0] === 'Total geral')?.[1], 2);
-  assert.ok(summaryRows.some((row) => row[0] === '2026-10' && row[3] === 0));
-  assert.ok(summaryRows.some((row) => row[0] === '2026-11' && row[3] === 200));
+  assert.ok(summaryRows.some((row) => row[0] === '2026-10' && row[2] === 1000 && row[3] === 0 && row[4] === 1000));
+  assert.ok(summaryRows.some((row) => row[0] === '2026-11' && row[2] === 500 && row[3] === 200 && row[4] === 300));
 
   const csv = createSalesCsv(sales, refunds, products, filters);
   assert.ok(csv.startsWith('\uFEFF'));
@@ -122,4 +122,32 @@ test('inclusive date range and empty selected month preserve zero totals', () =>
     refundsCents: 0n,
     netCents: 0n,
   });
+});
+
+test('exports every matching record beyond a 500-row screen page', () => {
+  const bulkSales = Array.from({ length: 620 }, (_, index) => ({
+    ...octoberSale,
+    id: `sale-bulk-${index}`,
+    unitAmountCents: 1,
+    totalCents: 1,
+    customerName: `Cliente ${index}`,
+  }));
+  const filters = {
+    selection: { mode: 'months', months: ['2026-10'] } as const,
+    productName: '',
+    generatedAt,
+  };
+  const workbook = createSalesWorkbook(bulkSales, [], products, filters);
+  const reopened = XLSX.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' });
+  const rows = XLSX.utils.sheet_to_json(reopened.Sheets['Lançamentos']!, { header: 1 }) as unknown[][];
+  assert.equal(rows.length, 621);
+  assert.deepEqual(summarizeSalesReport(bulkSales, [], products, filters), {
+    salesCount: 620,
+    refundsCount: 0,
+    quantity: 620n,
+    salesCents: 620n,
+    refundsCents: 0n,
+    netCents: 620n,
+  });
+  assert.ok(createSalesCsv(bulkSales, [], products, filters).includes('sale-bulk-619'));
 });

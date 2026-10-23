@@ -1263,13 +1263,21 @@ test("monthly backup HTTP endpoints enforce access and use the isolated router d
 test("period financial backups reconcile dates, preserve cross-month dependencies, and restore idempotently", async () => {
   const mainProduct = `Plano período ${randomUUID()}`;
   const rangeProduct = `Plano intervalo ${randomUUID()}`;
+  const outsideProduct = `Produto fora do período ${randomUUID()}`;
+  const database = getTestDatabase();
+  const originalSaleIds = new Set(createdSaleIds);
+  const originalRefundIds = new Set(createdRefundIds);
+  const originalProductIds = new Set(createdProductIds);
+  const originalGoalIds = new Set(createdGoalIds);
 
-  await withSalesApi(getTestDatabase(), async (baseUrl) => {
+  await withSalesApi(database, async (baseUrl) => {
+    const originalHistoryIds = new Set((await database.select({ id: salesHistoryTable.id }).from(salesHistoryTable)).map(({ id }) => id));
+    try {
     const octoberSaleId = await recordSale(baseUrl, mainProduct, "2026-10-05", 100000);
     const novemberSaleId = await recordSale(baseUrl, mainProduct, "2026-11-10", 50000);
-    const outsideSaleId = await recordSale(baseUrl, mainProduct, "2026-12-10", 9900);
-    await recordSale(baseUrl, rangeProduct, "2026-10-31", 100);
-    await recordSale(baseUrl, rangeProduct, "2026-11-01", 200);
+    const outsideSaleId = await recordSale(baseUrl, outsideProduct, "2026-12-10", 9900);
+    const rangeOctoberSaleId = await recordSale(baseUrl, rangeProduct, "2026-10-31", 100);
+    const rangeNovemberSaleId = await recordSale(baseUrl, rangeProduct, "2026-11-01", 200);
 
     const refundKey = randomUUID();
     createdIdempotencyKeys.push(refundKey);
@@ -1351,6 +1359,21 @@ test("period financial backups reconcile dates, preserve cross-month dependencie
     assert.equal(combined.counts.periodSales, 2);
     assert.equal(combined.counts.periodRefunds, 1);
     assert.deepEqual(combined.totals, { salesCents: 150000, refundsCents: 20000, netCents: 130000, quantity: 2 });
+    const [mainProductSale] = await database.select().from(salesTable).where(eq(salesTable.id, octoberSaleId));
+    assert.ok(mainProductSale.productId);
+    for (const [month, expected] of [
+      ["2026-10", { quantity: 1, salesCents: 100000, refundCents: 0, netCents: 100000 }],
+      ["2026-11", { quantity: 1, salesCents: 50000, refundCents: 20000, netCents: 30000 }],
+      ["2026-10,2026-11", { quantity: 2, salesCents: 150000, refundCents: 20000, netCents: 130000 }],
+    ] as const) {
+      const range = month.includes(",")
+        ? "/sales/scoreboard?fromDate=2026-10-01&toDate=2026-11-30"
+        : `/sales/scoreboard?fromDate=${month}-01&toDate=${month}-30`;
+      const scoreboardResponse = await apiRequest(baseUrl, `${range}&productId=${mainProductSale.productId}`);
+      assert.equal(scoreboardResponse.status, 200);
+      const scoreboard = await scoreboardResponse.json() as { totals: typeof expected };
+      assert.deepEqual(scoreboard.totals, expected);
+    }
 
     const inclusiveRange = await createBackup({
       mode: "range",
@@ -1373,15 +1396,16 @@ test("period financial backups reconcile dates, preserve cross-month dependencie
     assert.ok(allHistory.totals.salesCents >= 160200);
     assert.ok(allHistory.totals.refundsCents >= 20000);
 
-    const database = getTestDatabase();
     const restoreSaleIds = november.sales.map(({ record }) => record.id);
     const restoreRefundIds = november.refunds.map(({ record }) => record.id);
     const restoreGoalIds = november.goals.map(({ record }) => record.id);
     const restoreHistoryIds = november.histories.map(({ record }) => record.id);
+    const restoreProductIds = november.products.map(({ record }) => record.id);
     await database.delete(salesHistoryTable).where(inArray(salesHistoryTable.id, restoreHistoryIds));
     await database.delete(salesRefundsTable).where(inArray(salesRefundsTable.id, restoreRefundIds));
-    await database.delete(salesGoalsTable).where(inArray(salesGoalsTable.id, restoreGoalIds));
+    await database.delete(salesGoalsTable).where(inArray(salesGoalsTable.productId, restoreProductIds));
     await database.delete(salesTable).where(inArray(salesTable.id, restoreSaleIds));
+    await database.delete(productsTable).where(inArray(productsTable.id, restoreProductIds));
 
     const previewResponse = await apiRequest(baseUrl, "/sales/restore/preview", {
       method: "POST",
@@ -1390,7 +1414,7 @@ test("period financial backups reconcile dates, preserve cross-month dependencie
     assert.equal(previewResponse.status, 200);
     const preview = await previewResponse.json() as {
       period: string;
-      toInsert: { sales: number; refunds: number; goals: number };
+      toInsert: { sales: number; refunds: number; goals: number; products: number };
       blocked: boolean;
     };
     assert.equal(preview.period, "2026-11");
@@ -1398,6 +1422,7 @@ test("period financial backups reconcile dates, preserve cross-month dependencie
     assert.equal(preview.toInsert.sales, 2);
     assert.equal(preview.toInsert.refunds, 1);
     assert.equal(preview.toInsert.goals, 1);
+    assert.equal(preview.toInsert.products, 1);
 
     const restoreResponse = await apiRequest(baseUrl, "/sales/restore", {
       method: "POST",
@@ -1405,7 +1430,7 @@ test("period financial backups reconcile dates, preserve cross-month dependencie
     });
     assert.equal(restoreResponse.status, 200);
     const restored = await restoreResponse.json() as { inserted: { sales: number; refunds: number; goals: number } };
-    assert.deepEqual(restored.inserted, { sales: 2, refunds: 1, goals: 1, products: 0, histories: restoreHistoryIds.length });
+    assert.deepEqual(restored.inserted, { sales: 2, refunds: 1, goals: 1, products: 1, histories: restoreHistoryIds.length });
 
     const repeatResponse = await apiRequest(baseUrl, "/sales/restore", {
       method: "POST",
@@ -1433,6 +1458,22 @@ test("period financial backups reconcile dates, preserve cross-month dependencie
     assert.equal(decemberScoreboardResponse.status, 200);
     const decemberScoreboard = await decemberScoreboardResponse.json() as { totals: { quantity: number; salesCents: number; refundCents: number; netCents: number } };
     assert.deepEqual(decemberScoreboard.totals, { quantity: 1, salesCents: 9900, refundCents: 0, netCents: 9900 });
+    assert.ok(rangeOctoberSaleId);
+    assert.ok(rangeNovemberSaleId);
+    } finally {
+      const ownSales = createdSaleIds.filter((id) => !originalSaleIds.has(id));
+      const ownRefunds = createdRefundIds.filter((id) => !originalRefundIds.has(id));
+      const ownProducts = [...new Set(createdProductIds.filter((id) => !originalProductIds.has(id)))];
+      const ownGoals = createdGoalIds.filter((id) => !originalGoalIds.has(id));
+      const newHistoryIds = (await database.select({ id: salesHistoryTable.id }).from(salesHistoryTable))
+        .map(({ id }) => id)
+        .filter((id) => !originalHistoryIds.has(id));
+      if (newHistoryIds.length) await database.delete(salesHistoryTable).where(inArray(salesHistoryTable.id, newHistoryIds));
+      if (ownRefunds.length) await database.delete(salesRefundsTable).where(inArray(salesRefundsTable.id, ownRefunds));
+      if (ownGoals.length) await database.delete(salesGoalsTable).where(inArray(salesGoalsTable.id, ownGoals));
+      if (ownSales.length) await database.delete(salesTable).where(inArray(salesTable.id, ownSales));
+      if (ownProducts.length) await database.delete(productsTable).where(inArray(productsTable.id, ownProducts));
+    }
   });
 });
 

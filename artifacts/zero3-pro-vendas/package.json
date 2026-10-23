@@ -8,7 +8,7 @@
     "build": "vite build --config vite.config.ts",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test src/lib/sales-utils.test.ts src/lib/sales-workbook.test.ts"
+    "test": "tsx --test src/lib/sales-utils.test.ts src/lib/sales-workbook.test.ts src/lib/sales-export.test.ts"
   },
   "devDependencies": {
     "@clerk/localizations": "^4.24.0",

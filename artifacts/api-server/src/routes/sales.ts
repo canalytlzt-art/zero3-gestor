@@ -577,22 +577,31 @@ const salesPeriodBackupV3RuntimeSchema = z
       return date >= backup.selection.fromDate! && date <= backup.selection.toDate!;
     };
     const products = new Map(backup.products.map(({ record }) => [record.id, record]));
+    const normalizedProductNames = new Set<string>();
+    backup.products.forEach(({ record }, index) => {
+      const normalizedName = productNameKey(record.name);
+      if (record.normalizedName !== normalizedName || normalizedProductNames.has(normalizedName)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["products", index, "record", "normalizedName"], message: "O backup contém nomes de produto inválidos ou duplicados." });
+      }
+      normalizedProductNames.add(normalizedName);
+    });
     const sales = new Map(backup.sales.map(({ record }) => [record.id, record]));
-    const periodSales = new Set<string>();
     backup.sales.forEach(({ scope, record }, index) => {
       const inPeriod = selectedDate(record.saleDate) && matchesPlan(record.productName);
       if ((scope === "period") !== inPeriod) {
         context.addIssue({ code: z.ZodIssueCode.custom, path: ["sales", index, "scope"], message: "A classificação da venda não corresponde ao período e filtros." });
       }
       const total = calculateSaleTotalCents(record.quantity, record.unitAmountCents);
-      if (total === null || total !== record.totalCents || (record.productId !== null && !products.has(record.productId))) {
+      if (total === null || total !== record.totalCents
+        || (record.productId !== null && !products.has(record.productId))
+        || (record.productId === null && record.productName !== UNCATEGORIZED_SALE_LABEL)
+        || (record.status === "active" && record.cancellationReason !== null)
+        || (record.status === "cancelled" && !record.cancellationReason?.trim())) {
         context.addIssue({ code: z.ZodIssueCode.custom, path: ["sales", index, "record"], message: "O total ou o produto da venda não confere." });
       }
-      if (scope === "period") periodSales.add(record.id);
     });
-    const selectedSalesForTotals = new Set(periodSales);
     const refundsBySale = new Map<string, bigint>();
-    const selectedRefundIds = new Set<string>();
+    const refundSaleIds = new Set<string>();
     backup.refunds.forEach(({ scope, record }, index) => {
       const sale = sales.get(record.saleId);
       if (!sale) {
@@ -606,8 +615,17 @@ const salesPeriodBackupV3RuntimeSchema = z
       if (record.status === "active" && (sale.status !== "active" || record.refundDate < sale.saleDate)) {
         context.addIssue({ code: z.ZodIssueCode.custom, path: ["refunds", index, "record"], message: "Estorno ativo sem venda válida relacionada." });
       }
-      if (scope === "period") selectedRefundIds.add(record.id);
+      if (record.status === "active" && record.voidReason !== null
+        || record.status === "voided" && !record.voidReason?.trim()) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["refunds", index, "record", "voidReason"], message: "O motivo de anulação não corresponde à situação do estorno." });
+      }
+      refundSaleIds.add(record.saleId);
       if (record.status === "active") refundsBySale.set(record.saleId, (refundsBySale.get(record.saleId) ?? 0n) + BigInt(record.amountCents));
+    });
+    backup.sales.forEach(({ scope, record }, index) => {
+      if (scope === "dependency" && !refundSaleIds.has(record.id)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["sales", index, "scope"], message: "A venda dependente não está vinculada a um estorno incluído." });
+      }
     });
     for (const [saleId, cents] of refundsBySale) {
       const sale = sales.get(saleId);
@@ -642,9 +660,6 @@ const salesPeriodBackupV3RuntimeSchema = z
     const salesCents = backup.sales
       .filter(({ scope, record }) => scope === "period" && record.status === "active")
       .reduce((sum, { record }) => sum + BigInt(record.totalCents), 0n);
-    const activePeriodSales = new Set(backup.sales
-      .filter(({ scope, record }) => scope === "period" && record.status === "active")
-      .map(({ record }) => record.id));
     const refundsCents = backup.refunds
       .filter(({ scope, record }) => scope === "period" && record.status === "active" && sales.get(record.saleId)?.status === "active")
       .reduce((sum, { record }) => sum + BigInt(record.amountCents), 0n);
@@ -659,8 +674,6 @@ const salesPeriodBackupV3RuntimeSchema = z
       || backup.totals.quantity !== Number(quantity)) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ["totals"], message: "Os totais de conferência não correspondem aos lançamentos do período." });
     }
-    void selectedSalesForTotals;
-    void selectedRefundIds;
   });
 
 function stableJson(value: unknown): string {
@@ -1344,12 +1357,6 @@ function periodSelectionMonths(selection: SalesPeriodBackupSelection) {
   if (selection.mode === "months") return selection.months ?? [];
   if (selection.mode === "range") return monthKeysBetween(selection.fromDate!.slice(0, 7), selection.toDate!.slice(0, 7));
   return [];
-}
-
-function isDateInPeriodSelection(date: string, selection: SalesPeriodBackupSelection) {
-  if (selection.mode === "all") return true;
-  if (selection.mode === "months") return (selection.months ?? []).includes(date.slice(0, 7));
-  return date >= selection.fromDate! && date <= selection.toDate!;
 }
 
 function periodSelectionLabel(selection: SalesPeriodBackupSelection) {

@@ -326,7 +326,22 @@ export function downloadSalesWorkbook(sales: Sale[], refunds: SalesRefundRecord[
 export function createSalesCsv(sales: Sale[], refunds: SalesRefundRecord[], products: Product[], filters: ExportFilters) {
   const worksheet = createSalesWorkbook(sales, refunds, products, filters).Sheets['Lançamentos'];
   if (!worksheet) throw new Error('A planilha de lançamentos não foi criada.');
-  return `\uFEFF${XLSX.utils.sheet_to_csv(worksheet, { FS: ';', RS: '\r\n' })}`;
+  const selectionLabel = filters.selection.mode === 'all'
+    ? 'Todo o histórico'
+    : filters.selection.mode === 'range'
+      ? `${filters.selection.fromDate} a ${filters.selection.toDate}`
+      : filters.selection.months.join(', ');
+  const csvCell = (value: string) => /[;"\r\n]/.test(value)
+    ? `"${value.replaceAll('"', '""')}"`
+    : value;
+  const metadata = [
+    ['Relatório financeiro Zero3 PRO'],
+    ['Período', selectionLabel],
+    ['Plano/produto', filters.productName || 'Todos os planos'],
+    ['Gerado em', filters.generatedAt],
+    [],
+  ].map((row) => row.map((cell) => csvCell(String(cell ?? ''))).join(';')).join('\r\n');
+  return `\uFEFF${metadata}\r\n${XLSX.utils.sheet_to_csv(worksheet, { FS: ';', RS: '\r\n' })}`;
 }
 
 export function downloadSalesCsv(sales: Sale[], refunds: SalesRefundRecord[], products: Product[], filters: ExportFilters, filename: string) {
