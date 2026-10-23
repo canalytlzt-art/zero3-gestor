@@ -1,9 +1,10 @@
 import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
 import { getAuth } from "@clerk/express";
 import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
-import { db, occupancyHistoryTable, occupancyModalitiesTable, occupancyRecordsTable } from "@workspace/db";
+import { db, occupancyHistoryTable, occupancyModalitiesTable, occupancyRecordsTable, productsTable } from "@workspace/db";
 import {
   CreateOccupancyModalityBody, CreateOccupancyModalityResponse,
+  DeleteOccupancyModalityBody, DeleteOccupancyModalityParams, DeleteOccupancyModalityResponse,
   UpdateOccupancyModalityBody, UpdateOccupancyModalityParams, UpdateOccupancyModalityResponse,
   GetOccupancyModalitiesResponse, GetOccupancyRecordsQueryParams, GetOccupancyRecordsResponse,
   CreateOccupancyRecordBody, CreateOccupancyRecordResponse,
@@ -372,6 +373,60 @@ export function createOccupancyRouter(dependencies: Dependencies = {}): IRouter 
     });
     res.json(UpdateOccupancyModalityResponse.parse(modality));
   });
+  router.delete("/occupancy/modalities/:id", async (req, res): Promise<void> => {
+    const { id } = parse(DeleteOccupancyModalityParams, req.params);
+    const { version } = parse(DeleteOccupancyModalityBody, req.body);
+    const result = await database.transaction(async (tx) => {
+      const [modality] = await tx.select().from(occupancyModalitiesTable)
+        .where(eq(occupancyModalitiesTable.id, id)).for("update");
+      if (!modality) throw new OccupancyError(404, "Modalidade não encontrada. Atualize a lista.");
+      if (modality.version !== version) throw new OccupancyError(409, "A modalidade foi alterada. Atualize antes de excluir.");
+
+      const records = await tx.select().from(occupancyRecordsTable)
+        .where(eq(occupancyRecordsTable.modalityId, id)).for("update");
+      const linkedProducts = await tx.select({ id: productsTable.id }).from(productsTable)
+        .where(eq(productsTable.modalityId, id)).for("update");
+
+      if (records.length) {
+        for (let offset = 0; offset < records.length; offset += 500) {
+          await tx.insert(occupancyHistoryTable).values(records.slice(offset, offset + 500).map((record) => ({
+            entityType: "record",
+            entityId: record.id,
+            operation: "delete",
+            actorId: getUserId(req)!,
+            beforeData: record,
+            afterData: null,
+          })));
+        }
+        await tx.delete(occupancyRecordsTable).where(eq(occupancyRecordsTable.modalityId, id));
+      }
+      if (linkedProducts.length) {
+        await tx.update(productsTable).set({
+          modalityId: null,
+          version: sql`${productsTable.version} + 1`,
+          updatedAt: new Date(),
+        }).where(eq(productsTable.modalityId, id));
+      }
+
+      await tx.insert(occupancyHistoryTable).values({
+        entityType: "modality",
+        entityId: id,
+        operation: "delete",
+        actorId: getUserId(req)!,
+        beforeData: {
+          ...modality,
+          deletedRecords: records.length,
+          unlinkedProductIds: linkedProducts.map((product) => product.id),
+        },
+      });
+      const [deleted] = await tx.delete(occupancyModalitiesTable)
+        .where(and(eq(occupancyModalitiesTable.id, id), eq(occupancyModalitiesTable.version, version)))
+        .returning({ id: occupancyModalitiesTable.id });
+      if (!deleted) throw new OccupancyError(409, "A modalidade foi alterada. Atualize antes de excluir.");
+      return { modalityId: id, deletedRecords: records.length, unlinkedProducts: linkedProducts.length };
+    });
+    res.json(DeleteOccupancyModalityResponse.parse(result));
+  });
   router.get("/occupancy", async (req, res): Promise<void> => {
     const input = parse(GetOccupancyRecordsQueryParams, req.query);
     const filters: SQL[] = [isNull(occupancyRecordsTable.deletedAt)];
@@ -473,6 +528,9 @@ export function createOccupancyRouter(dependencies: Dependencies = {}): IRouter 
     const cause = error as { code?: string; cause?: { code?: string } };
     if (cause.code === "23505" || cause.cause?.code === "23505") {
       res.status(409).json({ error: "Já existe um registro para essa modalidade, data, horário e turma. Atualize a base antes de tentar novamente." }); return;
+    }
+    if (cause.code === "23503" || cause.cause?.code === "23503") {
+      res.status(409).json({ error: "A modalidade recebeu novos vínculos durante a exclusão. Atualize a lista e tente novamente." }); return;
     }
     req.log?.error({ code: cause.code ?? cause.cause?.code }, "Falha na operação de ocupação");
     res.status(500).json({ error: "Não foi possível concluir a operação de ocupação. Tente novamente." });

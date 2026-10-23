@@ -39,6 +39,8 @@ export * from './occupancyImportPreviewRowStatus';
 export * from './occupancyImportRowInput';
 export * from './occupancyImportSourceCells';
 export * from './occupancyModality';
+export * from './occupancyModalityDelete';
+export * from './occupancyModalityDeletion';
 export * from './occupancyModalityInput';
 export * from './occupancyModalityUpdate';
 export * from './occupancyRecord';

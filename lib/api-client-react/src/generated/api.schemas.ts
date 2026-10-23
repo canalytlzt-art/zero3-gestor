@@ -29,6 +29,19 @@ export interface OccupancyModalityUpdate {
   version: number;
 }
 
+export interface OccupancyModalityDelete {
+  /** @minimum 1 */
+  version: number;
+}
+
+export interface OccupancyModalityDeletion {
+  modalityId: string;
+  /** @minimum 0 */
+  deletedRecords: number;
+  /** @minimum 0 */
+  unlinkedProducts: number;
+}
+
 export type OccupancyRecordKind = typeof OccupancyRecordKind[keyof typeof OccupancyRecordKind];
 
 

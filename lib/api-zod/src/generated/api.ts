@@ -52,6 +52,30 @@ export const UpdateOccupancyModalityResponse = zod.object({
 })
 
 
+export const DeleteOccupancyModalityParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+
+
+
+export const DeleteOccupancyModalityBody = zod.object({
+  "version": zod.number().int().min(1)
+})
+
+export const deleteOccupancyModalityResponseDeletedRecordsMin = 0;
+
+export const deleteOccupancyModalityResponseUnlinkedProductsMin = 0;
+
+
+
+export const DeleteOccupancyModalityResponse = zod.object({
+  "modalityId": zod.string().uuid(),
+  "deletedRecords": zod.number().int().min(deleteOccupancyModalityResponseDeletedRecordsMin),
+  "unlinkedProducts": zod.number().int().min(deleteOccupancyModalityResponseUnlinkedProductsMin)
+})
+
+
 export const getOccupancyRecordsQueryYearMin = 1900;
 export const getOccupancyRecordsQueryYearMax = 2100;
 

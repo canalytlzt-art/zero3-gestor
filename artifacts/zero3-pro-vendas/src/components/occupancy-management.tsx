@@ -6,6 +6,7 @@ import {
   getGetOccupancyRecordsQueryKey,
   useCreateOccupancyModality,
   useCreateOccupancyRecord,
+  useDeleteOccupancyModality,
   useDeleteOccupancyRecord,
   useGetOccupancyModalities,
   useGetOccupancyRecords,
@@ -658,14 +659,19 @@ function ModalitiesDialog({ open, onOpenChange, modalities, isLoading, isError, 
   onRetry: () => void;
   onChanged: () => Promise<unknown>;
 }) {
+  const queryClient = useQueryClient();
   const createModality = useCreateOccupancyModality();
   const updateModality = useUpdateOccupancyModality();
+  const deleteModality = useDeleteOccupancyModality();
   const [newName, setNewName] = useState('');
   const [renaming, setRenaming] = useState<{ id: string; version: number; name: string } | null>(null);
+  const [toDelete, setToDelete] = useState<{ id: string; version: number; name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const lock = useRef(false);
-  const busy = createModality.isPending || updateModality.isPending;
+  const deleteLock = useRef(false);
+  const busy = createModality.isPending || updateModality.isPending || deleteModality.isPending;
 
   const create = async (e: FormEvent) => {
     e.preventDefault();
@@ -707,8 +713,30 @@ function ModalitiesDialog({ open, onOpenChange, modalities, isLoading, isError, 
     } finally { lock.current = false; }
   };
 
+  const confirmDelete = async () => {
+    if (!toDelete || deleteLock.current || busy) return;
+    deleteLock.current = true;
+    setDeleteError(null);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await deleteModality.mutateAsync({
+        id: toDelete.id,
+        data: { version: toDelete.version },
+      });
+      setToDelete(null);
+      setNotice(`${toDelete.name} excluída. ${result.deletedRecords} aula(s) removida(s) e ${result.unlinkedProducts} produto(s) desvinculado(s).`);
+      await onChanged();
+      await queryClient.invalidateQueries();
+    } catch (err) {
+      setDeleteError(apiErrorMessage(err, 'modality'));
+    } finally {
+      deleteLock.current = false;
+    }
+  };
+
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!busy) { onOpenChange(o); if (!o) { setRenaming(null); setError(null); setNotice(null); } } }}>
+    <Dialog open={open} onOpenChange={(o) => { if (!busy && !toDelete) { onOpenChange(o); if (!o) { setRenaming(null); setError(null); setDeleteError(null); setNotice(null); } } }}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto rounded-[22px] border-[#e7e1e9] bg-[#fffefc] sm:max-w-[480px]" data-testid="dialog-modalities">
         <DialogHeader>
           <DialogTitle className="text-xl font-extrabold tracking-[-.04em]">Modalidades</DialogTitle>
@@ -742,6 +770,7 @@ function ModalitiesDialog({ open, onOpenChange, modalities, isLoading, isError, 
                   <>
                     <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[#3f384b]" data-testid={`text-modality-name-${m.id}`}>{m.name}</span>
                     <button type="button" onClick={() => { setRenaming({ id: m.id, version: m.version, name: m.name }); setError(null); setNotice(null); }} className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-[#6d5a8a] hover:bg-[#f3eff8]" data-testid={`button-rename-modality-${m.id}`}><Pencil size={13} /> Renomear</button>
+                    <button type="button" onClick={() => { setToDelete({ id: m.id, version: m.version, name: m.name }); setDeleteError(null); setError(null); setNotice(null); }} aria-label={`Excluir modalidade ${m.name}`} disabled={busy} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-[#a0584f] hover:bg-[#fff0ed] disabled:opacity-50" data-testid={`button-delete-modality-${m.id}`}><Trash2 size={15} /></button>
                   </>
                 )}
               </li>
@@ -749,6 +778,21 @@ function ModalitiesDialog({ open, onOpenChange, modalities, isLoading, isError, 
           </ul>
         )}
       </DialogContent>
+      <AlertDialog open={!!toDelete} onOpenChange={(isOpen) => { if (!isOpen && !deleteModality.isPending) { setToDelete(null); setDeleteError(null); } }}>
+        <AlertDialogContent className="rounded-[22px] border-[#e7e1e9] bg-[#fffefc]" data-testid="dialog-delete-modality">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir modalidade e vínculos?</AlertDialogTitle>
+            <AlertDialogDescription data-testid="text-delete-modality-warning">
+              {toDelete && <>A modalidade <strong>{toDelete.name}</strong> e todas as aulas vinculadas serão removidas. Os produtos associados perderão o vínculo, e as vendas deixarão de ser classificadas por essa modalidade. Esta ação não pode ser desfeita.</>}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteError && <p role="alert" className="rounded-xl border border-[#f1d0ca] bg-[#fff3f1] px-3 py-2 text-xs font-semibold text-[#8e3d33]" data-testid="status-delete-modality-error">{deleteError}</p>}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteModality.isPending} data-testid="button-cancel-delete-modality">Cancelar</AlertDialogCancel>
+            <button type="button" onClick={() => void confirmDelete()} disabled={deleteModality.isPending} className="inline-flex h-10 items-center justify-center rounded-md bg-[#bc4141] px-4 text-sm font-bold text-white hover:bg-[#a63636] disabled:opacity-60" data-testid="button-confirm-delete-modality">{deleteModality.isPending ? 'Excluindo…' : 'Excluir modalidade e vínculos'}</button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

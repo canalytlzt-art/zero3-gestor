@@ -61,6 +61,21 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/OccupancyModality" }
         default: { $ref: "#/components/responses/OccupancyFailure" }
+    delete:
+      operationId: deleteOccupancyModality
+      tags: [occupancy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OccupancyModalityDelete" }
+      responses:
+        "200":
+          description: Modalidade excluída; aulas removidas e produtos desvinculados
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OccupancyModalityDeletion" }
+        default: { $ref: "#/components/responses/OccupancyFailure" }
   /occupancy:
     get:
       operationId: getOccupancyRecords
@@ -1109,6 +1124,18 @@ components:
       properties:
         name: { type: string, minLength: 1, maxLength: 120 }
         version: { type: integer, minimum: 1 }
+    OccupancyModalityDelete:
+      type: object
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1 }
+    OccupancyModalityDeletion:
+      type: object
+      required: [modalityId, deletedRecords, unlinkedProducts]
+      properties:
+        modalityId: { type: string, format: uuid }
+        deletedRecords: { type: integer, minimum: 0 }
+        unlinkedProducts: { type: integer, minimum: 0 }
     OccupancyRecord:
       type: object
       required: [id, kind, period, month, modalityId, modalityName, percentage, reportedPercentage, presences, capacity, startTime, endTime, className, notes, sourceFileHash, sourceSheet, sourceCell, sourceCells, version, createdAt, updatedAt]

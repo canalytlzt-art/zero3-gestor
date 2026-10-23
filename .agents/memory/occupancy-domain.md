@@ -50,3 +50,9 @@ Não confiar somente na limpeza assíncrona por sinal de encerramento de um serv
 **Why:** Parar o processo em segundo plano encerrou o servidor sem concluir a remoção de seu esquema privado.
 
 **How to apply:** Após parar, conferir a remoção e limpar explicitamente apenas o esquema identificado e validado como exclusivo de teste.
+
+Excluir uma modalidade vinculada exige confirmação explícita: remover suas aulas e desvincular os produtos, mantendo as vendas sem classificação por essa modalidade.
+
+**Why:** O usuário escolheu esse comportamento após ser informado de que aulas seriam apagadas e as associações dos produtos seriam removidas.
+
+**How to apply:** A confirmação deve explicar que a ação é irreversível; manter a auditoria e atualizar as consultas de ocupação e vendas após concluir.

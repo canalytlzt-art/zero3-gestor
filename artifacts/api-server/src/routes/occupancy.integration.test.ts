@@ -36,6 +36,16 @@ before(async () => {
   testPool = new PgPool({ ...pool.options, options: `-c search_path=${testSchema}` });
   database = drizzle(testPool, { schema });
   await testPool.query(await readFile(new URL("../../../../lib/db/scripts/occupancy-schema.sql", import.meta.url), "utf8"));
+  await testPool.query(`
+    CREATE TABLE products (
+      id uuid PRIMARY KEY,
+      name text NOT NULL,
+      normalized_name text NOT NULL,
+      modality_id uuid REFERENCES occupancy_modalities(id) ON DELETE SET NULL,
+      version integer NOT NULL DEFAULT 1,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `);
   base = await server();
 });
 after(async () => {
@@ -406,4 +416,51 @@ test("occupancy import is safe under simultaneous retries and repeated rows in o
   });
   assert.deepEqual(duplicated.body.rows.map((row) => row.status), ["inserted", "duplicate_in_batch"]);
   assert.equal((await call<OccupancyRecord[]>("/occupancy?months=2026-08")).body.length, 2);
+});
+
+test("modality deletion requires the current version, removes linked classes, and unlinks products with audit", async () => {
+  const modality = await call<OccupancyModality>("/occupancy/modalities", "POST", { name: "Modalidade para excluir" });
+  assert.equal(modality.status, 201);
+  const active = await call<OccupancyRecord>("/occupancy", "POST", record({
+    period: "2026-11-01", modalityId: modality.body.id, modalityName: modality.body.name,
+  }));
+  const archived = await call<OccupancyRecord>("/occupancy", "POST", record({
+    period: "2026-11-02", modalityId: modality.body.id, modalityName: modality.body.name,
+  }));
+  assert.equal(active.status, 201);
+  assert.equal(archived.status, 201);
+  await call(`/occupancy/${archived.body.id}`, "DELETE", { version: archived.body.version });
+
+  const productId = randomUUID();
+  await testPool.query(
+    "INSERT INTO products (id, name, normalized_name, modality_id) VALUES ($1, $2, $3, $4)",
+    [productId, "Produto vinculado", "produto vinculado", modality.body.id],
+  );
+
+  const stale = await call(`/occupancy/modalities/${modality.body.id}`, "DELETE", { version: modality.body.version + 1 });
+  assert.equal(stale.status, 409);
+  assert.equal((await testPool.query("SELECT count(*)::int AS count FROM occupancy_records WHERE modality_id=$1", [modality.body.id])).rows[0].count, 2);
+  assert.equal((await testPool.query("SELECT modality_id FROM products WHERE id=$1", [productId])).rows[0].modality_id, modality.body.id);
+
+  const deleted = await call<{ modalityId: string; deletedRecords: number; unlinkedProducts: number }>(
+    `/occupancy/modalities/${modality.body.id}`, "DELETE", { version: modality.body.version },
+  );
+  assert.equal(deleted.status, 200);
+  assert.deepEqual(deleted.body, { modalityId: modality.body.id, deletedRecords: 2, unlinkedProducts: 1 });
+  assert.equal((await call<OccupancyModality[]>("/occupancy/modalities")).body.some((row) => row.id === modality.body.id), false);
+  assert.equal((await testPool.query("SELECT count(*)::int AS count FROM occupancy_records WHERE modality_id=$1", [modality.body.id])).rows[0].count, 0);
+  const product = (await testPool.query("SELECT modality_id, version FROM products WHERE id=$1", [productId])).rows[0];
+  assert.equal(product.modality_id, null);
+  assert.equal(product.version, 2);
+  const modalityAudit = (await testPool.query(
+    "SELECT before_data FROM occupancy_history WHERE entity_type='modality' AND entity_id=$1 AND operation='delete'",
+    [modality.body.id],
+  )).rows[0];
+  assert.equal(modalityAudit.before_data.deletedRecords, 2);
+  assert.deepEqual(modalityAudit.before_data.unlinkedProductIds, [productId]);
+  const recordAudits = await testPool.query(
+    "SELECT count(*)::int AS count FROM occupancy_history WHERE entity_type='record' AND entity_id = ANY($1::uuid[]) AND operation='delete'",
+    [[active.body.id, archived.body.id]],
+  );
+  assert.equal(recordAudits.rows[0].count, 3);
 });
