@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
 import { getAuth } from "@clerk/express";
-import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, like, or, sql, type SQL } from "drizzle-orm";
 import { db, occupancyHistoryTable, occupancyModalitiesTable, occupancyRecordsTable, productsTable } from "@workspace/db";
 import {
   CreateOccupancyModalityBody, CreateOccupancyModalityResponse,
@@ -50,6 +50,18 @@ function validateImportOrigin(row: OccupancyImportRowInput) {
     || !cells.period || !cells.modality || !sourceValid) {
     throw new OccupancyError(400, "A origem deve informar aba, células de período/modalidade e os campos de ocupação reconhecidos.");
   }
+}
+
+function scopeMatches(scopeKey: string): SQL {
+  const escaped = scopeKey.replace(/[\\%_]/g, "\\$&");
+  return or(
+    eq(occupancyRecordsTable.scopeKey, scopeKey),
+    like(occupancyRecordsTable.scopeKey, `${escaped}::%`),
+  )!;
+}
+
+function sameLogicalScope(storedScope: string, baseScope: string) {
+  return storedScope === baseScope || storedScope.startsWith(`${baseScope}::`);
 }
 
 export function createOccupancyRouter(dependencies: Dependencies = {}): IRouter {
@@ -110,7 +122,7 @@ export function createOccupancyRouter(dependencies: Dependencies = {}): IRouter 
           eq(occupancyRecordsTable.modalityId, modality.id),
           eq(occupancyRecordsTable.kind, entry.kind),
           eq(occupancyRecordsTable.month, values.month),
-          eq(occupancyRecordsTable.scopeKey, values.scopeKey),
+          scopeMatches(values.scopeKey),
           values.startTime === null ? isNull(occupancyRecordsTable.startTime) : eq(occupancyRecordsTable.startTime, values.startTime),
           entry.kind === "daily" ? eq(occupancyRecordsTable.date, values.date!) : isNull(occupancyRecordsTable.date),
           isNull(occupancyRecordsTable.deletedAt),
@@ -201,7 +213,7 @@ export function createOccupancyRouter(dependencies: Dependencies = {}): IRouter 
             const before = target?.record;
             const sameNaturalScope = Boolean(target && occupancyKey(target.name) === occupancyKey(entry.modalityName)
               && before!.kind === entry.kind && before!.month === values.month && before!.date === values.date
-              && before!.scopeKey === values.scopeKey && (before!.startTime?.slice(0, 5) ?? null) === values.startTime);
+              && sameLogicalScope(before!.scopeKey, values.scopeKey) && (before!.startTime?.slice(0, 5) ?? null) === values.startTime);
             const sameSourceCell = Boolean(before && before.sourceFileHash === input.fileHash
               && before.sourceSheet === entry.sourceSheet && before.sourceCell === entry.sourceCell);
             if (!before || before.version !== item.expectedVersion || (!sameNaturalScope && !sameSourceCell)) {
@@ -235,7 +247,7 @@ export function createOccupancyRouter(dependencies: Dependencies = {}): IRouter 
             eq(occupancyRecordsTable.modalityId, existingModality.id),
             eq(occupancyRecordsTable.kind, entry.kind),
             eq(occupancyRecordsTable.month, values.month),
-            eq(occupancyRecordsTable.scopeKey, values.scopeKey),
+            scopeMatches(values.scopeKey),
             values.startTime === null ? isNull(occupancyRecordsTable.startTime) : eq(occupancyRecordsTable.startTime, values.startTime),
             entry.kind === "daily" ? eq(occupancyRecordsTable.date, values.date!) : isNull(occupancyRecordsTable.date),
             isNull(occupancyRecordsTable.deletedAt),
@@ -281,7 +293,7 @@ export function createOccupancyRouter(dependencies: Dependencies = {}): IRouter 
               && scopeMatch.sourceSheet === entry.sourceSheet && scopeMatch.sourceCell === entry.sourceCell;
             const samePayload = scopeMatch.kind === entry.kind && scopeMatch.month === values.month
               && scopeMatch.date === values.date && occupancyKey(scopeModality?.name ?? "") === occupancyKey(entry.modalityName)
-              && Number(scopeMatch.percentage) === Number(values.percentage) && scopeMatch.scopeKey === values.scopeKey
+              && Number(scopeMatch.percentage) === Number(values.percentage) && sameLogicalScope(scopeMatch.scopeKey, values.scopeKey)
               && scopeMatch.presences === values.presences && scopeMatch.capacity === values.capacity
               && (scopeMatch.startTime?.slice(0, 5) ?? null) === values.startTime
               && (scopeMatch.endTime?.slice(0, 5) ?? null) === values.endTime;
@@ -480,7 +492,7 @@ export function createOccupancyRouter(dependencies: Dependencies = {}): IRouter 
     if (startTimes.length) filters.push(inArray(occupancyRecordsTable.startTime, startTimes.map((value) => `${value}:00`)));
     if (weekdays.length) filters.push(sql`extract(isodow from ${occupancyRecordsTable.date})::int in (${sql.join(weekdays.map((day) => sql`${Number(day)}`), sql`, `)})`);
     if (input.modalityId) filters.push(eq(occupancyRecordsTable.modalityId, input.modalityId));
-    if (input.className !== undefined) filters.push(eq(occupancyRecordsTable.scopeKey, occupancyKey(input.className)));
+    if (input.className !== undefined) filters.push(scopeMatches(occupancyKey(input.className)));
     if (input.kind && input.kind !== "all") filters.push(eq(occupancyRecordsTable.kind, input.kind));
     const rows = await database.select({ record: occupancyRecordsTable, name: occupancyModalitiesTable.name })
       .from(occupancyRecordsTable).innerJoin(occupancyModalitiesTable, eq(occupancyModalitiesTable.id, occupancyRecordsTable.modalityId))

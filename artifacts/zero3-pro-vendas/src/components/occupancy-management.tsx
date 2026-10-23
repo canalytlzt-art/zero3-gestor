@@ -35,6 +35,7 @@ import {
   type OccupancyPeriodMode,
 } from '@/lib/occupancy-filter-store';
 import OccupancyImportDialog from '@/components/occupancy-import-dialog';
+import OccupancyReportsDialog from '@/components/occupancy-reports-dialog';
 
 type Kind = 'daily' | 'monthly';
 
@@ -351,6 +352,7 @@ export default function OccupancyManagement() {
           <button type="button" onClick={() => setImportOpen(true)} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#d7f500] px-4 text-sm font-extrabold text-[#262b15] transition hover:bg-[#c9e600]" data-testid="button-import-occupancy"><Upload size={15} /> Importar ocupação</button>
           <button type="button" onClick={() => setModalitiesOpen(true)} className="inline-flex h-11 items-center gap-2 rounded-xl border border-[#ded7e7] bg-white px-4 text-sm font-bold text-[#5d4a78] transition hover:bg-[#f7f4fa]" data-testid="button-manage-modalities"><Layers size={15} /> Modalidades</button>
           <button type="button" onClick={refreshBase} disabled={isRefreshing} aria-busy={isRefreshing} className="inline-flex h-11 items-center gap-2 rounded-xl border border-[#ded7e7] bg-white px-4 text-sm font-bold text-[#5d4a78] transition hover:bg-[#f7f4fa] disabled:cursor-wait disabled:opacity-65" data-testid="button-refresh-occupancy"><RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} /> {isRefreshing ? 'Atualizando…' : 'Atualizar base'}</button>
+          <OccupancyReportsDialog modalities={modalities} allRecords={filterOptions} onRestored={invalidateAll} />
         </div>
       </div>
 

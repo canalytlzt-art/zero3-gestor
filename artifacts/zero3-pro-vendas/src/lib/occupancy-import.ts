@@ -515,8 +515,9 @@ export async function parseOccupancySpreadsheet(bytes: ArrayBuffer, filename: st
   const pendingScale: ParsedOccupancyImport["scaleDecisions"] = [];
   let index = 0;
   const isInstructionSheet = (name: string) => {
-    const normalized = normalize(name).replace(/\s+/g, "");
-    return normalized === "modelo" || normalized === "comousar";
+    const normalized = name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR").replace(/[^a-z0-9]/g, "");
+    return normalized === "modelo" || normalized === "comousar"
+      || normalized === "resumomodalidademes" || normalized === "comparacaoporhorario";
   };
   const appendUnmapped = (source: SourceSheet, rowIndex: number, cells: Cell[], reason: string) => {
     index += 1;

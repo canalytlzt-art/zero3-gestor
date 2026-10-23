@@ -5,3 +5,5 @@
 - [Domínio de ocupação](occupancy-domain.md) — a nova regra calcula ocupação por presenças/vagas; registros antigos só com percentual continuam separados.
 - [Scripts TSX inline](tsx-inline-async.md) — `tsx -e` compila como CJS neste workspace; envolva verificações assíncronas em uma IIFE.
 - [Ciclo de vida dos produtos](product-lifecycle.md) — produtos podem ser inativados, nunca apagados permanentemente; vendas, estornos e metas devem permanecer.
+- [Relatórios de ocupação importáveis](occupancy-report-import-compatibility.md) — mantenha a aba detalhada compatível com a importação e exclua abas auxiliares da leitura de registros.
+- [Seleção do banco por ambiente](database-environment-snapshots.md) — para cópias e migrações, selecione explicitamente o banco de desenvolvimento; não confie no ambiente padrão do processo.

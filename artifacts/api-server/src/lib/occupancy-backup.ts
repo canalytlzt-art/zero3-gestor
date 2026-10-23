@@ -28,6 +28,7 @@ type OccupancyRecordRow = typeof occupancyRecordsTable.$inferSelect;
 type BackupRecord = OccupancyBackup["records"][number];
 
 const MAX_BACKUP_RECORDS = 50_000;
+const MAX_BACKUP_BYTES = 8 * 1024 * 1024;
 
 export class OccupancyBackupError extends Error {}
 
@@ -141,6 +142,27 @@ function isMeasured(record: BackupRecord["record"]) {
     && record.capacity !== null && record.capacity !== undefined;
 }
 
+function backupRecordMatchesSelection(record: BackupRecord["record"], selection: OccupancyBackupSelection) {
+  if (selection.modalityId && record.modalityId !== selection.modalityId) return false;
+  if (selection.className && occupancyKey(record.className ?? "") !== occupancyKey(selection.className)) return false;
+  if (selection.mode === "months" && !selection.months?.includes(record.month)) return false;
+  if (selection.mode === "quarter" && (record.month.slice(0, 4) !== String(selection.year)
+    || Math.ceil(Number(record.month.slice(5, 7)) / 3) !== selection.quarter)) return false;
+  if (selection.mode === "range") {
+    if (record.kind === "monthly") {
+      if (!monthIsCompleteInRange(record.month, selection.fromDate!, selection.toDate!)) return false;
+    } else if (record.period < selection.fromDate! || record.period > selection.toDate!) return false;
+  }
+  if (selection.startTimes?.length
+    && (record.kind !== "daily" || !record.startTime || !selection.startTimes.includes(record.startTime))) return false;
+  if (selection.weekdays?.length) {
+    if (record.kind !== "daily") return false;
+    const weekday = new Date(`${record.period}T00:00:00.000Z`).getUTCDay() || 7;
+    if (!selection.weekdays.includes(weekday)) return false;
+  }
+  return true;
+}
+
 function effectiveRecords(records: BackupRecord[], selection: OccupancyBackupSelection): BackupRecord[] {
   const allowMonthly = selection.mode !== "range"
     || (selection.fromDate && selection.toDate && selectionMonths(selection).every((month) =>
@@ -227,6 +249,9 @@ export async function createOccupancyBackup(database: Database, input: unknown):
     modalities,
     records,
   };
+  if (new TextEncoder().encode(JSON.stringify(backup)).byteLength > MAX_BACKUP_BYTES) {
+    throw new OccupancyBackupError("O backup excede 8 MB. Divida a seleção em períodos menores.");
+  }
   const checked = CreateOccupancyBackupResponse.safeParse(backup);
   if (!checked.success) throw new OccupancyBackupError("Não foi possível validar o arquivo de backup gerado.");
   return checked.data as OccupancyBackup;
@@ -258,7 +283,7 @@ function sameRecord(a: BackupRecord["record"], b: BackupRecord["record"], scopeA
   const logicalScopeMatches = scopeA === scopeB
     || (scopeA === baseScopeKey(a) && scopeB.startsWith(`${scopeA}::restore:`));
   return logicalScopeMatches
-    && a.id === b.id && a.modalityId === b.modalityId && a.kind === b.kind && a.period === b.period
+    && a.id === b.id && a.kind === b.kind && a.period === b.period
     && a.percentage === b.percentage && (a.reportedPercentage ?? null) === (b.reportedPercentage ?? null)
     && (a.presences ?? null) === (b.presences ?? null) && (a.capacity ?? null) === (b.capacity ?? null)
     && stripSeconds(a.startTime) === stripSeconds(b.startTime) && stripSeconds(a.endTime) === stripSeconds(b.endTime)
@@ -287,10 +312,15 @@ async function analyzeRestore(database: Database, backup: OccupancyBackup): Prom
     const sameId = existingModalities.find((item) => item.id === modality.id);
     if (sameId) {
       if (occupancyKey(sameId.name) !== occupancyKey(modality.name)) {
+        const nameOwner = existingModalities.find((item) =>
+          item.id !== sameId.id && occupancyKey(item.name) === occupancyKey(modality.name),
+        );
         conflicts.push({
           entityType: "modality", backupId: modality.id, existingId: sameId.id, conflictKind: "id",
-          reason: `A modalidade "${sameId.name}" já usa esse ID, mas o backup contém "${modality.name}".`,
-          options: ["ignore", "update"],
+          reason: nameOwner
+            ? `O ID já pertence a "${sameId.name}", mas "${modality.name}" também está cadastrado com outro ID.`
+            : `A modalidade "${sameId.name}" já usa esse ID, mas o backup contém "${modality.name}".`,
+          options: nameOwner ? ["ignore"] : ["ignore", "update"],
         });
       } else modalityMap.set(modality.id, sameId.id);
       continue;
@@ -353,23 +383,32 @@ async function analyzeRestore(database: Database, backup: OccupancyBackup): Prom
 }
 
 export function validateOccupancyBackup(value: unknown): OccupancyBackup {
+  if (new TextEncoder().encode(JSON.stringify(value)).byteLength > MAX_BACKUP_BYTES) {
+    throw new OccupancyBackupError("O backup excede 8 MB. Use arquivos menores.");
+  }
   if (!hasValidRawBackupDates(value)) {
     throw new OccupancyBackupError("As datas do backup precisam estar serializadas como texto válido, antes da validação.");
   }
   const parsed = CreateOccupancyBackupResponse.safeParse(value);
   if (!parsed.success) throw new OccupancyBackupError("O arquivo não é um backup de ocupação válido ou não é compatível com esta versão.");
   const backup = parsed.data as OccupancyBackup;
+  const selection = validateOccupancyBackupSelection(backup.selection);
   if (backup.records.length > MAX_BACKUP_RECORDS || backup.counts.records !== backup.records.length
     || backup.counts.totalRecords !== backup.records.length
     || backup.counts.dailyRecords !== backup.records.filter(({ record }) => record.kind === "daily").length
     || backup.counts.monthlyRecords !== backup.records.filter(({ record }) => record.kind === "monthly").length
     || backup.counts.modalities !== backup.modalities.length) throw new OccupancyBackupError("As contagens do backup não correspondem aos registros.");
   const modalityIds = new Set(backup.modalities.map((item) => item.id));
+  if (modalityIds.size !== backup.modalities.length) throw new OccupancyBackupError("O backup contém modalidades repetidas.");
   const ids = new Set<string>();
+  const isCompleteHistory = selection.mode === "all" && !selection.modalityId && !selection.className
+    && !selection.startTimes?.length && !selection.weekdays?.length;
+  if (backup.partial === isCompleteHistory) throw new OccupancyBackupError("A indicação de backup parcial não corresponde aos filtros.");
   for (const { scope, scopeKey, record } of backup.records) {
     const normalizedScope = baseScopeKey(record);
     if (scope !== "period" || ids.has(record.id) || !record.modalityId || !modalityIds.has(record.modalityId)
-      || (scopeKey !== normalizedScope && !scopeKey.startsWith(`${normalizedScope}::`))) {
+      || (scopeKey !== normalizedScope && !scopeKey.startsWith(`${normalizedScope}::`))
+      || !backupRecordMatchesSelection(record, selection)) {
       throw new OccupancyBackupError("O backup contém IDs repetidos ou modalidades ausentes.");
     }
     ids.add(record.id);
@@ -381,10 +420,30 @@ export function validateOccupancyBackup(value: unknown): OccupancyBackup {
     if (record.kind === "daily" && ((record.presences === undefined) !== (record.capacity === undefined))) {
       throw new OccupancyBackupError("Presenças e vagas do backup precisam estar preenchidas em conjunto.");
     }
+    if (record.kind === "monthly" && (record.presences != null || record.capacity != null || record.startTime || record.endTime)) {
+      throw new OccupancyBackupError("Um resumo mensal não pode conter contagens ou horários de aula diária.");
+    }
+    if (!isMeasured(record) && (record.startTime || record.endTime)) {
+      throw new OccupancyBackupError("Registro sem contagens não pode carregar horário de aula.");
+    }
     if (record.presences != null && record.capacity != null
       && record.capacity > 0 && Math.abs(record.percentage! - record.presences / record.capacity * 100) > 0.00001) {
       throw new OccupancyBackupError("O percentual calculado não confere com presenças e vagas.");
     }
+  }
+  const summaryRecords = effectiveRecords(backup.records, selection);
+  const measuredRecords = summaryRecords.filter(({ record }) => isMeasured(record));
+  const summaryPresences = measuredRecords.reduce((total, { record }) => total + (record.presences ?? 0), 0);
+  const summaryCapacity = measuredRecords.reduce((total, { record }) => total + (record.capacity ?? 0), 0);
+  const summaryPercentage = summaryCapacity ? (summaryPresences / summaryCapacity) * 100 : null;
+  if (backup.summary.measuredRecords !== measuredRecords.length
+    || backup.summary.legacyRecords !== summaryRecords.length - measuredRecords.length
+    || backup.summary.presences !== summaryPresences
+    || backup.summary.capacity !== summaryCapacity
+    || (summaryPercentage === null
+      ? backup.summary.weightedPercentage !== null
+      : backup.summary.weightedPercentage === null || Math.abs(backup.summary.weightedPercentage - summaryPercentage) > 0.00001)) {
+    throw new OccupancyBackupError("Os totais de conferência do backup não correspondem aos registros.");
   }
   return backup;
 }
@@ -460,16 +519,28 @@ export async function restoreOccupancyBackup(
   };
   await database.transaction(async (tx) => {
     const analysis = await analyzeRestore(tx as unknown as Database, backup);
+    const seenActions = new Set<string>();
+    for (const action of actions) {
+      const key = `${action.entityType}:${action.backupId}`;
+      if (seenActions.has(key)) throw new OccupancyBackupError("Há mais de uma decisão para o mesmo conflito.");
+      seenActions.add(key);
+      const conflict = analysis.conflicts.find((item) => item.entityType === action.entityType && item.backupId === action.backupId);
+      if (!conflict || !conflict.options.includes(action.action)) {
+        throw new OccupancyBackupError("A decisão informada não corresponde às opções disponíveis na prévia.");
+      }
+    }
     const modalityMap = new Map(analysis.modalityMap);
     const ignoredModalities = new Set<string>();
     for (const conflict of analysis.conflicts.filter((item) => item.entityType === "modality")) {
       const action = actionMap.get(`modality:${conflict.backupId}`) ?? "ignore";
       const incoming = backup.modalities.find((item) => item.id === conflict.backupId)!;
       if (action === "update") {
+        const existing = (await tx.select().from(occupancyModalitiesTable).where(eq(occupancyModalitiesTable.id, conflict.existingId)).limit(1))[0];
+        if (!existing) throw new OccupancyBackupError("A modalidade do conflito mudou após a prévia. Gere uma nova prévia.");
         await tx.update(occupancyModalitiesTable).set({
           name: incoming.name,
           normalizedName: occupancyKey(incoming.name),
-          version: (await tx.select().from(occupancyModalitiesTable).where(eq(occupancyModalitiesTable.id, conflict.existingId)).limit(1))[0]?.version! + 1,
+          version: existing.version + 1,
           updatedAt: new Date(),
         }).where(eq(occupancyModalitiesTable.id, conflict.existingId));
         modalityMap.set(incoming.id, conflict.existingId);
