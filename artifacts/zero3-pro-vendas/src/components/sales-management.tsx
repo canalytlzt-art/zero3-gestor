@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArchiveRestore, CalendarDays, Check, ChevronDown, CircleHelp, ClipboardList, Download, Edit3, FileSpreadsheet, Filter, History, PackagePlus, Plus, RefreshCw, RotateCcw, Save, Search, Upload, X } from 'lucide-react';
+import { ArchiveRestore, CalendarDays, Check, ChevronDown, CircleHelp, ClipboardList, Download, Edit3, FileSpreadsheet, Filter, History, PackagePlus, Plus, Power, RefreshCw, RotateCcw, Save, Search, Upload, X } from 'lucide-react';
 import {
   getGetProductsQueryKey,
   getGetOccupancyModalitiesQueryKey,
@@ -39,6 +39,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { PurpleSelect } from '@/components/ui/purple-select';
 import { SuggestionInput } from '@/components/ui/suggestion-input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { downloadMonthlyBackup, parseMonthlySalesBackup } from '@/lib/sales-export';
 import { formatCents, formatMonthKey, getSaoPauloMonthKey, normalizeProductName, productNameKey } from '@/lib/sales-utils';
 import { mapSalesImportRow, parseImportDate, parseSalesSpreadsheet, type SalesImportField, type SalesImportSheet } from '@/lib/sales-import';
@@ -275,6 +276,8 @@ export default function SalesManagement() {
   const [productsOpen, setProductsOpen] = useState(false);
   const [productSearch, setProductSearch] = useState('');
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [deactivatingProduct, setDeactivatingProduct] = useState<Product | null>(null);
+  const [deactivationError, setDeactivationError] = useState('');
   const [productFeedback, setProductFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importWorkspace, setImportWorkspace] = useState<ImportWorkspace | null>(null);
@@ -534,6 +537,45 @@ export default function SalesManagement() {
     } catch (error) {
       setProductFeedback({ type: 'error', message: conflictAwareMessage(error, 'produto') });
       if (error && typeof error === 'object' && 'status' in error && error.status === 409) void invalidateSalesRelated();
+    } finally {
+      operationLock.current = false;
+    }
+  }
+
+  async function confirmDeactivateProduct() {
+    const product = deactivatingProduct;
+    if (!product || busy || operationLock.current) return;
+    operationLock.current = true;
+    setDeactivationError('');
+    setProductFeedback(null);
+    try {
+      await updateProduct.mutateAsync({
+        id: product.id,
+        data: {
+          name: product.name,
+          suggestedPriceCents: product.suggestedPriceCents,
+          modalityId: product.modalityId,
+          isActive: false,
+          expectedVersion: product.version,
+          idempotencyKey: crypto.randomUUID(),
+        },
+      });
+      await invalidateSalesRelated();
+      if (editingProduct?.id === product.id) {
+        setEditingProduct(null);
+        pendingProductKey.current = null;
+        productForm.reset({ name: '', suggestedPrice: '', modalityId: '', isActive: true });
+      }
+      setProductFeedback({
+        type: 'success',
+        message: `${product.name} foi inativado. Vendas, estornos e metas foram mantidos; o produto pode ser reativado na edição.`,
+      });
+      setDeactivatingProduct(null);
+    } catch (error) {
+      setDeactivationError(conflictAwareMessage(error, 'produto'));
+      if (error && typeof error === 'object' && 'status' in error && error.status === 409) {
+        await invalidateSalesRelated();
+      }
     } finally {
       operationLock.current = false;
     }
@@ -1112,7 +1154,7 @@ export default function SalesManagement() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={productsOpen} onOpenChange={(open) => { if (!(createProduct.isPending || updateProduct.isPending)) setProductsOpen(open); }}>
+      <Dialog open={productsOpen} onOpenChange={(open) => { if (!(createProduct.isPending || updateProduct.isPending || deactivatingProduct)) setProductsOpen(open); }}>
         <DialogContent className="max-w-3xl border-[#e7e1e9] bg-[#fffefc] p-5 sm:rounded-[24px] md:p-6">
           <DialogHeader className="text-left">
             <DialogTitle className="text-lg font-extrabold tracking-[-.035em] text-[#332d40]">Produtos</DialogTitle>
@@ -1136,6 +1178,7 @@ export default function SalesManagement() {
                         <p className="mt-0.5 text-[10px] text-[#8a8491]">{formatCents(product.suggestedPriceCents)} · {product.isActive ? 'Ativo' : 'Inativo'} · {product.modalityId ? occupancyModalities?.find((modality) => modality.id === product.modalityId)?.name ?? 'Modalidade não encontrada' : 'Não classificado'}</p>
                       </div>
                       <button type="button" onClick={() => editProduct(product)} aria-label={`Editar produto ${product.name}`} className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-[#776b88] hover:bg-[#f1edf7] hover:text-[#6848a9]" data-testid={`button-edit-product-${product.id}`}><Edit3 size={15} /></button>
+                      {product.isActive && <button type="button" onClick={() => { setDeactivatingProduct(product); setDeactivationError(''); setProductFeedback(null); }} aria-label={`Inativar produto ${product.name}`} title="Inativar produto" disabled={busy} className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-[#a0584f] hover:bg-[#fff0ed] disabled:opacity-50" data-testid={`button-deactivate-product-${product.id}`}><Power size={15} /></button>}
                     </article>) : <div className="rounded-xl border border-dashed border-[#ded7e7] p-5 text-center text-xs text-[#817b89]" data-testid="status-products-empty">{products.length ? 'Nenhum produto encontrado.' : 'Nenhum produto cadastrado ainda.'}</div>}
               </div>
             </section>
@@ -1161,6 +1204,22 @@ export default function SalesManagement() {
           <DialogFooter><button type="button" onClick={() => setProductsOpen(false)} className="h-10 rounded-xl border border-[#e3dfe7] px-4 text-sm font-bold text-[#716a79] hover:bg-[#f8f6fa]" data-testid="button-close-products">Concluir</button></DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deactivatingProduct} onOpenChange={(open) => { if (!open && !updateProduct.isPending) { setDeactivatingProduct(null); setDeactivationError(''); } }}>
+        <AlertDialogContent className="rounded-[22px] border-[#e7e1e9] bg-[#fffefc]" data-testid="dialog-deactivate-product">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Inativar produto?</AlertDialogTitle>
+            <AlertDialogDescription data-testid="text-deactivate-product-warning">
+              {deactivatingProduct && <>O produto <strong>{deactivatingProduct.name}</strong> não será apagado. Ele deixará de aparecer em novas vendas, mas vendas, estornos e metas existentes serão preservados. Você poderá reativá-lo pela edição do produto.</>}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deactivationError && <p role="alert" className="rounded-xl border border-[#f1d0ca] bg-[#fff3f1] px-3 py-2 text-xs font-semibold text-[#8e3d33]" data-testid="status-deactivate-product-error">{deactivationError}</p>}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={updateProduct.isPending} data-testid="button-cancel-deactivate-product">Cancelar</AlertDialogCancel>
+            <button type="button" onClick={() => void confirmDeactivateProduct()} disabled={updateProduct.isPending} className="inline-flex h-10 items-center justify-center rounded-md bg-[#bc4141] px-4 text-sm font-bold text-white hover:bg-[#a63636] disabled:opacity-60" data-testid="button-confirm-deactivate-product">{updateProduct.isPending ? 'Inativando…' : 'Inativar produto'}</button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={importOpen} onOpenChange={(open) => { if (!importSales.isPending) setImportOpen(open); }}>
         <DialogContent className="max-w-4xl border-[#e7e1e9] bg-[#fffefc] p-5 sm:rounded-[24px] md:p-6">

@@ -1155,7 +1155,7 @@ export function createSalesRouter(
   router.get("/products", async (req, res): Promise<void> => {
     if (!(await requireSalesAccess(req, res))) return;
 
-    const products = await db
+    const products = await database
       .select()
       .from(productsTable)
       .orderBy(asc(productsTable.normalizedName));

@@ -310,10 +310,11 @@ test("Scoreboard modality filters preserve gross sales, refunds, net revenue, an
       },
     });
     assert.equal(productResponse.status, 201);
-    const product = (await productResponse.json()) as { id: string; modalityId: string | null };
+    const product = (await productResponse.json()) as { id: string; modalityId: string | null; version: number };
     createdProductIds.push(product.id);
     assert.equal(product.modalityId, modalityId);
 
+    const productGoal = await saveGoal(baseUrl, "2097-11", productName, 12000);
     const linkedSaleId = await recordSale(baseUrl, productName, "2097-11-05");
     const unlinkedName = `Plano não classificado ${randomUUID()}`;
     await recordSale(baseUrl, unlinkedName, "2097-11-06");
@@ -376,6 +377,71 @@ test("Scoreboard modality filters preserve gross sales, refunds, net revenue, an
       netCents: 8800,
     });
     assert.equal(all.products.find(({ productName: name }) => name === unlinkedName)?.modalityId, null);
+
+    const deactivateKey = randomUUID();
+    createdIdempotencyKeys.push(deactivateKey);
+    const deactivatedResponse = await apiRequest(baseUrl, `/products/${product.id}`, {
+      method: "PATCH",
+      body: {
+        name: productName,
+        suggestedPriceCents: 5000,
+        modalityId,
+        isActive: false,
+        expectedVersion: product.version,
+        idempotencyKey: deactivateKey,
+      },
+    });
+    assert.equal(deactivatedResponse.status, 200);
+    const deactivated = (await deactivatedResponse.json()) as { isActive: boolean; version: number };
+    assert.equal(deactivated.isActive, false);
+    assert.equal(deactivated.version, product.version + 1);
+
+    const inactiveSaleKey = randomUUID();
+    createdIdempotencyKeys.push(inactiveSaleKey);
+    const inactiveSaleResponse = await apiRequest(baseUrl, "/sales", {
+      method: "POST",
+      body: {
+        saleDate: "2097-11-20",
+        productName,
+        quantity: 1,
+        unitAmountCents: 5000,
+        notes: null,
+        idempotencyKey: inactiveSaleKey,
+      },
+    });
+    assert.equal(inactiveSaleResponse.status, 409);
+
+    const storedProductsResponse = await apiRequest(baseUrl, "/products");
+    assert.equal(storedProductsResponse.status, 200);
+    const storedProducts = (await storedProductsResponse.json()) as Array<{ id: string; isActive: boolean }>;
+    assert.equal(storedProducts.find(({ id }) => id === product.id)?.isActive, false);
+    const scoreboardAfterDeactivate = await apiRequest(
+      baseUrl,
+      `/sales/scoreboard?fromDate=2097-11-01&toDate=2097-11-30&modalityId=${modalityId}`,
+    );
+    const totalsAfterDeactivate = (await scoreboardAfterDeactivate.json()) as {
+      totals: { quantity: number; salesCents: number; refundCents: number; netCents: number };
+    };
+    assert.deepEqual(totalsAfterDeactivate.totals, filtered.totals);
+    const goalsAfterDeactivate = await apiRequest(baseUrl, "/sales-goals");
+    const storedGoals = (await goalsAfterDeactivate.json()) as Array<{ id: string; productId: string | null }>;
+    assert.equal(storedGoals.find(({ id }) => id === productGoal.id)?.productId, product.id);
+
+    const reactivateKey = randomUUID();
+    createdIdempotencyKeys.push(reactivateKey);
+    const reactivatedResponse = await apiRequest(baseUrl, `/products/${product.id}`, {
+      method: "PATCH",
+      body: {
+        name: productName,
+        suggestedPriceCents: 5000,
+        modalityId,
+        isActive: true,
+        expectedVersion: deactivated.version,
+        idempotencyKey: reactivateKey,
+      },
+    });
+    assert.equal(reactivatedResponse.status, 200);
+    assert.equal(((await reactivatedResponse.json()) as { isActive: boolean }).isActive, true);
   });
 });
 
