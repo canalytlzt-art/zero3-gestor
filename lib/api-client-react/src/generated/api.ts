@@ -33,6 +33,12 @@ import type {
   HealthStatus,
   MonthlySalesBackupInput,
   MonthlySalesBackupV2,
+  OccupancyBackup,
+  OccupancyBackupRestoreInput,
+  OccupancyBackupRestorePreview,
+  OccupancyBackupRestorePreviewInput,
+  OccupancyBackupRestoreResult,
+  OccupancyBackupSelection,
   OccupancyFailureResponse,
   OccupancyImportCommitInput,
   OccupancyImportCommitResponse,
@@ -903,6 +909,270 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getCommitOccupancyImportMutationOptions(options));
+    }
+
+export const getCreateOccupancyBackupUrl = () => {
+
+
+
+
+  return `/api/occupancy/backup/period`
+}
+
+/**
+ * @summary Create a filtered occupancy backup
+ */
+export const createOccupancyBackup = async (occupancyBackupSelection: OccupancyBackupSelection, options?: Parameters<typeof customFetch>[1]): Promise<OccupancyBackup> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<OccupancyBackup>(getCreateOccupancyBackupUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(occupancyBackupSelection)
+  }
+);}
+
+
+
+
+
+export const getCreateOccupancyBackupMutationKey = () => ['createOccupancyBackup'] as const;
+
+export const getCreateOccupancyBackupMutationOptions = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOccupancyBackup>>, TError,CreateOccupancyBackupMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOccupancyBackup>>, TError,CreateOccupancyBackupMutationVariables, TContext> => {
+
+const mutationKey = getCreateOccupancyBackupMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOccupancyBackup>>, CreateOccupancyBackupMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createOccupancyBackup(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOccupancyBackupMutationResult = NonNullable<Awaited<ReturnType<typeof createOccupancyBackup>>>
+    export type CreateOccupancyBackupMutationBody = BodyType<OccupancyBackupSelection>
+    export type CreateOccupancyBackupMutationError = ErrorType<OccupancyFailureResponse>
+    export type CreateOccupancyBackupMutationVariables = {data: BodyType<OccupancyBackupSelection>}
+
+    /**
+ * @summary Create a filtered occupancy backup
+ */
+export const useCreateOccupancyBackup = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOccupancyBackup>>, TError,CreateOccupancyBackupMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createOccupancyBackup>>,
+        TError,
+        CreateOccupancyBackupMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOccupancyBackupMutationOptions(options));
+    }
+
+export const getPreviewOccupancyBackupRestoreUrl = () => {
+
+
+
+
+  return `/api/occupancy/backup/restore/preview`
+}
+
+/**
+ * @summary Preview an occupancy backup before restoring it
+ */
+export const previewOccupancyBackupRestore = async (occupancyBackupRestorePreviewInput: OccupancyBackupRestorePreviewInput, options?: Parameters<typeof customFetch>[1]): Promise<OccupancyBackupRestorePreview> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<OccupancyBackupRestorePreview>(getPreviewOccupancyBackupRestoreUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(occupancyBackupRestorePreviewInput)
+  }
+);}
+
+
+
+
+
+export const getPreviewOccupancyBackupRestoreMutationKey = () => ['previewOccupancyBackupRestore'] as const;
+
+export const getPreviewOccupancyBackupRestoreMutationOptions = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewOccupancyBackupRestore>>, TError,PreviewOccupancyBackupRestoreMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof previewOccupancyBackupRestore>>, TError,PreviewOccupancyBackupRestoreMutationVariables, TContext> => {
+
+const mutationKey = getPreviewOccupancyBackupRestoreMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof previewOccupancyBackupRestore>>, PreviewOccupancyBackupRestoreMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  previewOccupancyBackupRestore(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PreviewOccupancyBackupRestoreMutationResult = NonNullable<Awaited<ReturnType<typeof previewOccupancyBackupRestore>>>
+    export type PreviewOccupancyBackupRestoreMutationBody = BodyType<OccupancyBackupRestorePreviewInput>
+    export type PreviewOccupancyBackupRestoreMutationError = ErrorType<OccupancyFailureResponse>
+    export type PreviewOccupancyBackupRestoreMutationVariables = {data: BodyType<OccupancyBackupRestorePreviewInput>}
+
+    /**
+ * @summary Preview an occupancy backup before restoring it
+ */
+export const usePreviewOccupancyBackupRestore = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewOccupancyBackupRestore>>, TError,PreviewOccupancyBackupRestoreMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof previewOccupancyBackupRestore>>,
+        TError,
+        PreviewOccupancyBackupRestoreMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPreviewOccupancyBackupRestoreMutationOptions(options));
+    }
+
+export const getRestoreOccupancyBackupUrl = () => {
+
+
+
+
+  return `/api/occupancy/backup/restore`
+}
+
+/**
+ * @summary Restore an occupancy backup after conflict confirmation
+ */
+export const restoreOccupancyBackup = async (occupancyBackupRestoreInput: OccupancyBackupRestoreInput, options?: Parameters<typeof customFetch>[1]): Promise<OccupancyBackupRestoreResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<OccupancyBackupRestoreResult>(getRestoreOccupancyBackupUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(occupancyBackupRestoreInput)
+  }
+);}
+
+
+
+
+
+export const getRestoreOccupancyBackupMutationKey = () => ['restoreOccupancyBackup'] as const;
+
+export const getRestoreOccupancyBackupMutationOptions = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restoreOccupancyBackup>>, TError,RestoreOccupancyBackupMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof restoreOccupancyBackup>>, TError,RestoreOccupancyBackupMutationVariables, TContext> => {
+
+const mutationKey = getRestoreOccupancyBackupMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof restoreOccupancyBackup>>, RestoreOccupancyBackupMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  restoreOccupancyBackup(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RestoreOccupancyBackupMutationResult = NonNullable<Awaited<ReturnType<typeof restoreOccupancyBackup>>>
+    export type RestoreOccupancyBackupMutationBody = BodyType<OccupancyBackupRestoreInput>
+    export type RestoreOccupancyBackupMutationError = ErrorType<OccupancyFailureResponse>
+    export type RestoreOccupancyBackupMutationVariables = {data: BodyType<OccupancyBackupRestoreInput>}
+
+    /**
+ * @summary Restore an occupancy backup after conflict confirmation
+ */
+export const useRestoreOccupancyBackup = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restoreOccupancyBackup>>, TError,RestoreOccupancyBackupMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof restoreOccupancyBackup>>,
+        TError,
+        RestoreOccupancyBackupMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRestoreOccupancyBackupMutationOptions(options));
     }
 
 export const getHealthCheckUrl = () => {

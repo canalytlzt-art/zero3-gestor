@@ -12,9 +12,16 @@ import {
   DeleteOccupancyRecordBody, DeleteOccupancyRecordParams,
   PreviewOccupancyImportBody, PreviewOccupancyImportResponse,
   CommitOccupancyImportBody, CommitOccupancyImportResponse,
+  CreateOccupancyBackupBody, CreateOccupancyBackupResponse,
+  PreviewOccupancyBackupRestoreBody, PreviewOccupancyBackupRestoreResponse,
+  RestoreOccupancyBackupBody, RestoreOccupancyBackupResponse,
   type OccupancyImportRowInput,
 } from "@workspace/api-zod";
 import { isAuthorizedUser } from "../lib/authorization";
+import {
+  createOccupancyBackup, OccupancyBackupError, previewOccupancyBackupRestore, restoreOccupancyBackup,
+  validateOccupancyBackup,
+} from "../lib/occupancy-backup";
 import {
   cleanOccupancyText, occupancyKey, occupancyValues, OccupancyError, resolveOccupancyModality,
   serializeOccupancy, validOccupancyDay, validOccupancyMonth,
@@ -521,6 +528,48 @@ export function createOccupancyRouter(dependencies: Dependencies = {}): IRouter 
       await tx.insert(occupancyHistoryTable).values({ entityType: "record", entityId: id, operation: "delete", actorId: getUserId(req)!, beforeData: before, afterData: updated });
     });
     res.status(204).end();
+  });
+  router.post("/occupancy/backup/period", async (req, res): Promise<void> => {
+    const input = parse(CreateOccupancyBackupBody, req.body);
+    try {
+      const backup = await createOccupancyBackup(database, input);
+      res.json(CreateOccupancyBackupResponse.parse(backup));
+    } catch (error) {
+      if (error instanceof OccupancyBackupError) throw new OccupancyError(400, error.message);
+      throw error;
+    }
+  });
+  router.post("/occupancy/backup/restore/preview", async (req, res): Promise<void> => {
+    const rawBackup = (req.body as { backup?: unknown } | null)?.backup;
+    try { validateOccupancyBackup(rawBackup); }
+    catch (error) {
+      if (error instanceof OccupancyBackupError) throw new OccupancyError(400, error.message);
+      throw error;
+    }
+    const input = parse(PreviewOccupancyBackupRestoreBody, req.body);
+    try {
+      const preview = await previewOccupancyBackupRestore(database, rawBackup);
+      res.json(PreviewOccupancyBackupRestoreResponse.parse(preview));
+    } catch (error) {
+      if (error instanceof OccupancyBackupError) throw new OccupancyError(400, error.message);
+      throw error;
+    }
+  });
+  router.post("/occupancy/backup/restore", async (req, res): Promise<void> => {
+    const rawBackup = (req.body as { backup?: unknown } | null)?.backup;
+    try { validateOccupancyBackup(rawBackup); }
+    catch (error) {
+      if (error instanceof OccupancyBackupError) throw new OccupancyError(400, error.message);
+      throw error;
+    }
+    const input = parse(RestoreOccupancyBackupBody, req.body);
+    try {
+      const restored = await restoreOccupancyBackup(database, rawBackup, input.actions, getUserId(req)!);
+      res.json(RestoreOccupancyBackupResponse.parse(restored));
+    } catch (error) {
+      if (error instanceof OccupancyBackupError) throw new OccupancyError(400, error.message);
+      throw error;
+    }
   });
   router.use((error: unknown, req: Request, res: Response, next: NextFunction) => {
     if (!req.path.startsWith("/occupancy")) { next(error); return; }

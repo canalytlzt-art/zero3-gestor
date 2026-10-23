@@ -496,6 +496,471 @@ export const CommitOccupancyImportResponse = zod.object({
 
 
 /**
+ * @summary Create a filtered occupancy backup
+ */
+export const createOccupancyBackupBodyMonthsItemRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
+export const createOccupancyBackupBodyMonthsMax = 120;
+
+export const createOccupancyBackupBodyYearMin = 1900;
+export const createOccupancyBackupBodyYearMax = 2100;
+
+export const createOccupancyBackupBodyQuarterMax = 4;
+
+export const createOccupancyBackupBodyFromDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const createOccupancyBackupBodyToDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const createOccupancyBackupBodyStartTimesItemRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const createOccupancyBackupBodyWeekdaysItemMax = 7;
+
+export const createOccupancyBackupBodyClassNameMax = 120;
+
+
+
+export const CreateOccupancyBackupBody = zod.object({
+  "mode": zod.enum(['months', 'quarter', 'range', 'all']),
+  "months": zod.array(zod.string().regex(createOccupancyBackupBodyMonthsItemRegExp)).max(createOccupancyBackupBodyMonthsMax).optional(),
+  "year": zod.number().int().min(createOccupancyBackupBodyYearMin).max(createOccupancyBackupBodyYearMax).optional(),
+  "quarter": zod.number().int().min(1).max(createOccupancyBackupBodyQuarterMax).optional(),
+  "fromDate": zod.string().regex(createOccupancyBackupBodyFromDateRegExp).optional(),
+  "toDate": zod.string().regex(createOccupancyBackupBodyToDateRegExp).optional(),
+  "modalityId": zod.string().uuid().nullish(),
+  "startTimes": zod.array(zod.string().regex(createOccupancyBackupBodyStartTimesItemRegExp)).optional(),
+  "weekdays": zod.array(zod.number().int().min(1).max(createOccupancyBackupBodyWeekdaysItemMax)).optional(),
+  "className": zod.string().max(createOccupancyBackupBodyClassNameMax).nullish()
+})
+
+export const createOccupancyBackupResponseSelectionMonthsItemRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
+export const createOccupancyBackupResponseSelectionMonthsMax = 120;
+
+export const createOccupancyBackupResponseSelectionYearMin = 1900;
+export const createOccupancyBackupResponseSelectionYearMax = 2100;
+
+export const createOccupancyBackupResponseSelectionQuarterMax = 4;
+
+export const createOccupancyBackupResponseSelectionFromDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const createOccupancyBackupResponseSelectionToDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const createOccupancyBackupResponseSelectionStartTimesItemRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const createOccupancyBackupResponseSelectionWeekdaysItemMax = 7;
+
+export const createOccupancyBackupResponseSelectionClassNameMax = 120;
+
+export const createOccupancyBackupResponseCountsRecordsMin = 0;
+
+export const createOccupancyBackupResponseCountsDailyRecordsMin = 0;
+
+export const createOccupancyBackupResponseCountsMonthlyRecordsMin = 0;
+
+export const createOccupancyBackupResponseCountsModalitiesMin = 0;
+
+export const createOccupancyBackupResponseCountsTotalRecordsMin = 0;
+
+export const createOccupancyBackupResponseSummaryMeasuredRecordsMin = 0;
+
+export const createOccupancyBackupResponseSummaryLegacyRecordsMin = 0;
+
+export const createOccupancyBackupResponseSummaryPresencesMin = 0;
+
+export const createOccupancyBackupResponseSummaryCapacityMin = 0;
+
+export const createOccupancyBackupResponseSummaryWeightedPercentageMin = 0;
+
+export const createOccupancyBackupResponseModalitiesMax = 2000;
+
+export const createOccupancyBackupResponseRecordsItemRecordPercentageMin = 0;
+
+export const createOccupancyBackupResponseRecordsItemRecordReportedPercentageMin = 0;
+
+export const createOccupancyBackupResponseRecordsItemRecordPresencesMin = 0;
+export const createOccupancyBackupResponseRecordsItemRecordPresencesMax = 2147483647;
+
+export const createOccupancyBackupResponseRecordsItemRecordCapacityMax = 2147483647;
+
+export const createOccupancyBackupResponseRecordsItemRecordStartTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const createOccupancyBackupResponseRecordsItemRecordEndTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const createOccupancyBackupResponseRecordsMax = 50000;
+
+
+
+export const CreateOccupancyBackupResponse = zod.object({
+  "format": zod.enum(['zero3-pro-occupancy-backup']),
+  "schemaVersion": zod.literal(1),
+  "module": zod.enum(['occupancy']),
+  "origin": zod.enum(['zero3-pro-occupancy-database']),
+  "generatedAt": zod.coerce.date(),
+  "period": zod.string(),
+  "selection": zod.object({
+  "mode": zod.enum(['months', 'quarter', 'range', 'all']),
+  "months": zod.array(zod.string().regex(createOccupancyBackupResponseSelectionMonthsItemRegExp)).max(createOccupancyBackupResponseSelectionMonthsMax).optional(),
+  "year": zod.number().int().min(createOccupancyBackupResponseSelectionYearMin).max(createOccupancyBackupResponseSelectionYearMax).optional(),
+  "quarter": zod.number().int().min(1).max(createOccupancyBackupResponseSelectionQuarterMax).optional(),
+  "fromDate": zod.string().regex(createOccupancyBackupResponseSelectionFromDateRegExp).optional(),
+  "toDate": zod.string().regex(createOccupancyBackupResponseSelectionToDateRegExp).optional(),
+  "modalityId": zod.string().uuid().nullish(),
+  "startTimes": zod.array(zod.string().regex(createOccupancyBackupResponseSelectionStartTimesItemRegExp)).optional(),
+  "weekdays": zod.array(zod.number().int().min(1).max(createOccupancyBackupResponseSelectionWeekdaysItemMax)).optional(),
+  "className": zod.string().max(createOccupancyBackupResponseSelectionClassNameMax).nullish()
+}),
+  "partial": zod.boolean(),
+  "counts": zod.object({
+  "records": zod.number().int().min(createOccupancyBackupResponseCountsRecordsMin),
+  "dailyRecords": zod.number().int().min(createOccupancyBackupResponseCountsDailyRecordsMin),
+  "monthlyRecords": zod.number().int().min(createOccupancyBackupResponseCountsMonthlyRecordsMin),
+  "modalities": zod.number().int().min(createOccupancyBackupResponseCountsModalitiesMin),
+  "totalRecords": zod.number().int().min(createOccupancyBackupResponseCountsTotalRecordsMin)
+}),
+  "summary": zod.object({
+  "measuredRecords": zod.number().int().min(createOccupancyBackupResponseSummaryMeasuredRecordsMin),
+  "legacyRecords": zod.number().int().min(createOccupancyBackupResponseSummaryLegacyRecordsMin),
+  "presences": zod.number().int().min(createOccupancyBackupResponseSummaryPresencesMin),
+  "capacity": zod.number().int().min(createOccupancyBackupResponseSummaryCapacityMin),
+  "weightedPercentage": zod.number().min(createOccupancyBackupResponseSummaryWeightedPercentageMin).nullable()
+}),
+  "modalities": zod.array(zod.object({
+  "id": zod.string().uuid(),
+  "name": zod.string(),
+  "version": zod.number().int()
+})).max(createOccupancyBackupResponseModalitiesMax),
+  "records": zod.array(zod.object({
+  "scope": zod.enum(['period']),
+  "scopeKey": zod.string(),
+  "record": zod.object({
+  "id": zod.string().uuid(),
+  "kind": zod.enum(['daily', 'monthly']),
+  "period": zod.string(),
+  "month": zod.string(),
+  "modalityId": zod.string().uuid(),
+  "modalityName": zod.string(),
+  "percentage": zod.number().min(createOccupancyBackupResponseRecordsItemRecordPercentageMin),
+  "reportedPercentage": zod.number().min(createOccupancyBackupResponseRecordsItemRecordReportedPercentageMin).nullable(),
+  "presences": zod.number().int().min(createOccupancyBackupResponseRecordsItemRecordPresencesMin).max(createOccupancyBackupResponseRecordsItemRecordPresencesMax).nullable(),
+  "capacity": zod.number().int().min(1).max(createOccupancyBackupResponseRecordsItemRecordCapacityMax).nullable(),
+  "startTime": zod.string().regex(createOccupancyBackupResponseRecordsItemRecordStartTimeRegExp).nullable(),
+  "endTime": zod.string().regex(createOccupancyBackupResponseRecordsItemRecordEndTimeRegExp).nullable(),
+  "className": zod.string().nullable(),
+  "notes": zod.string().nullable(),
+  "sourceFileHash": zod.string().nullable(),
+  "sourceSheet": zod.string().nullable(),
+  "sourceCell": zod.string().nullable(),
+  "sourceCells": zod.union([zod.record(zod.string(), zod.string()),zod.null()]),
+  "version": zod.number().int(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+})).max(createOccupancyBackupResponseRecordsMax)
+})
+
+
+/**
+ * @summary Preview an occupancy backup before restoring it
+ */
+export const previewOccupancyBackupRestoreBodyBackupSelectionMonthsItemRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
+export const previewOccupancyBackupRestoreBodyBackupSelectionMonthsMax = 120;
+
+export const previewOccupancyBackupRestoreBodyBackupSelectionYearMin = 1900;
+export const previewOccupancyBackupRestoreBodyBackupSelectionYearMax = 2100;
+
+export const previewOccupancyBackupRestoreBodyBackupSelectionQuarterMax = 4;
+
+export const previewOccupancyBackupRestoreBodyBackupSelectionFromDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const previewOccupancyBackupRestoreBodyBackupSelectionToDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const previewOccupancyBackupRestoreBodyBackupSelectionStartTimesItemRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const previewOccupancyBackupRestoreBodyBackupSelectionWeekdaysItemMax = 7;
+
+export const previewOccupancyBackupRestoreBodyBackupSelectionClassNameMax = 120;
+
+export const previewOccupancyBackupRestoreBodyBackupCountsRecordsMin = 0;
+
+export const previewOccupancyBackupRestoreBodyBackupCountsDailyRecordsMin = 0;
+
+export const previewOccupancyBackupRestoreBodyBackupCountsMonthlyRecordsMin = 0;
+
+export const previewOccupancyBackupRestoreBodyBackupCountsModalitiesMin = 0;
+
+export const previewOccupancyBackupRestoreBodyBackupCountsTotalRecordsMin = 0;
+
+export const previewOccupancyBackupRestoreBodyBackupSummaryMeasuredRecordsMin = 0;
+
+export const previewOccupancyBackupRestoreBodyBackupSummaryLegacyRecordsMin = 0;
+
+export const previewOccupancyBackupRestoreBodyBackupSummaryPresencesMin = 0;
+
+export const previewOccupancyBackupRestoreBodyBackupSummaryCapacityMin = 0;
+
+export const previewOccupancyBackupRestoreBodyBackupSummaryWeightedPercentageMin = 0;
+
+export const previewOccupancyBackupRestoreBodyBackupModalitiesMax = 2000;
+
+export const previewOccupancyBackupRestoreBodyBackupRecordsItemRecordPercentageMin = 0;
+
+export const previewOccupancyBackupRestoreBodyBackupRecordsItemRecordReportedPercentageMin = 0;
+
+export const previewOccupancyBackupRestoreBodyBackupRecordsItemRecordPresencesMin = 0;
+export const previewOccupancyBackupRestoreBodyBackupRecordsItemRecordPresencesMax = 2147483647;
+
+export const previewOccupancyBackupRestoreBodyBackupRecordsItemRecordCapacityMax = 2147483647;
+
+export const previewOccupancyBackupRestoreBodyBackupRecordsItemRecordStartTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const previewOccupancyBackupRestoreBodyBackupRecordsItemRecordEndTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const previewOccupancyBackupRestoreBodyBackupRecordsMax = 50000;
+
+
+
+export const PreviewOccupancyBackupRestoreBody = zod.object({
+  "backup": zod.object({
+  "format": zod.enum(['zero3-pro-occupancy-backup']),
+  "schemaVersion": zod.literal(1),
+  "module": zod.enum(['occupancy']),
+  "origin": zod.enum(['zero3-pro-occupancy-database']),
+  "generatedAt": zod.coerce.date(),
+  "period": zod.string(),
+  "selection": zod.object({
+  "mode": zod.enum(['months', 'quarter', 'range', 'all']),
+  "months": zod.array(zod.string().regex(previewOccupancyBackupRestoreBodyBackupSelectionMonthsItemRegExp)).max(previewOccupancyBackupRestoreBodyBackupSelectionMonthsMax).optional(),
+  "year": zod.number().int().min(previewOccupancyBackupRestoreBodyBackupSelectionYearMin).max(previewOccupancyBackupRestoreBodyBackupSelectionYearMax).optional(),
+  "quarter": zod.number().int().min(1).max(previewOccupancyBackupRestoreBodyBackupSelectionQuarterMax).optional(),
+  "fromDate": zod.string().regex(previewOccupancyBackupRestoreBodyBackupSelectionFromDateRegExp).optional(),
+  "toDate": zod.string().regex(previewOccupancyBackupRestoreBodyBackupSelectionToDateRegExp).optional(),
+  "modalityId": zod.string().uuid().nullish(),
+  "startTimes": zod.array(zod.string().regex(previewOccupancyBackupRestoreBodyBackupSelectionStartTimesItemRegExp)).optional(),
+  "weekdays": zod.array(zod.number().int().min(1).max(previewOccupancyBackupRestoreBodyBackupSelectionWeekdaysItemMax)).optional(),
+  "className": zod.string().max(previewOccupancyBackupRestoreBodyBackupSelectionClassNameMax).nullish()
+}),
+  "partial": zod.boolean(),
+  "counts": zod.object({
+  "records": zod.number().int().min(previewOccupancyBackupRestoreBodyBackupCountsRecordsMin),
+  "dailyRecords": zod.number().int().min(previewOccupancyBackupRestoreBodyBackupCountsDailyRecordsMin),
+  "monthlyRecords": zod.number().int().min(previewOccupancyBackupRestoreBodyBackupCountsMonthlyRecordsMin),
+  "modalities": zod.number().int().min(previewOccupancyBackupRestoreBodyBackupCountsModalitiesMin),
+  "totalRecords": zod.number().int().min(previewOccupancyBackupRestoreBodyBackupCountsTotalRecordsMin)
+}),
+  "summary": zod.object({
+  "measuredRecords": zod.number().int().min(previewOccupancyBackupRestoreBodyBackupSummaryMeasuredRecordsMin),
+  "legacyRecords": zod.number().int().min(previewOccupancyBackupRestoreBodyBackupSummaryLegacyRecordsMin),
+  "presences": zod.number().int().min(previewOccupancyBackupRestoreBodyBackupSummaryPresencesMin),
+  "capacity": zod.number().int().min(previewOccupancyBackupRestoreBodyBackupSummaryCapacityMin),
+  "weightedPercentage": zod.number().min(previewOccupancyBackupRestoreBodyBackupSummaryWeightedPercentageMin).nullable()
+}),
+  "modalities": zod.array(zod.object({
+  "id": zod.string().uuid(),
+  "name": zod.string(),
+  "version": zod.number().int()
+})).max(previewOccupancyBackupRestoreBodyBackupModalitiesMax),
+  "records": zod.array(zod.object({
+  "scope": zod.enum(['period']),
+  "scopeKey": zod.string(),
+  "record": zod.object({
+  "id": zod.string().uuid(),
+  "kind": zod.enum(['daily', 'monthly']),
+  "period": zod.string(),
+  "month": zod.string(),
+  "modalityId": zod.string().uuid(),
+  "modalityName": zod.string(),
+  "percentage": zod.number().min(previewOccupancyBackupRestoreBodyBackupRecordsItemRecordPercentageMin),
+  "reportedPercentage": zod.number().min(previewOccupancyBackupRestoreBodyBackupRecordsItemRecordReportedPercentageMin).nullable(),
+  "presences": zod.number().int().min(previewOccupancyBackupRestoreBodyBackupRecordsItemRecordPresencesMin).max(previewOccupancyBackupRestoreBodyBackupRecordsItemRecordPresencesMax).nullable(),
+  "capacity": zod.number().int().min(1).max(previewOccupancyBackupRestoreBodyBackupRecordsItemRecordCapacityMax).nullable(),
+  "startTime": zod.string().regex(previewOccupancyBackupRestoreBodyBackupRecordsItemRecordStartTimeRegExp).nullable(),
+  "endTime": zod.string().regex(previewOccupancyBackupRestoreBodyBackupRecordsItemRecordEndTimeRegExp).nullable(),
+  "className": zod.string().nullable(),
+  "notes": zod.string().nullable(),
+  "sourceFileHash": zod.string().nullable(),
+  "sourceSheet": zod.string().nullable(),
+  "sourceCell": zod.string().nullable(),
+  "sourceCells": zod.union([zod.record(zod.string(), zod.string()),zod.null()]),
+  "version": zod.number().int(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+})).max(previewOccupancyBackupRestoreBodyBackupRecordsMax)
+})
+})
+
+export const previewOccupancyBackupRestoreResponseCountsRecordsToInsertMin = 0;
+
+export const previewOccupancyBackupRestoreResponseCountsRecordsIdenticalMin = 0;
+
+export const previewOccupancyBackupRestoreResponseCountsModalityDependenciesMin = 0;
+
+export const previewOccupancyBackupRestoreResponseCountsConflictsMin = 0;
+
+
+
+export const PreviewOccupancyBackupRestoreResponse = zod.object({
+  "period": zod.string(),
+  "counts": zod.object({
+  "recordsToInsert": zod.number().int().min(previewOccupancyBackupRestoreResponseCountsRecordsToInsertMin),
+  "recordsIdentical": zod.number().int().min(previewOccupancyBackupRestoreResponseCountsRecordsIdenticalMin),
+  "modalityDependencies": zod.number().int().min(previewOccupancyBackupRestoreResponseCountsModalityDependenciesMin),
+  "conflicts": zod.number().int().min(previewOccupancyBackupRestoreResponseCountsConflictsMin)
+}),
+  "conflicts": zod.array(zod.object({
+  "entityType": zod.enum(['record', 'modality']),
+  "backupId": zod.string().uuid(),
+  "existingId": zod.string().uuid(),
+  "conflictKind": zod.enum(['id', 'natural-key', 'source']),
+  "reason": zod.string(),
+  "options": zod.array(zod.enum(['ignore', 'update', 'keep-both']))
+}))
+})
+
+
+/**
+ * @summary Restore an occupancy backup after conflict confirmation
+ */
+export const restoreOccupancyBackupBodyBackupSelectionMonthsItemRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
+export const restoreOccupancyBackupBodyBackupSelectionMonthsMax = 120;
+
+export const restoreOccupancyBackupBodyBackupSelectionYearMin = 1900;
+export const restoreOccupancyBackupBodyBackupSelectionYearMax = 2100;
+
+export const restoreOccupancyBackupBodyBackupSelectionQuarterMax = 4;
+
+export const restoreOccupancyBackupBodyBackupSelectionFromDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const restoreOccupancyBackupBodyBackupSelectionToDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const restoreOccupancyBackupBodyBackupSelectionStartTimesItemRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const restoreOccupancyBackupBodyBackupSelectionWeekdaysItemMax = 7;
+
+export const restoreOccupancyBackupBodyBackupSelectionClassNameMax = 120;
+
+export const restoreOccupancyBackupBodyBackupCountsRecordsMin = 0;
+
+export const restoreOccupancyBackupBodyBackupCountsDailyRecordsMin = 0;
+
+export const restoreOccupancyBackupBodyBackupCountsMonthlyRecordsMin = 0;
+
+export const restoreOccupancyBackupBodyBackupCountsModalitiesMin = 0;
+
+export const restoreOccupancyBackupBodyBackupCountsTotalRecordsMin = 0;
+
+export const restoreOccupancyBackupBodyBackupSummaryMeasuredRecordsMin = 0;
+
+export const restoreOccupancyBackupBodyBackupSummaryLegacyRecordsMin = 0;
+
+export const restoreOccupancyBackupBodyBackupSummaryPresencesMin = 0;
+
+export const restoreOccupancyBackupBodyBackupSummaryCapacityMin = 0;
+
+export const restoreOccupancyBackupBodyBackupSummaryWeightedPercentageMin = 0;
+
+export const restoreOccupancyBackupBodyBackupModalitiesMax = 2000;
+
+export const restoreOccupancyBackupBodyBackupRecordsItemRecordPercentageMin = 0;
+
+export const restoreOccupancyBackupBodyBackupRecordsItemRecordReportedPercentageMin = 0;
+
+export const restoreOccupancyBackupBodyBackupRecordsItemRecordPresencesMin = 0;
+export const restoreOccupancyBackupBodyBackupRecordsItemRecordPresencesMax = 2147483647;
+
+export const restoreOccupancyBackupBodyBackupRecordsItemRecordCapacityMax = 2147483647;
+
+export const restoreOccupancyBackupBodyBackupRecordsItemRecordStartTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const restoreOccupancyBackupBodyBackupRecordsItemRecordEndTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const restoreOccupancyBackupBodyBackupRecordsMax = 50000;
+
+export const restoreOccupancyBackupBodyActionsMax = 50000;
+
+
+
+export const RestoreOccupancyBackupBody = zod.object({
+  "backup": zod.object({
+  "format": zod.enum(['zero3-pro-occupancy-backup']),
+  "schemaVersion": zod.literal(1),
+  "module": zod.enum(['occupancy']),
+  "origin": zod.enum(['zero3-pro-occupancy-database']),
+  "generatedAt": zod.coerce.date(),
+  "period": zod.string(),
+  "selection": zod.object({
+  "mode": zod.enum(['months', 'quarter', 'range', 'all']),
+  "months": zod.array(zod.string().regex(restoreOccupancyBackupBodyBackupSelectionMonthsItemRegExp)).max(restoreOccupancyBackupBodyBackupSelectionMonthsMax).optional(),
+  "year": zod.number().int().min(restoreOccupancyBackupBodyBackupSelectionYearMin).max(restoreOccupancyBackupBodyBackupSelectionYearMax).optional(),
+  "quarter": zod.number().int().min(1).max(restoreOccupancyBackupBodyBackupSelectionQuarterMax).optional(),
+  "fromDate": zod.string().regex(restoreOccupancyBackupBodyBackupSelectionFromDateRegExp).optional(),
+  "toDate": zod.string().regex(restoreOccupancyBackupBodyBackupSelectionToDateRegExp).optional(),
+  "modalityId": zod.string().uuid().nullish(),
+  "startTimes": zod.array(zod.string().regex(restoreOccupancyBackupBodyBackupSelectionStartTimesItemRegExp)).optional(),
+  "weekdays": zod.array(zod.number().int().min(1).max(restoreOccupancyBackupBodyBackupSelectionWeekdaysItemMax)).optional(),
+  "className": zod.string().max(restoreOccupancyBackupBodyBackupSelectionClassNameMax).nullish()
+}),
+  "partial": zod.boolean(),
+  "counts": zod.object({
+  "records": zod.number().int().min(restoreOccupancyBackupBodyBackupCountsRecordsMin),
+  "dailyRecords": zod.number().int().min(restoreOccupancyBackupBodyBackupCountsDailyRecordsMin),
+  "monthlyRecords": zod.number().int().min(restoreOccupancyBackupBodyBackupCountsMonthlyRecordsMin),
+  "modalities": zod.number().int().min(restoreOccupancyBackupBodyBackupCountsModalitiesMin),
+  "totalRecords": zod.number().int().min(restoreOccupancyBackupBodyBackupCountsTotalRecordsMin)
+}),
+  "summary": zod.object({
+  "measuredRecords": zod.number().int().min(restoreOccupancyBackupBodyBackupSummaryMeasuredRecordsMin),
+  "legacyRecords": zod.number().int().min(restoreOccupancyBackupBodyBackupSummaryLegacyRecordsMin),
+  "presences": zod.number().int().min(restoreOccupancyBackupBodyBackupSummaryPresencesMin),
+  "capacity": zod.number().int().min(restoreOccupancyBackupBodyBackupSummaryCapacityMin),
+  "weightedPercentage": zod.number().min(restoreOccupancyBackupBodyBackupSummaryWeightedPercentageMin).nullable()
+}),
+  "modalities": zod.array(zod.object({
+  "id": zod.string().uuid(),
+  "name": zod.string(),
+  "version": zod.number().int()
+})).max(restoreOccupancyBackupBodyBackupModalitiesMax),
+  "records": zod.array(zod.object({
+  "scope": zod.enum(['period']),
+  "scopeKey": zod.string(),
+  "record": zod.object({
+  "id": zod.string().uuid(),
+  "kind": zod.enum(['daily', 'monthly']),
+  "period": zod.string(),
+  "month": zod.string(),
+  "modalityId": zod.string().uuid(),
+  "modalityName": zod.string(),
+  "percentage": zod.number().min(restoreOccupancyBackupBodyBackupRecordsItemRecordPercentageMin),
+  "reportedPercentage": zod.number().min(restoreOccupancyBackupBodyBackupRecordsItemRecordReportedPercentageMin).nullable(),
+  "presences": zod.number().int().min(restoreOccupancyBackupBodyBackupRecordsItemRecordPresencesMin).max(restoreOccupancyBackupBodyBackupRecordsItemRecordPresencesMax).nullable(),
+  "capacity": zod.number().int().min(1).max(restoreOccupancyBackupBodyBackupRecordsItemRecordCapacityMax).nullable(),
+  "startTime": zod.string().regex(restoreOccupancyBackupBodyBackupRecordsItemRecordStartTimeRegExp).nullable(),
+  "endTime": zod.string().regex(restoreOccupancyBackupBodyBackupRecordsItemRecordEndTimeRegExp).nullable(),
+  "className": zod.string().nullable(),
+  "notes": zod.string().nullable(),
+  "sourceFileHash": zod.string().nullable(),
+  "sourceSheet": zod.string().nullable(),
+  "sourceCell": zod.string().nullable(),
+  "sourceCells": zod.union([zod.record(zod.string(), zod.string()),zod.null()]),
+  "version": zod.number().int(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+})).max(restoreOccupancyBackupBodyBackupRecordsMax)
+}),
+  "actions": zod.array(zod.object({
+  "entityType": zod.enum(['record', 'modality']),
+  "backupId": zod.string().uuid(),
+  "action": zod.enum(['ignore', 'update', 'keep-both'])
+})).max(restoreOccupancyBackupBodyActionsMax)
+})
+
+export const restoreOccupancyBackupResponseInsertedRecordsMin = 0;
+
+export const restoreOccupancyBackupResponseUpdatedRecordsMin = 0;
+
+export const restoreOccupancyBackupResponseIdenticalRecordsMin = 0;
+
+export const restoreOccupancyBackupResponseIgnoredRecordsMin = 0;
+
+export const restoreOccupancyBackupResponseKeptDistinctMin = 0;
+
+export const restoreOccupancyBackupResponseInsertedModalitiesMin = 0;
+
+
+
+export const RestoreOccupancyBackupResponse = zod.object({
+  "period": zod.string(),
+  "insertedRecords": zod.number().int().min(restoreOccupancyBackupResponseInsertedRecordsMin),
+  "updatedRecords": zod.number().int().min(restoreOccupancyBackupResponseUpdatedRecordsMin),
+  "identicalRecords": zod.number().int().min(restoreOccupancyBackupResponseIdenticalRecordsMin),
+  "ignoredRecords": zod.number().int().min(restoreOccupancyBackupResponseIgnoredRecordsMin),
+  "keptDistinct": zod.number().int().min(restoreOccupancyBackupResponseKeptDistinctMin),
+  "insertedModalities": zod.number().int().min(restoreOccupancyBackupResponseInsertedModalitiesMin)
+})
+
+
+/**
  * Returns server health status
  * @summary Health check
  */

@@ -270,6 +270,241 @@ export interface OccupancyImportCommitResponse {
   conflicts: number;
 }
 
+export type OccupancyBackupSelectionMode = typeof OccupancyBackupSelectionMode[keyof typeof OccupancyBackupSelectionMode];
+
+
+export const OccupancyBackupSelectionMode = {
+  months: 'months',
+  quarter: 'quarter',
+  range: 'range',
+  all: 'all',
+} as const;
+
+export interface OccupancyBackupSelection {
+  mode: OccupancyBackupSelectionMode;
+  /**
+     * @maxItems 120
+     * @items.pattern ^\d{4}-(0[1-9]|1[0-2])$
+     */
+  months?: string[];
+  /**
+     * @minimum 1900
+     * @maximum 2100
+     */
+  year?: number;
+  /**
+     * @minimum 1
+     * @maximum 4
+     */
+  quarter?: number;
+  /** @pattern ^\d{4}-\d{2}-\d{2}$ */
+  fromDate?: string;
+  /** @pattern ^\d{4}-\d{2}-\d{2}$ */
+  toDate?: string;
+  /** @nullable */
+  modalityId?: string | null;
+  /** @items.pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$ */
+  startTimes?: string[];
+  /**
+     * @items.minimum 1
+     * @items.maximum 7
+     */
+  weekdays?: number[];
+  /**
+     * @maxLength 120
+     * @nullable
+     */
+  className?: string | null;
+}
+
+export interface OccupancyBackupCounts {
+  /** @minimum 0 */
+  records: number;
+  /** @minimum 0 */
+  dailyRecords: number;
+  /** @minimum 0 */
+  monthlyRecords: number;
+  /** @minimum 0 */
+  modalities: number;
+  /** @minimum 0 */
+  totalRecords: number;
+}
+
+export interface OccupancyBackupSummary {
+  /** @minimum 0 */
+  measuredRecords: number;
+  /** @minimum 0 */
+  legacyRecords: number;
+  /** @minimum 0 */
+  presences: number;
+  /** @minimum 0 */
+  capacity: number;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  weightedPercentage: number | null;
+}
+
+export type OccupancyBackupRecordEnvelopeScope = typeof OccupancyBackupRecordEnvelopeScope[keyof typeof OccupancyBackupRecordEnvelopeScope];
+
+
+export const OccupancyBackupRecordEnvelopeScope = {
+  period: 'period',
+} as const;
+
+export interface OccupancyBackupRecordEnvelope {
+  scope: OccupancyBackupRecordEnvelopeScope;
+  scopeKey: string;
+  record: OccupancyRecord;
+}
+
+export type OccupancyBackupFormat = typeof OccupancyBackupFormat[keyof typeof OccupancyBackupFormat];
+
+
+export const OccupancyBackupFormat = {
+  'zero3-pro-occupancy-backup': 'zero3-pro-occupancy-backup',
+} as const;
+
+export type OccupancyBackupSchemaVersion = typeof OccupancyBackupSchemaVersion[keyof typeof OccupancyBackupSchemaVersion];
+
+
+export const OccupancyBackupSchemaVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export type OccupancyBackupModule = typeof OccupancyBackupModule[keyof typeof OccupancyBackupModule];
+
+
+export const OccupancyBackupModule = {
+  occupancy: 'occupancy',
+} as const;
+
+export type OccupancyBackupOrigin = typeof OccupancyBackupOrigin[keyof typeof OccupancyBackupOrigin];
+
+
+export const OccupancyBackupOrigin = {
+  'zero3-pro-occupancy-database': 'zero3-pro-occupancy-database',
+} as const;
+
+export interface OccupancyBackup {
+  format: OccupancyBackupFormat;
+  schemaVersion: OccupancyBackupSchemaVersion;
+  module: OccupancyBackupModule;
+  origin: OccupancyBackupOrigin;
+  generatedAt: string;
+  period: string;
+  selection: OccupancyBackupSelection;
+  partial: boolean;
+  counts: OccupancyBackupCounts;
+  summary: OccupancyBackupSummary;
+  /** @maxItems 2000 */
+  modalities: OccupancyModality[];
+  /** @maxItems 50000 */
+  records: OccupancyBackupRecordEnvelope[];
+}
+
+export interface OccupancyBackupRestorePreviewInput {
+  backup: OccupancyBackup;
+}
+
+export type OccupancyBackupRestoreActionEntityType = typeof OccupancyBackupRestoreActionEntityType[keyof typeof OccupancyBackupRestoreActionEntityType];
+
+
+export const OccupancyBackupRestoreActionEntityType = {
+  record: 'record',
+  modality: 'modality',
+} as const;
+
+export type OccupancyBackupRestoreActionAction = typeof OccupancyBackupRestoreActionAction[keyof typeof OccupancyBackupRestoreActionAction];
+
+
+export const OccupancyBackupRestoreActionAction = {
+  ignore: 'ignore',
+  update: 'update',
+  'keep-both': 'keep-both',
+} as const;
+
+export interface OccupancyBackupRestoreAction {
+  entityType: OccupancyBackupRestoreActionEntityType;
+  backupId: string;
+  action: OccupancyBackupRestoreActionAction;
+}
+
+export interface OccupancyBackupRestoreInput {
+  backup: OccupancyBackup;
+  /** @maxItems 50000 */
+  actions: OccupancyBackupRestoreAction[];
+}
+
+export type OccupancyBackupRestoreConflictEntityType = typeof OccupancyBackupRestoreConflictEntityType[keyof typeof OccupancyBackupRestoreConflictEntityType];
+
+
+export const OccupancyBackupRestoreConflictEntityType = {
+  record: 'record',
+  modality: 'modality',
+} as const;
+
+export type OccupancyBackupRestoreConflictConflictKind = typeof OccupancyBackupRestoreConflictConflictKind[keyof typeof OccupancyBackupRestoreConflictConflictKind];
+
+
+export const OccupancyBackupRestoreConflictConflictKind = {
+  id: 'id',
+  'natural-key': 'natural-key',
+  source: 'source',
+} as const;
+
+export type OccupancyBackupRestoreConflictOptionsItem = typeof OccupancyBackupRestoreConflictOptionsItem[keyof typeof OccupancyBackupRestoreConflictOptionsItem];
+
+
+export const OccupancyBackupRestoreConflictOptionsItem = {
+  ignore: 'ignore',
+  update: 'update',
+  'keep-both': 'keep-both',
+} as const;
+
+export interface OccupancyBackupRestoreConflict {
+  entityType: OccupancyBackupRestoreConflictEntityType;
+  backupId: string;
+  existingId: string;
+  conflictKind: OccupancyBackupRestoreConflictConflictKind;
+  reason: string;
+  options: OccupancyBackupRestoreConflictOptionsItem[];
+}
+
+export interface OccupancyBackupRestorePlan {
+  /** @minimum 0 */
+  recordsToInsert: number;
+  /** @minimum 0 */
+  recordsIdentical: number;
+  /** @minimum 0 */
+  modalityDependencies: number;
+  /** @minimum 0 */
+  conflicts: number;
+}
+
+export interface OccupancyBackupRestorePreview {
+  period: string;
+  counts: OccupancyBackupRestorePlan;
+  conflicts: OccupancyBackupRestoreConflict[];
+}
+
+export interface OccupancyBackupRestoreResult {
+  period: string;
+  /** @minimum 0 */
+  insertedRecords: number;
+  /** @minimum 0 */
+  updatedRecords: number;
+  /** @minimum 0 */
+  identicalRecords: number;
+  /** @minimum 0 */
+  ignoredRecords: number;
+  /** @minimum 0 */
+  keptDistinct: number;
+  /** @minimum 0 */
+  insertedModalities: number;
+}
+
 export interface HealthStatus {
   status: string;
 }
