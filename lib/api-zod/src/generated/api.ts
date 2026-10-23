@@ -1232,6 +1232,129 @@ export const GetMonthlySalesBackupResponse = zod.object({
 
 
 /**
+ * @summary Create a financial backup for selected months or dates
+ */
+export const createSalesPeriodBackupBodyMonthsItemRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
+export const createSalesPeriodBackupBodyMonthsMax = 120;
+
+export const createSalesPeriodBackupBodyFromDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const createSalesPeriodBackupBodyToDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const createSalesPeriodBackupBodyProductNameMax = 120;
+
+
+
+export const CreateSalesPeriodBackupBody = zod.object({
+  "mode": zod.enum(['months', 'range', 'all']),
+  "months": zod.array(zod.string().regex(createSalesPeriodBackupBodyMonthsItemRegExp)).max(createSalesPeriodBackupBodyMonthsMax).optional(),
+  "fromDate": zod.string().regex(createSalesPeriodBackupBodyFromDateRegExp).optional(),
+  "toDate": zod.string().regex(createSalesPeriodBackupBodyToDateRegExp).optional(),
+  "productName": zod.string().max(createSalesPeriodBackupBodyProductNameMax).nullish()
+})
+
+export const createSalesPeriodBackupResponseSelectionMonthsItemRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
+export const createSalesPeriodBackupResponseSelectionMonthsMax = 120;
+
+export const createSalesPeriodBackupResponseSelectionFromDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const createSalesPeriodBackupResponseSelectionToDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const createSalesPeriodBackupResponseSelectionProductNameMax = 120;
+
+export const createSalesPeriodBackupResponseCountsPeriodSalesMin = 0;
+
+export const createSalesPeriodBackupResponseCountsPeriodRefundsMin = 0;
+
+export const createSalesPeriodBackupResponseCountsPeriodGoalsMin = 0;
+
+export const createSalesPeriodBackupResponseCountsDependencySalesMin = 0;
+
+export const createSalesPeriodBackupResponseCountsDependencyRefundsMin = 0;
+
+export const createSalesPeriodBackupResponseCountsProductsMin = 0;
+
+export const createSalesPeriodBackupResponseCountsHistoriesMin = 0;
+
+export const createSalesPeriodBackupResponseCountsTotalRecordsMin = 0;
+
+export const createSalesPeriodBackupResponseTotalsSalesCentsMin = 0;
+export const createSalesPeriodBackupResponseTotalsSalesCentsMax = 9007199254740991;
+
+export const createSalesPeriodBackupResponseTotalsRefundsCentsMin = 0;
+export const createSalesPeriodBackupResponseTotalsRefundsCentsMax = 9007199254740991;
+
+export const createSalesPeriodBackupResponseTotalsNetCentsMin = -9007199254740991;
+export const createSalesPeriodBackupResponseTotalsNetCentsMax = 9007199254740991;
+
+export const createSalesPeriodBackupResponseTotalsQuantityMin = 0;
+export const createSalesPeriodBackupResponseTotalsQuantityMax = 9007199254740991;
+
+export const createSalesPeriodBackupResponseProductsMax = 2000;
+
+export const createSalesPeriodBackupResponseSalesMax = 10000;
+
+export const createSalesPeriodBackupResponseRefundsMax = 20000;
+
+export const createSalesPeriodBackupResponseGoalsMax = 500;
+
+export const createSalesPeriodBackupResponseHistoriesMax = 50000;
+
+
+
+export const CreateSalesPeriodBackupResponse = zod.object({
+  "format": zod.enum(['zero3-pro-financial-backup']),
+  "schemaVersion": zod.literal(3),
+  "module": zod.enum(['sales']),
+  "origin": zod.enum(['zero3-pro-financial-database']),
+  "generatedAt": zod.coerce.date(),
+  "period": zod.string().describe('Human-readable label for the selected period.'),
+  "selection": zod.object({
+  "mode": zod.enum(['months', 'range', 'all']),
+  "months": zod.array(zod.string().regex(createSalesPeriodBackupResponseSelectionMonthsItemRegExp)).max(createSalesPeriodBackupResponseSelectionMonthsMax).optional(),
+  "fromDate": zod.string().regex(createSalesPeriodBackupResponseSelectionFromDateRegExp).optional(),
+  "toDate": zod.string().regex(createSalesPeriodBackupResponseSelectionToDateRegExp).optional(),
+  "productName": zod.string().max(createSalesPeriodBackupResponseSelectionProductNameMax).nullish()
+}),
+  "partial": zod.boolean(),
+  "currency": zod.enum(['BRL']),
+  "businessTimezone": zod.enum(['America/Sao_Paulo']),
+  "counts": zod.object({
+  "periodSales": zod.number().int().min(createSalesPeriodBackupResponseCountsPeriodSalesMin),
+  "periodRefunds": zod.number().int().min(createSalesPeriodBackupResponseCountsPeriodRefundsMin),
+  "periodGoals": zod.number().int().min(createSalesPeriodBackupResponseCountsPeriodGoalsMin),
+  "dependencySales": zod.number().int().min(createSalesPeriodBackupResponseCountsDependencySalesMin),
+  "dependencyRefunds": zod.number().int().min(createSalesPeriodBackupResponseCountsDependencyRefundsMin),
+  "products": zod.number().int().min(createSalesPeriodBackupResponseCountsProductsMin),
+  "histories": zod.number().int().min(createSalesPeriodBackupResponseCountsHistoriesMin),
+  "totalRecords": zod.number().int().min(createSalesPeriodBackupResponseCountsTotalRecordsMin)
+}),
+  "totals": zod.object({
+  "salesCents": zod.number().int().min(createSalesPeriodBackupResponseTotalsSalesCentsMin).max(createSalesPeriodBackupResponseTotalsSalesCentsMax),
+  "refundsCents": zod.number().int().min(createSalesPeriodBackupResponseTotalsRefundsCentsMin).max(createSalesPeriodBackupResponseTotalsRefundsCentsMax),
+  "netCents": zod.number().int().min(createSalesPeriodBackupResponseTotalsNetCentsMin).max(createSalesPeriodBackupResponseTotalsNetCentsMax),
+  "quantity": zod.number().int().min(createSalesPeriodBackupResponseTotalsQuantityMin).max(createSalesPeriodBackupResponseTotalsQuantityMax)
+}),
+  "products": zod.array(zod.object({
+  "scope": zod.enum(['period', 'dependency']),
+  "record": zod.record(zod.string(), zod.unknown())
+})).max(createSalesPeriodBackupResponseProductsMax),
+  "sales": zod.array(zod.object({
+  "scope": zod.enum(['period', 'dependency']),
+  "record": zod.record(zod.string(), zod.unknown())
+})).max(createSalesPeriodBackupResponseSalesMax),
+  "refunds": zod.array(zod.object({
+  "scope": zod.enum(['period', 'dependency']),
+  "record": zod.record(zod.string(), zod.unknown())
+})).max(createSalesPeriodBackupResponseRefundsMax),
+  "goals": zod.array(zod.object({
+  "scope": zod.enum(['period', 'dependency']),
+  "record": zod.record(zod.string(), zod.unknown())
+})).max(createSalesPeriodBackupResponseGoalsMax),
+  "histories": zod.array(zod.object({
+  "scope": zod.enum(['period', 'dependency']),
+  "record": zod.record(zod.string(), zod.unknown())
+})).max(createSalesPeriodBackupResponseHistoriesMax)
+})
+
+
+/**
  * @summary Preview a monthly sales backup before restoring it
  */
 export const previewMonthlySalesBackupRestoreBodyOnePeriodRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
@@ -1261,35 +1384,80 @@ export const previewMonthlySalesBackupRestoreBodyOneGoalsMax = 500;
 
 export const previewMonthlySalesBackupRestoreBodyOneHistoriesMax = 50000;
 
-export const previewMonthlySalesBackupRestoreBodyTwoMonthRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
-export const previewMonthlySalesBackupRestoreBodyTwoRecordCountMin = 0;
-export const previewMonthlySalesBackupRestoreBodyTwoRecordCountMax = 10000;
+export const previewMonthlySalesBackupRestoreBodyTwoSelectionMonthsItemRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
+export const previewMonthlySalesBackupRestoreBodyTwoSelectionMonthsMax = 120;
 
-export const previewMonthlySalesBackupRestoreBodyTwoGoalCountMin = 0;
-export const previewMonthlySalesBackupRestoreBodyTwoGoalCountMax = 500;
+export const previewMonthlySalesBackupRestoreBodyTwoSelectionFromDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const previewMonthlySalesBackupRestoreBodyTwoSelectionToDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const previewMonthlySalesBackupRestoreBodyTwoSelectionProductNameMax = 120;
 
-export const previewMonthlySalesBackupRestoreBodyTwoSalesItemProductNameMax = 120;
+export const previewMonthlySalesBackupRestoreBodyTwoCountsPeriodSalesMin = 0;
 
-export const previewMonthlySalesBackupRestoreBodyTwoSalesItemQuantityMax = 2147483647;
+export const previewMonthlySalesBackupRestoreBodyTwoCountsPeriodRefundsMin = 0;
 
-export const previewMonthlySalesBackupRestoreBodyTwoSalesItemUnitAmountCentsMin = 0;
-export const previewMonthlySalesBackupRestoreBodyTwoSalesItemUnitAmountCentsMax = 9007199254740991;
+export const previewMonthlySalesBackupRestoreBodyTwoCountsPeriodGoalsMin = 0;
 
-export const previewMonthlySalesBackupRestoreBodyTwoSalesItemTotalCentsMin = 0;
-export const previewMonthlySalesBackupRestoreBodyTwoSalesItemTotalCentsMax = 9007199254740991;
+export const previewMonthlySalesBackupRestoreBodyTwoCountsDependencySalesMin = 0;
 
-export const previewMonthlySalesBackupRestoreBodyTwoSalesItemCustomerNameMax = 120;
+export const previewMonthlySalesBackupRestoreBodyTwoCountsDependencyRefundsMin = 0;
 
-export const previewMonthlySalesBackupRestoreBodyTwoSalesItemNotesMax = 1000;
+export const previewMonthlySalesBackupRestoreBodyTwoCountsProductsMin = 0;
+
+export const previewMonthlySalesBackupRestoreBodyTwoCountsHistoriesMin = 0;
+
+export const previewMonthlySalesBackupRestoreBodyTwoCountsTotalRecordsMin = 0;
+
+export const previewMonthlySalesBackupRestoreBodyTwoTotalsSalesCentsMin = 0;
+export const previewMonthlySalesBackupRestoreBodyTwoTotalsSalesCentsMax = 9007199254740991;
+
+export const previewMonthlySalesBackupRestoreBodyTwoTotalsRefundsCentsMin = 0;
+export const previewMonthlySalesBackupRestoreBodyTwoTotalsRefundsCentsMax = 9007199254740991;
+
+export const previewMonthlySalesBackupRestoreBodyTwoTotalsNetCentsMin = -9007199254740991;
+export const previewMonthlySalesBackupRestoreBodyTwoTotalsNetCentsMax = 9007199254740991;
+
+export const previewMonthlySalesBackupRestoreBodyTwoTotalsQuantityMin = 0;
+export const previewMonthlySalesBackupRestoreBodyTwoTotalsQuantityMax = 9007199254740991;
+
+export const previewMonthlySalesBackupRestoreBodyTwoProductsMax = 2000;
 
 export const previewMonthlySalesBackupRestoreBodyTwoSalesMax = 10000;
 
-export const previewMonthlySalesBackupRestoreBodyTwoGoalsItemMonthRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
-export const previewMonthlySalesBackupRestoreBodyTwoGoalsItemProductNameMax = 120;
-
-export const previewMonthlySalesBackupRestoreBodyTwoGoalsItemTargetCentsMax = 9007199254740991;
+export const previewMonthlySalesBackupRestoreBodyTwoRefundsMax = 20000;
 
 export const previewMonthlySalesBackupRestoreBodyTwoGoalsMax = 500;
+
+export const previewMonthlySalesBackupRestoreBodyTwoHistoriesMax = 50000;
+
+export const previewMonthlySalesBackupRestoreBodyThreeMonthRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
+export const previewMonthlySalesBackupRestoreBodyThreeRecordCountMin = 0;
+export const previewMonthlySalesBackupRestoreBodyThreeRecordCountMax = 10000;
+
+export const previewMonthlySalesBackupRestoreBodyThreeGoalCountMin = 0;
+export const previewMonthlySalesBackupRestoreBodyThreeGoalCountMax = 500;
+
+export const previewMonthlySalesBackupRestoreBodyThreeSalesItemProductNameMax = 120;
+
+export const previewMonthlySalesBackupRestoreBodyThreeSalesItemQuantityMax = 2147483647;
+
+export const previewMonthlySalesBackupRestoreBodyThreeSalesItemUnitAmountCentsMin = 0;
+export const previewMonthlySalesBackupRestoreBodyThreeSalesItemUnitAmountCentsMax = 9007199254740991;
+
+export const previewMonthlySalesBackupRestoreBodyThreeSalesItemTotalCentsMin = 0;
+export const previewMonthlySalesBackupRestoreBodyThreeSalesItemTotalCentsMax = 9007199254740991;
+
+export const previewMonthlySalesBackupRestoreBodyThreeSalesItemCustomerNameMax = 120;
+
+export const previewMonthlySalesBackupRestoreBodyThreeSalesItemNotesMax = 1000;
+
+export const previewMonthlySalesBackupRestoreBodyThreeSalesMax = 10000;
+
+export const previewMonthlySalesBackupRestoreBodyThreeGoalsItemMonthRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
+export const previewMonthlySalesBackupRestoreBodyThreeGoalsItemProductNameMax = 120;
+
+export const previewMonthlySalesBackupRestoreBodyThreeGoalsItemTargetCentsMax = 9007199254740991;
+
+export const previewMonthlySalesBackupRestoreBodyThreeGoalsMax = 500;
 
 
 
@@ -1330,33 +1498,85 @@ export const PreviewMonthlySalesBackupRestoreBody = zod.union([zod.object({
   "record": zod.record(zod.string(), zod.unknown())
 })).max(previewMonthlySalesBackupRestoreBodyOneHistoriesMax)
 }),zod.object({
+  "format": zod.enum(['zero3-pro-financial-backup']),
+  "schemaVersion": zod.literal(3),
+  "module": zod.enum(['sales']),
+  "origin": zod.enum(['zero3-pro-financial-database']),
+  "generatedAt": zod.coerce.date(),
+  "period": zod.string().describe('Human-readable label for the selected period.'),
+  "selection": zod.object({
+  "mode": zod.enum(['months', 'range', 'all']),
+  "months": zod.array(zod.string().regex(previewMonthlySalesBackupRestoreBodyTwoSelectionMonthsItemRegExp)).max(previewMonthlySalesBackupRestoreBodyTwoSelectionMonthsMax).optional(),
+  "fromDate": zod.string().regex(previewMonthlySalesBackupRestoreBodyTwoSelectionFromDateRegExp).optional(),
+  "toDate": zod.string().regex(previewMonthlySalesBackupRestoreBodyTwoSelectionToDateRegExp).optional(),
+  "productName": zod.string().max(previewMonthlySalesBackupRestoreBodyTwoSelectionProductNameMax).nullish()
+}),
+  "partial": zod.boolean(),
+  "currency": zod.enum(['BRL']),
+  "businessTimezone": zod.enum(['America/Sao_Paulo']),
+  "counts": zod.object({
+  "periodSales": zod.number().int().min(previewMonthlySalesBackupRestoreBodyTwoCountsPeriodSalesMin),
+  "periodRefunds": zod.number().int().min(previewMonthlySalesBackupRestoreBodyTwoCountsPeriodRefundsMin),
+  "periodGoals": zod.number().int().min(previewMonthlySalesBackupRestoreBodyTwoCountsPeriodGoalsMin),
+  "dependencySales": zod.number().int().min(previewMonthlySalesBackupRestoreBodyTwoCountsDependencySalesMin),
+  "dependencyRefunds": zod.number().int().min(previewMonthlySalesBackupRestoreBodyTwoCountsDependencyRefundsMin),
+  "products": zod.number().int().min(previewMonthlySalesBackupRestoreBodyTwoCountsProductsMin),
+  "histories": zod.number().int().min(previewMonthlySalesBackupRestoreBodyTwoCountsHistoriesMin),
+  "totalRecords": zod.number().int().min(previewMonthlySalesBackupRestoreBodyTwoCountsTotalRecordsMin)
+}),
+  "totals": zod.object({
+  "salesCents": zod.number().int().min(previewMonthlySalesBackupRestoreBodyTwoTotalsSalesCentsMin).max(previewMonthlySalesBackupRestoreBodyTwoTotalsSalesCentsMax),
+  "refundsCents": zod.number().int().min(previewMonthlySalesBackupRestoreBodyTwoTotalsRefundsCentsMin).max(previewMonthlySalesBackupRestoreBodyTwoTotalsRefundsCentsMax),
+  "netCents": zod.number().int().min(previewMonthlySalesBackupRestoreBodyTwoTotalsNetCentsMin).max(previewMonthlySalesBackupRestoreBodyTwoTotalsNetCentsMax),
+  "quantity": zod.number().int().min(previewMonthlySalesBackupRestoreBodyTwoTotalsQuantityMin).max(previewMonthlySalesBackupRestoreBodyTwoTotalsQuantityMax)
+}),
+  "products": zod.array(zod.object({
+  "scope": zod.enum(['period', 'dependency']),
+  "record": zod.record(zod.string(), zod.unknown())
+})).max(previewMonthlySalesBackupRestoreBodyTwoProductsMax),
+  "sales": zod.array(zod.object({
+  "scope": zod.enum(['period', 'dependency']),
+  "record": zod.record(zod.string(), zod.unknown())
+})).max(previewMonthlySalesBackupRestoreBodyTwoSalesMax),
+  "refunds": zod.array(zod.object({
+  "scope": zod.enum(['period', 'dependency']),
+  "record": zod.record(zod.string(), zod.unknown())
+})).max(previewMonthlySalesBackupRestoreBodyTwoRefundsMax),
+  "goals": zod.array(zod.object({
+  "scope": zod.enum(['period', 'dependency']),
+  "record": zod.record(zod.string(), zod.unknown())
+})).max(previewMonthlySalesBackupRestoreBodyTwoGoalsMax),
+  "histories": zod.array(zod.object({
+  "scope": zod.enum(['period', 'dependency']),
+  "record": zod.record(zod.string(), zod.unknown())
+})).max(previewMonthlySalesBackupRestoreBodyTwoHistoriesMax)
+}),zod.object({
   "format": zod.enum(['zero3-pro-monthly-backup']),
   "version": zod.literal(1),
-  "month": zod.string().regex(previewMonthlySalesBackupRestoreBodyTwoMonthRegExp),
+  "month": zod.string().regex(previewMonthlySalesBackupRestoreBodyThreeMonthRegExp),
   "generatedAt": zod.coerce.date(),
-  "recordCount": zod.number().int().min(previewMonthlySalesBackupRestoreBodyTwoRecordCountMin).max(previewMonthlySalesBackupRestoreBodyTwoRecordCountMax),
-  "goalCount": zod.number().int().min(previewMonthlySalesBackupRestoreBodyTwoGoalCountMin).max(previewMonthlySalesBackupRestoreBodyTwoGoalCountMax),
+  "recordCount": zod.number().int().min(previewMonthlySalesBackupRestoreBodyThreeRecordCountMin).max(previewMonthlySalesBackupRestoreBodyThreeRecordCountMax),
+  "goalCount": zod.number().int().min(previewMonthlySalesBackupRestoreBodyThreeGoalCountMin).max(previewMonthlySalesBackupRestoreBodyThreeGoalCountMax),
   "sales": zod.array(zod.object({
   "id": zod.string().uuid(),
   "saleDate": zod.coerce.date(),
-  "productName": zod.string().min(1).max(previewMonthlySalesBackupRestoreBodyTwoSalesItemProductNameMax),
-  "quantity": zod.number().int().min(1).max(previewMonthlySalesBackupRestoreBodyTwoSalesItemQuantityMax),
-  "unitAmountCents": zod.number().int().min(previewMonthlySalesBackupRestoreBodyTwoSalesItemUnitAmountCentsMin).max(previewMonthlySalesBackupRestoreBodyTwoSalesItemUnitAmountCentsMax),
-  "totalCents": zod.number().int().min(previewMonthlySalesBackupRestoreBodyTwoSalesItemTotalCentsMin).max(previewMonthlySalesBackupRestoreBodyTwoSalesItemTotalCentsMax),
-  "customerName": zod.string().max(previewMonthlySalesBackupRestoreBodyTwoSalesItemCustomerNameMax).nullish(),
-  "notes": zod.string().max(previewMonthlySalesBackupRestoreBodyTwoSalesItemNotesMax).nullable(),
+  "productName": zod.string().min(1).max(previewMonthlySalesBackupRestoreBodyThreeSalesItemProductNameMax),
+  "quantity": zod.number().int().min(1).max(previewMonthlySalesBackupRestoreBodyThreeSalesItemQuantityMax),
+  "unitAmountCents": zod.number().int().min(previewMonthlySalesBackupRestoreBodyThreeSalesItemUnitAmountCentsMin).max(previewMonthlySalesBackupRestoreBodyThreeSalesItemUnitAmountCentsMax),
+  "totalCents": zod.number().int().min(previewMonthlySalesBackupRestoreBodyThreeSalesItemTotalCentsMin).max(previewMonthlySalesBackupRestoreBodyThreeSalesItemTotalCentsMax),
+  "customerName": zod.string().max(previewMonthlySalesBackupRestoreBodyThreeSalesItemCustomerNameMax).nullish(),
+  "notes": zod.string().max(previewMonthlySalesBackupRestoreBodyThreeSalesItemNotesMax).nullable(),
   "createdAt": zod.coerce.date()
-})).max(previewMonthlySalesBackupRestoreBodyTwoSalesMax),
+})).max(previewMonthlySalesBackupRestoreBodyThreeSalesMax),
   "goals": zod.array(zod.object({
   "id": zod.string().uuid(),
-  "month": zod.string().regex(previewMonthlySalesBackupRestoreBodyTwoGoalsItemMonthRegExp),
-  "productName": zod.string().max(previewMonthlySalesBackupRestoreBodyTwoGoalsItemProductNameMax).nullable(),
-  "targetCents": zod.number().int().min(1).max(previewMonthlySalesBackupRestoreBodyTwoGoalsItemTargetCentsMax),
+  "month": zod.string().regex(previewMonthlySalesBackupRestoreBodyThreeGoalsItemMonthRegExp),
+  "productName": zod.string().max(previewMonthlySalesBackupRestoreBodyThreeGoalsItemProductNameMax).nullable(),
+  "targetCents": zod.number().int().min(1).max(previewMonthlySalesBackupRestoreBodyThreeGoalsItemTargetCentsMax),
   "updatedAt": zod.coerce.date()
-})).max(previewMonthlySalesBackupRestoreBodyTwoGoalsMax)
+})).max(previewMonthlySalesBackupRestoreBodyThreeGoalsMax)
 })])
 
-export const previewMonthlySalesBackupRestoreResponsePeriodRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
 export const previewMonthlySalesBackupRestoreResponseDependencyMonthsItemRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
 export const previewMonthlySalesBackupRestoreResponseToInsertProductsMin = 0;
 
@@ -1381,7 +1601,7 @@ export const previewMonthlySalesBackupRestoreResponseIdenticalHistoriesMin = 0;
 
 
 export const PreviewMonthlySalesBackupRestoreResponse = zod.object({
-  "period": zod.string().regex(previewMonthlySalesBackupRestoreResponsePeriodRegExp),
+  "period": zod.string(),
   "dependencyMonths": zod.array(zod.string().regex(previewMonthlySalesBackupRestoreResponseDependencyMonthsItemRegExp)),
   "toInsert": zod.object({
   "products": zod.number().int().min(previewMonthlySalesBackupRestoreResponseToInsertProductsMin),
@@ -1437,35 +1657,80 @@ export const restoreMonthlySalesBackupBodyOneGoalsMax = 500;
 
 export const restoreMonthlySalesBackupBodyOneHistoriesMax = 50000;
 
-export const restoreMonthlySalesBackupBodyTwoMonthRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
-export const restoreMonthlySalesBackupBodyTwoRecordCountMin = 0;
-export const restoreMonthlySalesBackupBodyTwoRecordCountMax = 10000;
+export const restoreMonthlySalesBackupBodyTwoSelectionMonthsItemRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
+export const restoreMonthlySalesBackupBodyTwoSelectionMonthsMax = 120;
 
-export const restoreMonthlySalesBackupBodyTwoGoalCountMin = 0;
-export const restoreMonthlySalesBackupBodyTwoGoalCountMax = 500;
+export const restoreMonthlySalesBackupBodyTwoSelectionFromDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const restoreMonthlySalesBackupBodyTwoSelectionToDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const restoreMonthlySalesBackupBodyTwoSelectionProductNameMax = 120;
 
-export const restoreMonthlySalesBackupBodyTwoSalesItemProductNameMax = 120;
+export const restoreMonthlySalesBackupBodyTwoCountsPeriodSalesMin = 0;
 
-export const restoreMonthlySalesBackupBodyTwoSalesItemQuantityMax = 2147483647;
+export const restoreMonthlySalesBackupBodyTwoCountsPeriodRefundsMin = 0;
 
-export const restoreMonthlySalesBackupBodyTwoSalesItemUnitAmountCentsMin = 0;
-export const restoreMonthlySalesBackupBodyTwoSalesItemUnitAmountCentsMax = 9007199254740991;
+export const restoreMonthlySalesBackupBodyTwoCountsPeriodGoalsMin = 0;
 
-export const restoreMonthlySalesBackupBodyTwoSalesItemTotalCentsMin = 0;
-export const restoreMonthlySalesBackupBodyTwoSalesItemTotalCentsMax = 9007199254740991;
+export const restoreMonthlySalesBackupBodyTwoCountsDependencySalesMin = 0;
 
-export const restoreMonthlySalesBackupBodyTwoSalesItemCustomerNameMax = 120;
+export const restoreMonthlySalesBackupBodyTwoCountsDependencyRefundsMin = 0;
 
-export const restoreMonthlySalesBackupBodyTwoSalesItemNotesMax = 1000;
+export const restoreMonthlySalesBackupBodyTwoCountsProductsMin = 0;
+
+export const restoreMonthlySalesBackupBodyTwoCountsHistoriesMin = 0;
+
+export const restoreMonthlySalesBackupBodyTwoCountsTotalRecordsMin = 0;
+
+export const restoreMonthlySalesBackupBodyTwoTotalsSalesCentsMin = 0;
+export const restoreMonthlySalesBackupBodyTwoTotalsSalesCentsMax = 9007199254740991;
+
+export const restoreMonthlySalesBackupBodyTwoTotalsRefundsCentsMin = 0;
+export const restoreMonthlySalesBackupBodyTwoTotalsRefundsCentsMax = 9007199254740991;
+
+export const restoreMonthlySalesBackupBodyTwoTotalsNetCentsMin = -9007199254740991;
+export const restoreMonthlySalesBackupBodyTwoTotalsNetCentsMax = 9007199254740991;
+
+export const restoreMonthlySalesBackupBodyTwoTotalsQuantityMin = 0;
+export const restoreMonthlySalesBackupBodyTwoTotalsQuantityMax = 9007199254740991;
+
+export const restoreMonthlySalesBackupBodyTwoProductsMax = 2000;
 
 export const restoreMonthlySalesBackupBodyTwoSalesMax = 10000;
 
-export const restoreMonthlySalesBackupBodyTwoGoalsItemMonthRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
-export const restoreMonthlySalesBackupBodyTwoGoalsItemProductNameMax = 120;
-
-export const restoreMonthlySalesBackupBodyTwoGoalsItemTargetCentsMax = 9007199254740991;
+export const restoreMonthlySalesBackupBodyTwoRefundsMax = 20000;
 
 export const restoreMonthlySalesBackupBodyTwoGoalsMax = 500;
+
+export const restoreMonthlySalesBackupBodyTwoHistoriesMax = 50000;
+
+export const restoreMonthlySalesBackupBodyThreeMonthRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
+export const restoreMonthlySalesBackupBodyThreeRecordCountMin = 0;
+export const restoreMonthlySalesBackupBodyThreeRecordCountMax = 10000;
+
+export const restoreMonthlySalesBackupBodyThreeGoalCountMin = 0;
+export const restoreMonthlySalesBackupBodyThreeGoalCountMax = 500;
+
+export const restoreMonthlySalesBackupBodyThreeSalesItemProductNameMax = 120;
+
+export const restoreMonthlySalesBackupBodyThreeSalesItemQuantityMax = 2147483647;
+
+export const restoreMonthlySalesBackupBodyThreeSalesItemUnitAmountCentsMin = 0;
+export const restoreMonthlySalesBackupBodyThreeSalesItemUnitAmountCentsMax = 9007199254740991;
+
+export const restoreMonthlySalesBackupBodyThreeSalesItemTotalCentsMin = 0;
+export const restoreMonthlySalesBackupBodyThreeSalesItemTotalCentsMax = 9007199254740991;
+
+export const restoreMonthlySalesBackupBodyThreeSalesItemCustomerNameMax = 120;
+
+export const restoreMonthlySalesBackupBodyThreeSalesItemNotesMax = 1000;
+
+export const restoreMonthlySalesBackupBodyThreeSalesMax = 10000;
+
+export const restoreMonthlySalesBackupBodyThreeGoalsItemMonthRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
+export const restoreMonthlySalesBackupBodyThreeGoalsItemProductNameMax = 120;
+
+export const restoreMonthlySalesBackupBodyThreeGoalsItemTargetCentsMax = 9007199254740991;
+
+export const restoreMonthlySalesBackupBodyThreeGoalsMax = 500;
 
 
 
@@ -1506,33 +1771,85 @@ export const RestoreMonthlySalesBackupBody = zod.union([zod.object({
   "record": zod.record(zod.string(), zod.unknown())
 })).max(restoreMonthlySalesBackupBodyOneHistoriesMax)
 }),zod.object({
+  "format": zod.enum(['zero3-pro-financial-backup']),
+  "schemaVersion": zod.literal(3),
+  "module": zod.enum(['sales']),
+  "origin": zod.enum(['zero3-pro-financial-database']),
+  "generatedAt": zod.coerce.date(),
+  "period": zod.string().describe('Human-readable label for the selected period.'),
+  "selection": zod.object({
+  "mode": zod.enum(['months', 'range', 'all']),
+  "months": zod.array(zod.string().regex(restoreMonthlySalesBackupBodyTwoSelectionMonthsItemRegExp)).max(restoreMonthlySalesBackupBodyTwoSelectionMonthsMax).optional(),
+  "fromDate": zod.string().regex(restoreMonthlySalesBackupBodyTwoSelectionFromDateRegExp).optional(),
+  "toDate": zod.string().regex(restoreMonthlySalesBackupBodyTwoSelectionToDateRegExp).optional(),
+  "productName": zod.string().max(restoreMonthlySalesBackupBodyTwoSelectionProductNameMax).nullish()
+}),
+  "partial": zod.boolean(),
+  "currency": zod.enum(['BRL']),
+  "businessTimezone": zod.enum(['America/Sao_Paulo']),
+  "counts": zod.object({
+  "periodSales": zod.number().int().min(restoreMonthlySalesBackupBodyTwoCountsPeriodSalesMin),
+  "periodRefunds": zod.number().int().min(restoreMonthlySalesBackupBodyTwoCountsPeriodRefundsMin),
+  "periodGoals": zod.number().int().min(restoreMonthlySalesBackupBodyTwoCountsPeriodGoalsMin),
+  "dependencySales": zod.number().int().min(restoreMonthlySalesBackupBodyTwoCountsDependencySalesMin),
+  "dependencyRefunds": zod.number().int().min(restoreMonthlySalesBackupBodyTwoCountsDependencyRefundsMin),
+  "products": zod.number().int().min(restoreMonthlySalesBackupBodyTwoCountsProductsMin),
+  "histories": zod.number().int().min(restoreMonthlySalesBackupBodyTwoCountsHistoriesMin),
+  "totalRecords": zod.number().int().min(restoreMonthlySalesBackupBodyTwoCountsTotalRecordsMin)
+}),
+  "totals": zod.object({
+  "salesCents": zod.number().int().min(restoreMonthlySalesBackupBodyTwoTotalsSalesCentsMin).max(restoreMonthlySalesBackupBodyTwoTotalsSalesCentsMax),
+  "refundsCents": zod.number().int().min(restoreMonthlySalesBackupBodyTwoTotalsRefundsCentsMin).max(restoreMonthlySalesBackupBodyTwoTotalsRefundsCentsMax),
+  "netCents": zod.number().int().min(restoreMonthlySalesBackupBodyTwoTotalsNetCentsMin).max(restoreMonthlySalesBackupBodyTwoTotalsNetCentsMax),
+  "quantity": zod.number().int().min(restoreMonthlySalesBackupBodyTwoTotalsQuantityMin).max(restoreMonthlySalesBackupBodyTwoTotalsQuantityMax)
+}),
+  "products": zod.array(zod.object({
+  "scope": zod.enum(['period', 'dependency']),
+  "record": zod.record(zod.string(), zod.unknown())
+})).max(restoreMonthlySalesBackupBodyTwoProductsMax),
+  "sales": zod.array(zod.object({
+  "scope": zod.enum(['period', 'dependency']),
+  "record": zod.record(zod.string(), zod.unknown())
+})).max(restoreMonthlySalesBackupBodyTwoSalesMax),
+  "refunds": zod.array(zod.object({
+  "scope": zod.enum(['period', 'dependency']),
+  "record": zod.record(zod.string(), zod.unknown())
+})).max(restoreMonthlySalesBackupBodyTwoRefundsMax),
+  "goals": zod.array(zod.object({
+  "scope": zod.enum(['period', 'dependency']),
+  "record": zod.record(zod.string(), zod.unknown())
+})).max(restoreMonthlySalesBackupBodyTwoGoalsMax),
+  "histories": zod.array(zod.object({
+  "scope": zod.enum(['period', 'dependency']),
+  "record": zod.record(zod.string(), zod.unknown())
+})).max(restoreMonthlySalesBackupBodyTwoHistoriesMax)
+}),zod.object({
   "format": zod.enum(['zero3-pro-monthly-backup']),
   "version": zod.literal(1),
-  "month": zod.string().regex(restoreMonthlySalesBackupBodyTwoMonthRegExp),
+  "month": zod.string().regex(restoreMonthlySalesBackupBodyThreeMonthRegExp),
   "generatedAt": zod.coerce.date(),
-  "recordCount": zod.number().int().min(restoreMonthlySalesBackupBodyTwoRecordCountMin).max(restoreMonthlySalesBackupBodyTwoRecordCountMax),
-  "goalCount": zod.number().int().min(restoreMonthlySalesBackupBodyTwoGoalCountMin).max(restoreMonthlySalesBackupBodyTwoGoalCountMax),
+  "recordCount": zod.number().int().min(restoreMonthlySalesBackupBodyThreeRecordCountMin).max(restoreMonthlySalesBackupBodyThreeRecordCountMax),
+  "goalCount": zod.number().int().min(restoreMonthlySalesBackupBodyThreeGoalCountMin).max(restoreMonthlySalesBackupBodyThreeGoalCountMax),
   "sales": zod.array(zod.object({
   "id": zod.string().uuid(),
   "saleDate": zod.coerce.date(),
-  "productName": zod.string().min(1).max(restoreMonthlySalesBackupBodyTwoSalesItemProductNameMax),
-  "quantity": zod.number().int().min(1).max(restoreMonthlySalesBackupBodyTwoSalesItemQuantityMax),
-  "unitAmountCents": zod.number().int().min(restoreMonthlySalesBackupBodyTwoSalesItemUnitAmountCentsMin).max(restoreMonthlySalesBackupBodyTwoSalesItemUnitAmountCentsMax),
-  "totalCents": zod.number().int().min(restoreMonthlySalesBackupBodyTwoSalesItemTotalCentsMin).max(restoreMonthlySalesBackupBodyTwoSalesItemTotalCentsMax),
-  "customerName": zod.string().max(restoreMonthlySalesBackupBodyTwoSalesItemCustomerNameMax).nullish(),
-  "notes": zod.string().max(restoreMonthlySalesBackupBodyTwoSalesItemNotesMax).nullable(),
+  "productName": zod.string().min(1).max(restoreMonthlySalesBackupBodyThreeSalesItemProductNameMax),
+  "quantity": zod.number().int().min(1).max(restoreMonthlySalesBackupBodyThreeSalesItemQuantityMax),
+  "unitAmountCents": zod.number().int().min(restoreMonthlySalesBackupBodyThreeSalesItemUnitAmountCentsMin).max(restoreMonthlySalesBackupBodyThreeSalesItemUnitAmountCentsMax),
+  "totalCents": zod.number().int().min(restoreMonthlySalesBackupBodyThreeSalesItemTotalCentsMin).max(restoreMonthlySalesBackupBodyThreeSalesItemTotalCentsMax),
+  "customerName": zod.string().max(restoreMonthlySalesBackupBodyThreeSalesItemCustomerNameMax).nullish(),
+  "notes": zod.string().max(restoreMonthlySalesBackupBodyThreeSalesItemNotesMax).nullable(),
   "createdAt": zod.coerce.date()
-})).max(restoreMonthlySalesBackupBodyTwoSalesMax),
+})).max(restoreMonthlySalesBackupBodyThreeSalesMax),
   "goals": zod.array(zod.object({
   "id": zod.string().uuid(),
-  "month": zod.string().regex(restoreMonthlySalesBackupBodyTwoGoalsItemMonthRegExp),
-  "productName": zod.string().max(restoreMonthlySalesBackupBodyTwoGoalsItemProductNameMax).nullable(),
-  "targetCents": zod.number().int().min(1).max(restoreMonthlySalesBackupBodyTwoGoalsItemTargetCentsMax),
+  "month": zod.string().regex(restoreMonthlySalesBackupBodyThreeGoalsItemMonthRegExp),
+  "productName": zod.string().max(restoreMonthlySalesBackupBodyThreeGoalsItemProductNameMax).nullable(),
+  "targetCents": zod.number().int().min(1).max(restoreMonthlySalesBackupBodyThreeGoalsItemTargetCentsMax),
   "updatedAt": zod.coerce.date()
-})).max(restoreMonthlySalesBackupBodyTwoGoalsMax)
+})).max(restoreMonthlySalesBackupBodyThreeGoalsMax)
 })])
 
-export const restoreMonthlySalesBackupResponsePeriodRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
 export const restoreMonthlySalesBackupResponseInsertedProductsMin = 0;
 
 export const restoreMonthlySalesBackupResponseInsertedSalesMin = 0;
@@ -1556,7 +1873,7 @@ export const restoreMonthlySalesBackupResponseIdenticalHistoriesMin = 0;
 
 
 export const RestoreMonthlySalesBackupResponse = zod.object({
-  "period": zod.string().regex(restoreMonthlySalesBackupResponsePeriodRegExp),
+  "period": zod.string(),
   "inserted": zod.object({
   "products": zod.number().int().min(restoreMonthlySalesBackupResponseInsertedProductsMin),
   "sales": zod.number().int().min(restoreMonthlySalesBackupResponseInsertedSalesMin),

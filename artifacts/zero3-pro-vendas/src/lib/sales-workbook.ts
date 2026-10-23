@@ -4,11 +4,24 @@ import { productNameKey } from './sales-utils';
 
 const MAX_SAFE_INTEGER_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 
-type ExportFilters = {
-  fromDate: string;
-  toDate: string;
+export type SalesExportSelection =
+  | { mode: 'months'; months: string[] }
+  | { mode: 'range'; fromDate: string; toDate: string }
+  | { mode: 'all' };
+
+export type ExportFilters = {
+  selection: SalesExportSelection;
   productName: string;
   generatedAt: string;
+};
+
+export type SalesReportSummary = {
+  salesCount: number;
+  refundsCount: number;
+  quantity: bigint;
+  salesCents: bigint;
+  refundsCents: bigint;
+  netCents: bigint;
 };
 
 type ProductTotals = {
@@ -75,9 +88,14 @@ function monthsBetween(start: string, end: string): string[] {
   return months;
 }
 
-function selected(saleDate: string, productId: string | null, name: string, filters: ExportFilters, productIds: Set<string>) {
-  return (!filters.fromDate || saleDate >= filters.fromDate)
-    && (!filters.toDate || saleDate <= filters.toDate)
+function dateMatchesSelection(date: string, selection: SalesExportSelection) {
+  if (selection.mode === 'all') return true;
+  if (selection.mode === 'range') return date >= selection.fromDate && date <= selection.toDate;
+  return selection.months.includes(date.slice(0, 7));
+}
+
+function selected(date: string, productId: string | null, name: string, filters: ExportFilters, productIds: Set<string>) {
+  return dateMatchesSelection(date, filters.selection)
     && (!filters.productName || (productId !== null && productIds.has(productId)) || productNameKey(name) === productNameKey(filters.productName));
 }
 
@@ -85,12 +103,12 @@ function productTotalsKey(productId: string | null) {
   return productId ?? '__uncategorized__';
 }
 
-export function createSalesWorkbook(
+function prepareSalesReport(
   sales: Sale[],
   refunds: SalesRefundRecord[],
   products: Product[],
   filters: ExportFilters,
-): XLSX.WorkBook {
+ ) {
   const currentNames = new Map(products.map((product) => [product.id, product.name]));
   const salesById = new Map(sales.map((sale) => [sale.id, sale]));
   const selectedProductIds = new Set([
@@ -103,6 +121,44 @@ export function createSalesWorkbook(
   const activeRefunds = refunds.filter((refund) => refund.status === 'active'
     && refund.saleStatus === 'active'
     && selected(refund.refundDate, refund.productId, refund.productName, filters, selectedProductIds));
+  const summary: SalesReportSummary = {
+    salesCount: activeSales.length,
+    refundsCount: activeRefunds.length,
+    quantity: activeSales.reduce((total, sale) => total + BigInt(sale.quantity), 0n),
+    salesCents: activeSales.reduce((total, sale) => total + BigInt(sale.totalCents), 0n),
+    refundsCents: activeRefunds.reduce((total, refund) => total + BigInt(refund.amountCents), 0n),
+    netCents: 0n,
+  };
+  summary.netCents = summary.salesCents - summary.refundsCents;
+  return { currentNames, salesById, activeSales, activeRefunds, summary };
+}
+
+function selectedMonths(filters: ExportFilters, sales: Sale[], refunds: SalesRefundRecord[]) {
+  if (filters.selection.mode === 'months') return [...new Set(filters.selection.months)].sort();
+  if (filters.selection.mode === 'range') return monthsBetween(filters.selection.fromDate, filters.selection.toDate);
+  const dates = [
+    ...sales.filter((sale) => sale.status === 'active').map(({ saleDate }) => saleDate),
+    ...refunds.filter(({ status, saleStatus }) => status === 'active' && saleStatus === 'active').map(({ refundDate }) => refundDate),
+  ].sort();
+  return dates.length ? monthsBetween(dates[0], dates.at(-1) ?? dates[0]) : [];
+}
+
+export function summarizeSalesReport(
+  sales: Sale[],
+  refunds: SalesRefundRecord[],
+  products: Product[],
+  filters: ExportFilters,
+): SalesReportSummary {
+  return prepareSalesReport(sales, refunds, products, filters).summary;
+}
+
+export function createSalesWorkbook(
+  sales: Sale[],
+  refunds: SalesRefundRecord[],
+  products: Product[],
+  filters: ExportFilters,
+): XLSX.WorkBook {
+  const { currentNames, salesById, activeSales, activeRefunds, summary: reportSummary } = prepareSalesReport(sales, refunds, products, filters);
 
   const workbook = XLSX.utils.book_new();
   const launchRows: (string | number | null)[][] = [
@@ -184,18 +240,19 @@ export function createSalesWorkbook(
     byMonth.set(month, monthly);
   }
 
-  const totalQuantity = activeSales.reduce((total, sale) => total + BigInt(sale.quantity), 0n);
-  const totalSalesCents = activeSales.reduce((total, sale) => total + BigInt(sale.totalCents), 0n);
-  const totalRefundsCents = activeRefunds.reduce((total, refund) => total + BigInt(refund.amountCents), 0n);
-  const startMonth = filters.fromDate || [...activeSales.map((sale) => sale.saleDate), ...activeRefunds.map((refund) => refund.refundDate)].sort()[0] || '';
-  const endMonth = filters.toDate || [...activeSales.map((sale) => sale.saleDate), ...activeRefunds.map((refund) => refund.refundDate)].sort().at(-1) || '';
-  for (const month of monthsBetween(startMonth, endMonth)) {
+  const { quantity: totalQuantity, salesCents: totalSalesCents, refundsCents: totalRefundsCents } = reportSummary;
+  for (const month of selectedMonths(filters, sales, refunds)) {
     if (!byMonth.has(month)) byMonth.set(month, { month, quantity: 0n, salesCents: 0n, refundsCents: 0n });
   }
 
+  const selectionLabel = filters.selection.mode === 'all'
+    ? 'Todo o histórico'
+    : filters.selection.mode === 'range'
+      ? `${filters.selection.fromDate} a ${filters.selection.toDate}`
+      : filters.selection.months.join(', ');
   const summaryRows: (string | number | null)[][] = [
     ['Resumo do período'],
-    ['Período', filters.fromDate || filters.toDate ? `${filters.fromDate || 'sem início'} a ${filters.toDate || 'sem fim'}` : 'Todas as datas'],
+    ['Período', selectionLabel],
     ['Plano/produto', filters.productName || 'Todos os planos'],
     ['Gerado em', filters.generatedAt],
     [],
@@ -264,4 +321,20 @@ export function createSalesWorkbook(
 
 export function downloadSalesWorkbook(sales: Sale[], refunds: SalesRefundRecord[], products: Product[], filters: ExportFilters, filename: string) {
   XLSX.writeFile(createSalesWorkbook(sales, refunds, products, filters), filename, { compression: true });
+}
+
+export function createSalesCsv(sales: Sale[], refunds: SalesRefundRecord[], products: Product[], filters: ExportFilters) {
+  const worksheet = createSalesWorkbook(sales, refunds, products, filters).Sheets['Lançamentos'];
+  if (!worksheet) throw new Error('A planilha de lançamentos não foi criada.');
+  return `\uFEFF${XLSX.utils.sheet_to_csv(worksheet, { FS: ';', RS: '\r\n' })}`;
+}
+
+export function downloadSalesCsv(sales: Sale[], refunds: SalesRefundRecord[], products: Product[], filters: ExportFilters, filename: string) {
+  const blob = new Blob([createSalesCsv(sales, refunds, products, filters)], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

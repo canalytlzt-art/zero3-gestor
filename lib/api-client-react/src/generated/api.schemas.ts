@@ -858,7 +858,125 @@ export interface MonthlySalesBackupV2 {
   histories: SalesBackupRecordEnvelope[];
 }
 
-export type MonthlySalesBackupInput = MonthlySalesBackupV2 | MonthlySalesBackupV1;
+export type SalesPeriodBackupSelectionMode = typeof SalesPeriodBackupSelectionMode[keyof typeof SalesPeriodBackupSelectionMode];
+
+
+export const SalesPeriodBackupSelectionMode = {
+  months: 'months',
+  range: 'range',
+  all: 'all',
+} as const;
+
+export interface SalesPeriodBackupSelection {
+  mode: SalesPeriodBackupSelectionMode;
+  /**
+     * @maxItems 120
+     * @items.pattern ^\d{4}-(0[1-9]|1[0-2])$
+     */
+  months?: string[];
+  /** @pattern ^\d{4}-\d{2}-\d{2}$ */
+  fromDate?: string;
+  /** @pattern ^\d{4}-\d{2}-\d{2}$ */
+  toDate?: string;
+  /**
+     * @maxLength 120
+     * @nullable
+     */
+  productName?: string | null;
+}
+
+export interface SalesBackupFinancialTotals {
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  salesCents: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  refundsCents: number;
+  /**
+     * @minimum -9007199254740991
+     * @maximum 9007199254740991
+     */
+  netCents: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  quantity: number;
+}
+
+export type SalesPeriodBackupFormat = typeof SalesPeriodBackupFormat[keyof typeof SalesPeriodBackupFormat];
+
+
+export const SalesPeriodBackupFormat = {
+  'zero3-pro-financial-backup': 'zero3-pro-financial-backup',
+} as const;
+
+export type SalesPeriodBackupSchemaVersion = typeof SalesPeriodBackupSchemaVersion[keyof typeof SalesPeriodBackupSchemaVersion];
+
+
+export const SalesPeriodBackupSchemaVersion = {
+  NUMBER_3: 3,
+} as const;
+
+export type SalesPeriodBackupModule = typeof SalesPeriodBackupModule[keyof typeof SalesPeriodBackupModule];
+
+
+export const SalesPeriodBackupModule = {
+  sales: 'sales',
+} as const;
+
+export type SalesPeriodBackupOrigin = typeof SalesPeriodBackupOrigin[keyof typeof SalesPeriodBackupOrigin];
+
+
+export const SalesPeriodBackupOrigin = {
+  'zero3-pro-financial-database': 'zero3-pro-financial-database',
+} as const;
+
+export type SalesPeriodBackupCurrency = typeof SalesPeriodBackupCurrency[keyof typeof SalesPeriodBackupCurrency];
+
+
+export const SalesPeriodBackupCurrency = {
+  BRL: 'BRL',
+} as const;
+
+export type SalesPeriodBackupBusinessTimezone = typeof SalesPeriodBackupBusinessTimezone[keyof typeof SalesPeriodBackupBusinessTimezone];
+
+
+export const SalesPeriodBackupBusinessTimezone = {
+  'America/Sao_Paulo': 'America/Sao_Paulo',
+} as const;
+
+export interface SalesPeriodBackup {
+  format: SalesPeriodBackupFormat;
+  schemaVersion: SalesPeriodBackupSchemaVersion;
+  module: SalesPeriodBackupModule;
+  origin: SalesPeriodBackupOrigin;
+  generatedAt: string;
+  /** Human-readable label for the selected period. */
+  period: string;
+  selection: SalesPeriodBackupSelection;
+  partial: boolean;
+  currency: SalesPeriodBackupCurrency;
+  businessTimezone: SalesPeriodBackupBusinessTimezone;
+  counts: SalesBackupRecordCounts;
+  totals: SalesBackupFinancialTotals;
+  /** @maxItems 2000 */
+  products: SalesBackupRecordEnvelope[];
+  /** @maxItems 10000 */
+  sales: SalesBackupRecordEnvelope[];
+  /** @maxItems 20000 */
+  refunds: SalesBackupRecordEnvelope[];
+  /** @maxItems 500 */
+  goals: SalesBackupRecordEnvelope[];
+  /** @maxItems 50000 */
+  histories: SalesBackupRecordEnvelope[];
+}
+
+export type MonthlySalesBackupInput = MonthlySalesBackupV2 | SalesPeriodBackup | MonthlySalesBackupV1;
 
 export interface SalesRestoreEntityCounts {
   /** @minimum 0 */
@@ -892,7 +1010,6 @@ export interface SalesRestoreConflict {
 }
 
 export interface SalesRestorePreview {
-  /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
   period: string;
   /** @items.pattern ^\d{4}-(0[1-9]|1[0-2])$ */
   dependencyMonths: string[];
@@ -903,7 +1020,6 @@ export interface SalesRestorePreview {
 }
 
 export interface SalesRestoreResult {
-  /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
   period: string;
   inserted: SalesRestoreEntityCounts;
   identical: SalesRestoreEntityCounts;

@@ -9,7 +9,6 @@ import type { SalesRestoreConflict } from './salesRestoreConflict';
 import type { SalesRestoreEntityCounts } from './salesRestoreEntityCounts';
 
 export interface SalesRestoreResult {
-  /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
   period: string;
   inserted: SalesRestoreEntityCounts;
   identical: SalesRestoreEntityCounts;

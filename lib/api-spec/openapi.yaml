@@ -901,6 +901,42 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+  /sales/backup/period:
+    post:
+      operationId: createSalesPeriodBackup
+      tags: [sales]
+      summary: Create a financial backup for selected months or dates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SalesPeriodBackupSelection"
+      responses:
+        "200":
+          description: Versioned partial or full financial backup with dependencies
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesPeriodBackup"
+        "400":
+          description: Invalid period selection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Authenticated user is not on the authorized email list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /sales/restore/preview:
     post:
       operationId: previewMonthlySalesBackupRestore
@@ -2052,9 +2088,114 @@ components:
           items:
             $ref: "#/components/schemas/SalesBackupRecordEnvelope"
       required: [schemaVersion, generatedAt, period, currency, businessTimezone, counts, products, sales, refunds, goals, histories]
+    SalesPeriodBackupSelection:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [months, range, all]
+        months:
+          type: array
+          maxItems: 120
+          uniqueItems: true
+          items:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+        fromDate:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+        toDate:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+        productName:
+          type: ["string", "null"]
+          maxLength: 120
+      required: [mode]
+    SalesBackupFinancialTotals:
+      type: object
+      properties:
+        salesCents:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        refundsCents:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        netCents:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        quantity:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+      required: [salesCents, refundsCents, netCents, quantity]
+    SalesPeriodBackup:
+      type: object
+      properties:
+        format:
+          type: string
+          enum: [zero3-pro-financial-backup]
+        schemaVersion:
+          type: integer
+          enum: [3]
+        module:
+          type: string
+          enum: [sales]
+        origin:
+          type: string
+          enum: [zero3-pro-financial-database]
+        generatedAt:
+          type: string
+          format: date-time
+        period:
+          type: string
+          description: Human-readable label for the selected period.
+        selection:
+          $ref: "#/components/schemas/SalesPeriodBackupSelection"
+        partial:
+          type: boolean
+        currency:
+          type: string
+          enum: [BRL]
+        businessTimezone:
+          type: string
+          enum: [America/Sao_Paulo]
+        counts:
+          $ref: "#/components/schemas/SalesBackupRecordCounts"
+        totals:
+          $ref: "#/components/schemas/SalesBackupFinancialTotals"
+        products:
+          type: array
+          maxItems: 2000
+          items:
+            $ref: "#/components/schemas/SalesBackupRecordEnvelope"
+        sales:
+          type: array
+          maxItems: 10000
+          items:
+            $ref: "#/components/schemas/SalesBackupRecordEnvelope"
+        refunds:
+          type: array
+          maxItems: 20000
+          items:
+            $ref: "#/components/schemas/SalesBackupRecordEnvelope"
+        goals:
+          type: array
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/SalesBackupRecordEnvelope"
+        histories:
+          type: array
+          maxItems: 50000
+          items:
+            $ref: "#/components/schemas/SalesBackupRecordEnvelope"
+      required: [format, schemaVersion, module, origin, generatedAt, period, selection, partial, currency, businessTimezone, counts, totals, products, sales, refunds, goals, histories]
     MonthlySalesBackupInput:
       oneOf:
         - $ref: "#/components/schemas/MonthlySalesBackupV2"
+        - $ref: "#/components/schemas/SalesPeriodBackup"
         - $ref: "#/components/schemas/MonthlySalesBackupV1"
     SalesRestoreEntityCounts:
       type: object
@@ -2093,7 +2234,6 @@ components:
       properties:
         period:
           type: string
-          pattern: '^\d{4}-(0[1-9]|1[0-2])$'
         dependencyMonths:
           type: array
           items:
@@ -2115,7 +2255,6 @@ components:
       properties:
         period:
           type: string
-          pattern: '^\d{4}-(0[1-9]|1[0-2])$'
         inserted:
           $ref: "#/components/schemas/SalesRestoreEntityCounts"
         identical:

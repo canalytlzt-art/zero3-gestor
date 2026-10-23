@@ -26,12 +26,16 @@ import {
   GetSalesResponse,
   GetMonthlySalesBackupQueryParams,
   GetMonthlySalesBackupResponse,
+  CreateSalesPeriodBackupBody,
+  CreateSalesPeriodBackupResponse,
   ImportSalesBody,
   ImportSalesResponse,
   GetSalesImportOriginsQueryParams,
   GetSalesImportOriginsResponse,
   MonthlySalesBackupV1,
   MonthlySalesBackupV2,
+  SalesPeriodBackup,
+  SalesPeriodBackupSelection,
   PreviewMonthlySalesBackupRestoreBody,
   PreviewMonthlySalesBackupRestoreResponse,
   RestoreMonthlySalesBackupBody,
@@ -455,6 +459,210 @@ const monthlyBackupV2RuntimeSchema = z
     });
   });
 
+const salesPeriodBackupSelectionRuntimeSchema = z
+  .object({
+    mode: z.enum(["months", "range", "all"]),
+    months: z.array(z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/)).max(120).optional(),
+    fromDate: z.string().optional(),
+    toDate: z.string().optional(),
+    productName: z.string().max(120).nullable().optional(),
+  })
+  .superRefine((selection, context) => {
+    if (selection.mode === "months") {
+      if (!selection.months?.length) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["months"], message: "Selecione ao menos um mês." });
+      }
+      if (new Set(selection.months ?? []).size !== (selection.months ?? []).length) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["months"], message: "Remova meses duplicados." });
+      }
+      if (selection.fromDate !== undefined || selection.toDate !== undefined) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["mode"], message: "A seleção de meses não aceita intervalo personalizado." });
+      }
+    } else if (selection.mode === "range") {
+      if (!parseSaleDate(selection.fromDate) || !parseSaleDate(selection.toDate)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["fromDate"], message: "Informe datas válidas para o intervalo." });
+      } else if (selection.fromDate! > selection.toDate!) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["toDate"], message: "A data final deve ser igual ou posterior à inicial." });
+      }
+      if (selection.months !== undefined) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["months"], message: "O intervalo personalizado não aceita meses selecionados." });
+      }
+    } else if (selection.months !== undefined || selection.fromDate !== undefined || selection.toDate !== undefined) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["mode"], message: "A seleção de todo o histórico não aceita um filtro de datas." });
+    }
+    if (selection.productName !== undefined && selection.productName !== null && !normalizeProductName(selection.productName)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["productName"], message: "Informe um plano válido ou escolha todos." });
+    }
+  });
+
+const salesPeriodBackupV3RuntimeSchema = z
+  .object({
+    format: z.literal("zero3-pro-financial-backup"),
+    schemaVersion: z.literal(3),
+    module: z.literal("sales"),
+    origin: z.literal("zero3-pro-financial-database"),
+    generatedAt: z.string().datetime(),
+    period: z.string().min(1).max(500),
+    selection: salesPeriodBackupSelectionRuntimeSchema,
+    partial: z.boolean(),
+    currency: z.literal("BRL"),
+    businessTimezone: z.literal("America/Sao_Paulo"),
+    counts: z.object({
+      periodSales: z.number().int().min(0),
+      periodRefunds: z.number().int().min(0),
+      periodGoals: z.number().int().min(0),
+      dependencySales: z.number().int().min(0),
+      dependencyRefunds: z.number().int().min(0),
+      products: z.number().int().min(0),
+      histories: z.number().int().min(0),
+      totalRecords: z.number().int().min(0),
+    }),
+    totals: z.object({
+      salesCents: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+      refundsCents: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+      netCents: z.number().int().min(-Number.MAX_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
+      quantity: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    }),
+    products: z.array(backupEnvelopeSchema(backupProductSchema)).max(2000),
+    sales: z.array(backupEnvelopeSchema(backupSaleSchema)).max(10000),
+    refunds: z.array(backupEnvelopeSchema(backupRefundSchema)).max(20000),
+    goals: z.array(backupEnvelopeSchema(backupGoalSchema)).max(500),
+    histories: z.array(backupEnvelopeSchema(backupHistorySchema)).max(50000),
+  })
+  .superRefine((backup, context) => {
+    const countValues = {
+      periodSales: backup.sales.filter(({ scope }) => scope === "period").length,
+      periodRefunds: backup.refunds.filter(({ scope }) => scope === "period").length,
+      periodGoals: backup.goals.filter(({ scope }) => scope === "period").length,
+      dependencySales: backup.sales.filter(({ scope }) => scope === "dependency").length,
+      dependencyRefunds: backup.refunds.filter(({ scope }) => scope === "dependency").length,
+      products: backup.products.length,
+      histories: backup.histories.length,
+    };
+    for (const [key, value] of Object.entries(countValues)) {
+      if (backup.counts[key as keyof typeof countValues] !== value) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["counts", key], message: "A quantidade de registros não corresponde ao conteúdo do backup." });
+      }
+    }
+    if (backup.counts.totalRecords !== Object.values(countValues).reduce((sum, value) => sum + value, 0)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["counts", "totalRecords"], message: "A quantidade total não corresponde ao conteúdo do backup." });
+    }
+    const checkIds = (records: Array<{ record: { id: string } }>, key: string) => {
+      const seen = new Set<string>();
+      records.forEach(({ record }, index) => {
+        if (seen.has(record.id)) context.addIssue({ code: z.ZodIssueCode.custom, path: [key, index, "record", "id"], message: "O backup contém um ID duplicado." });
+        seen.add(record.id);
+      });
+    };
+    checkIds(backup.products, "products");
+    checkIds(backup.sales, "sales");
+    checkIds(backup.refunds, "refunds");
+    checkIds(backup.goals, "goals");
+    checkIds(backup.histories, "histories");
+
+    const matchesPlan = (name: string) => !backup.selection.productName
+      || productNameKey(name) === productNameKey(backup.selection.productName);
+    const includedMonths = backup.selection.mode === "months"
+      ? backup.selection.months ?? []
+      : backup.selection.mode === "range"
+        ? monthKeysBetween(backup.selection.fromDate!.slice(0, 7), backup.selection.toDate!.slice(0, 7))
+        : [...new Set([
+          ...backup.sales.map(({ record }) => String(record.saleDate).slice(0, 7)),
+          ...backup.refunds.map(({ record }) => String(record.refundDate).slice(0, 7)),
+          ...backup.goals.map(({ record }) => record.month),
+        ])];
+    const selectedDate = (date: string) => {
+      if (backup.selection.mode === "all") return true;
+      if (backup.selection.mode === "months") return includedMonths.includes(date.slice(0, 7));
+      return date >= backup.selection.fromDate! && date <= backup.selection.toDate!;
+    };
+    const products = new Map(backup.products.map(({ record }) => [record.id, record]));
+    const sales = new Map(backup.sales.map(({ record }) => [record.id, record]));
+    const periodSales = new Set<string>();
+    backup.sales.forEach(({ scope, record }, index) => {
+      const inPeriod = selectedDate(record.saleDate) && matchesPlan(record.productName);
+      if ((scope === "period") !== inPeriod) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["sales", index, "scope"], message: "A classificação da venda não corresponde ao período e filtros." });
+      }
+      const total = calculateSaleTotalCents(record.quantity, record.unitAmountCents);
+      if (total === null || total !== record.totalCents || (record.productId !== null && !products.has(record.productId))) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["sales", index, "record"], message: "O total ou o produto da venda não confere." });
+      }
+      if (scope === "period") periodSales.add(record.id);
+    });
+    const selectedSalesForTotals = new Set(periodSales);
+    const refundsBySale = new Map<string, bigint>();
+    const selectedRefundIds = new Set<string>();
+    backup.refunds.forEach(({ scope, record }, index) => {
+      const sale = sales.get(record.saleId);
+      if (!sale) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["refunds", index, "record", "saleId"], message: "A venda original não está incluída no backup." });
+        return;
+      }
+      const inPeriod = selectedDate(record.refundDate) && matchesPlan(sale.productName);
+      if ((scope === "period") !== inPeriod) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["refunds", index, "scope"], message: "A classificação do estorno não corresponde ao período e filtros." });
+      }
+      if (record.status === "active" && (sale.status !== "active" || record.refundDate < sale.saleDate)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["refunds", index, "record"], message: "Estorno ativo sem venda válida relacionada." });
+      }
+      if (scope === "period") selectedRefundIds.add(record.id);
+      if (record.status === "active") refundsBySale.set(record.saleId, (refundsBySale.get(record.saleId) ?? 0n) + BigInt(record.amountCents));
+    });
+    for (const [saleId, cents] of refundsBySale) {
+      const sale = sales.get(saleId);
+      if (sale && cents > BigInt(sale.totalCents)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["refunds"], message: "Os estornos ativos excedem o total da venda original." });
+      }
+    }
+    const selectedGoals = backup.goals.filter(({ scope }) => scope === "period").map(({ record }) => record);
+    const goalScopes = new Set<string>();
+    selectedGoals.forEach((goal, index) => {
+      const eligibleMonth = includedMonths.includes(goal.month);
+      const eligiblePlan = backup.selection.productName
+        ? goal.productId !== null && matchesPlan(goal.productName ?? "")
+        : goal.productId === null || matchesPlan(goal.productName ?? "");
+      if (!eligibleMonth || !eligiblePlan || (goal.productId !== null && !products.has(goal.productId))) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["goals", index, "record"], message: "A meta não pertence ao período ou filtro selecionado." });
+      }
+      const scopeKey = `${goal.month}:${goal.scopeKey}`;
+      if (goalScopes.has(scopeKey)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["goals", index, "record", "scopeKey"], message: "Há metas duplicadas para o mesmo mês e plano." });
+      goalScopes.add(scopeKey);
+    });
+    const linkedEntities = {
+      product: new Set(backup.products.map(({ record }) => record.id)),
+      sale: new Set(backup.sales.map(({ record }) => record.id)),
+      refund: new Set(backup.refunds.map(({ record }) => record.id)),
+      goal: new Set(selectedGoals.map(({ id }) => id)),
+    };
+    backup.histories.forEach(({ record }, index) => {
+      const ids = linkedEntities[record.entityType as keyof typeof linkedEntities];
+      if (!ids?.has(record.entityId)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["histories", index], message: "O histórico não está relacionado a um registro incluído." });
+    });
+    const salesCents = backup.sales
+      .filter(({ scope, record }) => scope === "period" && record.status === "active")
+      .reduce((sum, { record }) => sum + BigInt(record.totalCents), 0n);
+    const activePeriodSales = new Set(backup.sales
+      .filter(({ scope, record }) => scope === "period" && record.status === "active")
+      .map(({ record }) => record.id));
+    const refundsCents = backup.refunds
+      .filter(({ scope, record }) => scope === "period" && record.status === "active" && sales.get(record.saleId)?.status === "active")
+      .reduce((sum, { record }) => sum + BigInt(record.amountCents), 0n);
+    const quantity = backup.sales
+      .filter(({ scope, record }) => scope === "period" && record.status === "active")
+      .reduce((sum, { record }) => sum + BigInt(record.quantity), 0n);
+    if (salesCents > BigInt(Number.MAX_SAFE_INTEGER) || refundsCents > BigInt(Number.MAX_SAFE_INTEGER)
+      || quantity > BigInt(Number.MAX_SAFE_INTEGER)
+      || backup.totals.salesCents !== Number(salesCents)
+      || backup.totals.refundsCents !== Number(refundsCents)
+      || backup.totals.netCents !== Number(salesCents - refundsCents)
+      || backup.totals.quantity !== Number(quantity)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["totals"], message: "Os totais de conferência não correspondem aos lançamentos do período." });
+    }
+    void selectedSalesForTotals;
+    void selectedRefundIds;
+  });
+
 function stableJson(value: unknown): string {
   const normalize = (item: unknown): unknown => {
     if (item instanceof Date) return item.toISOString();
@@ -489,6 +697,10 @@ function uniqueConflicts(conflicts: RestoreConflict[]) {
 async function analyzeMonthlyBackupRestore(
   tx: DatabaseTransaction,
   backup: MonthlySalesBackupV2,
+  restoreScope: { periodLabel: string; months: string[] } = {
+    periodLabel: backup.period,
+    months: [backup.period],
+  },
 ): Promise<RestoreAnalysis> {
   const incomingProducts = backup.products.map(
     ({ record }) => record as unknown as typeof productsTable.$inferSelect,
@@ -568,7 +780,7 @@ async function analyzeMonthlyBackupRestore(
         .from(salesGoalsTable)
         .where(
           and(
-            eq(salesGoalsTable.month, backup.period),
+            inArray(salesGoalsTable.month, restoreScope.months),
             inArray(salesGoalsTable.scopeKey, scopeKeys),
           ),
         )
@@ -660,10 +872,10 @@ async function analyzeMonthlyBackupRestore(
   });
 
   const existingGoalScopes = new Map(
-    existingGoalsByScope.map((row) => [row.scopeKey, row]),
+    existingGoalsByScope.map((row) => [`${row.month}:${row.scopeKey}`, row]),
   );
   rows.goals = rows.goals.filter((row) => {
-    const conflict = existingGoalScopes.get(row.scopeKey);
+    const conflict = existingGoalScopes.get(`${row.month}:${row.scopeKey}`);
     if (!conflict || conflict.id === row.id) return true;
     toInsert.goals -= 1;
     conflicts.push({
@@ -813,10 +1025,10 @@ async function analyzeMonthlyBackupRestore(
         .map(({ record }) => String(record.refundDate).slice(0, 7)),
     ]),
   ]
-    .filter((month) => month !== backup.period)
+    .filter((month) => !restoreScope.months.includes(month))
     .sort();
   const snapshot = {
-    period: backup.period,
+    period: restoreScope.periodLabel,
     products: [
       ...new Map(
         [...existingProductsById, ...existingProductsByName].map((row) => [
@@ -845,7 +1057,7 @@ async function analyzeMonthlyBackupRestore(
   };
   return {
     preview: {
-      period: backup.period,
+      period: restoreScope.periodLabel,
       dependencyMonths,
       toInsert,
       identical,
@@ -863,11 +1075,15 @@ export async function applyMonthlyBackupRestore(
   tx: DatabaseTransaction,
   backup: MonthlySalesBackupV2,
   actorId: string,
+  restoreScope: { periodLabel: string; months: string[] } = {
+    periodLabel: backup.period,
+    months: [backup.period],
+  },
 ) {
   await tx.execute(
     sql`lock table products, sales, sales_refunds, sales_goals, sales_history in share row exclusive mode`,
   );
-  const analysis = await analyzeMonthlyBackupRestore(tx, backup);
+  const analysis = await analyzeMonthlyBackupRestore(tx, backup, restoreScope);
   if (analysis.preview.blocked)
     throw new RestoreBlockedError(
       "A restauração foi bloqueada: confira os conflitos de vínculos ou saldo na prévia.",
@@ -919,7 +1135,7 @@ export async function applyMonthlyBackupRestore(
     inserted.histories += 1;
   }
   return {
-    period: backup.period,
+    period: restoreScope.periodLabel,
     inserted,
     identical: analysis.preview.identical,
     conflicts: analysis.preview.conflicts,
@@ -1102,6 +1318,222 @@ export async function buildMonthlySalesBackup(
         await tx.execute(sql`set transaction isolation level repeatable read`);
         return read(tx);
       });
+}
+
+export class SalesPeriodBackupLimitError extends Error {}
+
+function periodDateCondition(
+  column: unknown,
+  selection: SalesPeriodBackupSelection,
+): SQL | undefined {
+  const dateColumn = column as typeof salesTable.saleDate;
+  if (selection.mode === "range") {
+    return and(gte(dateColumn, selection.fromDate!), lte(dateColumn, selection.toDate!));
+  }
+  if (selection.mode !== "months") return undefined;
+  const monthRanges = (selection.months ?? []).map((month) => {
+    const [year, monthNumber] = month.split("-").map(Number);
+    const fromDate = `${month}-01`;
+    const toDate = new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
+    return and(gte(dateColumn, fromDate), lte(dateColumn, toDate));
+  }).filter((condition): condition is SQL => condition !== undefined);
+  return monthRanges.length === 1 ? monthRanges[0] : or(...monthRanges);
+}
+
+function periodSelectionMonths(selection: SalesPeriodBackupSelection) {
+  if (selection.mode === "months") return selection.months ?? [];
+  if (selection.mode === "range") return monthKeysBetween(selection.fromDate!.slice(0, 7), selection.toDate!.slice(0, 7));
+  return [];
+}
+
+function isDateInPeriodSelection(date: string, selection: SalesPeriodBackupSelection) {
+  if (selection.mode === "all") return true;
+  if (selection.mode === "months") return (selection.months ?? []).includes(date.slice(0, 7));
+  return date >= selection.fromDate! && date <= selection.toDate!;
+}
+
+function periodSelectionLabel(selection: SalesPeriodBackupSelection) {
+  if (selection.mode === "all") return "Todo o histórico";
+  if (selection.mode === "range") return `${selection.fromDate} a ${selection.toDate}`;
+  return [...(selection.months ?? [])].sort().join(", ");
+}
+
+function safeBackupNumber(value: bigint, field: string) {
+  if (value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new SalesPeriodBackupLimitError(`O total de ${field} excede a precisão segura do arquivo.`);
+  }
+  return Number(value);
+}
+
+export async function buildSalesPeriodBackup(
+  input: unknown,
+  executor?: DatabaseTransaction,
+): Promise<SalesPeriodBackup> {
+  const parsedSelection = salesPeriodBackupSelectionRuntimeSchema.safeParse(input);
+  if (!parsedSelection.success) {
+    throw new Error(parsedSelection.error.issues[0]?.message ?? "A seleção do período é inválida.");
+  }
+  const selection = {
+    ...parsedSelection.data,
+    ...(parsedSelection.data.mode === "months"
+      ? { months: [...(parsedSelection.data.months ?? [])].sort() }
+      : {}),
+    ...(parsedSelection.data.productName
+      ? { productName: normalizeProductName(parsedSelection.data.productName) }
+      : { productName: null }),
+  } as SalesPeriodBackupSelection;
+
+  const read = async (tx: DatabaseTransaction): Promise<SalesPeriodBackup> => {
+    const selectedSalesCandidates = await tx
+      .select()
+      .from(salesTable)
+      .where(periodDateCondition(salesTable.saleDate, selection));
+    const selectedRefundCandidates = await tx
+      .select()
+      .from(salesRefundsTable)
+      .where(periodDateCondition(salesRefundsTable.refundDate, selection));
+    const candidateSaleIds = [...new Set([
+      ...selectedSalesCandidates.map(({ id }) => id),
+      ...selectedRefundCandidates.map(({ saleId }) => saleId),
+    ])];
+    const candidateSales = candidateSaleIds.length
+      ? await tx.select().from(salesTable).where(inArray(salesTable.id, candidateSaleIds))
+      : [];
+    const candidateSalesById = new Map(candidateSales.map((sale) => [sale.id, sale]));
+    const productKey = selection.productName ? productNameKey(selection.productName) : "";
+    const matchingProducts = productKey
+      ? await tx.select().from(productsTable).where(eq(productsTable.normalizedName, productKey))
+      : [];
+    const matchingProductIds = new Set(matchingProducts.map(({ id }) => id));
+    const matchesProduct = (productId: string | null, productName: string) => !productKey
+      || (productId !== null && matchingProductIds.has(productId))
+      || productNameKey(productName) === productKey;
+    const periodSales = selectedSalesCandidates.filter((sale) => matchesProduct(sale.productId, sale.productName));
+    const periodRefunds = selectedRefundCandidates.filter((refund) => {
+      const sale = candidateSalesById.get(refund.saleId);
+      return Boolean(sale && matchesProduct(sale.productId, sale.productName));
+    });
+
+    const saleIds = [...new Set([
+      ...periodSales.map(({ id }) => id),
+      ...periodRefunds.map(({ saleId }) => saleId),
+    ])];
+    const allSales = saleIds.length
+      ? await tx.select().from(salesTable).where(inArray(salesTable.id, saleIds))
+      : [];
+    const refundsForIncludedSales = saleIds.length
+      ? await tx.select().from(salesRefundsTable).where(inArray(salesRefundsTable.saleId, saleIds))
+      : [];
+    const goalMonths = periodSelectionMonths(selection);
+    const goalMonthFilter = selection.mode === "all"
+      ? undefined
+      : selection.mode === "months"
+        ? (goalMonths.length ? inArray(salesGoalsTable.month, goalMonths) : undefined)
+        : and(gte(salesGoalsTable.month, goalMonths[0] ?? ""), lte(salesGoalsTable.month, goalMonths.at(-1) ?? ""));
+    const matchingGoals = await tx.select().from(salesGoalsTable).where(goalMonthFilter);
+    const periodGoals = matchingGoals.filter((goal) => productKey
+      ? goal.productId !== null && matchesProduct(goal.productId, goal.productName ?? "")
+      : goal.productId === null || matchesProduct(goal.productId, goal.productName ?? ""),
+    );
+    const allProductIds = [...new Set([
+      ...allSales.flatMap(({ productId }) => productId ? [productId] : []),
+      ...periodGoals.flatMap(({ productId }) => productId ? [productId] : []),
+    ])];
+    const products = allProductIds.length
+      ? await tx.select().from(productsTable).where(inArray(productsTable.id, allProductIds))
+      : [];
+    const historyConditions: SQL[] = [];
+    for (const [type, ids] of [
+      ["sale", allSales.map(({ id }) => id)],
+      ["refund", refundsForIncludedSales.map(({ id }) => id)],
+      ["product", products.map(({ id }) => id)],
+      ["goal", periodGoals.map(({ id }) => id)],
+    ] as Array<[string, string[]]>) {
+      if (ids.length) historyConditions.push(and(
+        eq(salesHistoryTable.entityType, type),
+        inArray(salesHistoryTable.entityId, ids),
+      )!);
+    }
+    const histories = historyConditions.length
+      ? await tx.select().from(salesHistoryTable).where(or(...historyConditions))
+      : [];
+
+    const periodSaleIds = new Set(periodSales.map(({ id }) => id));
+    const periodRefundIds = new Set(periodRefunds.map(({ id }) => id));
+    const sales = allSales.map((row) => backupEnvelope(
+      periodSaleIds.has(row.id) ? "period" : "dependency",
+      row as unknown as Record<string, unknown>,
+    ));
+    const refunds = refundsForIncludedSales.map((row) => backupEnvelope(
+      periodRefundIds.has(row.id) ? "period" : "dependency",
+      row as unknown as Record<string, unknown>,
+    ));
+    const goals = periodGoals.map((row) => backupEnvelope("period", row as unknown as Record<string, unknown>));
+    const productRecords = products.map((row) => backupEnvelope("dependency", row as unknown as Record<string, unknown>));
+    const historyRecords = histories.map((row) => backupEnvelope("dependency", row as unknown as Record<string, unknown>));
+    const counts = {
+      periodSales: periodSales.length,
+      periodRefunds: periodRefunds.length,
+      periodGoals: periodGoals.length,
+      dependencySales: sales.length - periodSales.length,
+      dependencyRefunds: refunds.length - periodRefunds.length,
+      products: productRecords.length,
+      histories: historyRecords.length,
+      totalRecords: sales.length + refunds.length + goals.length + productRecords.length + historyRecords.length,
+    };
+    const salesById = new Map(allSales.map((sale) => [sale.id, sale]));
+    const validPeriodSales = periodSales.filter(({ status }) => status === "active");
+    const validPeriodRefunds = periodRefunds.filter(({ status, saleId }) =>
+      status === "active" && salesById.get(saleId)?.status === "active",
+    );
+    const salesCents = validPeriodSales.reduce((sum, sale) => sum + BigInt(sale.totalCents), 0n);
+    const refundsCents = validPeriodRefunds.reduce((sum, refund) => sum + BigInt(refund.amountCents), 0n);
+    const quantity = validPeriodSales.reduce((sum, sale) => sum + BigInt(sale.quantity), 0n);
+    const backup = {
+      format: "zero3-pro-financial-backup" as const,
+      schemaVersion: 3 as const,
+      module: "sales" as const,
+      origin: "zero3-pro-financial-database" as const,
+      generatedAt: new Date().toISOString(),
+      period: periodSelectionLabel(selection),
+      selection,
+      partial: selection.mode !== "all" || Boolean(selection.productName),
+      currency: "BRL" as const,
+      businessTimezone: "America/Sao_Paulo" as const,
+      counts,
+      totals: {
+        salesCents: safeBackupNumber(salesCents, "vendas"),
+        refundsCents: safeBackupNumber(refundsCents, "estornos"),
+        netCents: safeBackupNumber(salesCents - refundsCents, "líquido"),
+        quantity: safeBackupNumber(quantity, "quantidade"),
+      },
+      products: productRecords,
+      sales,
+      refunds,
+      goals,
+      histories: historyRecords,
+    };
+    const validated = salesPeriodBackupV3RuntimeSchema.safeParse(backup);
+    const serializedBytes = new TextEncoder().encode(JSON.stringify(backup)).byteLength;
+    if (!validated.success || serializedBytes > 10 * 1024 * 1024) {
+      throw new SalesPeriodBackupLimitError(
+        !validated.success
+          ? validated.error.issues[0]?.message ?? "O backup contém dados inconsistentes."
+          : "O período e suas dependências excedem 10 MB. Selecione um período menor.",
+      );
+    }
+    const contractResult = CreateSalesPeriodBackupResponse.safeParse(backup);
+    if (!contractResult.success) {
+      throw new SalesPeriodBackupLimitError("O backup não atende ao formato publicado pela API.");
+    }
+    return backup as unknown as SalesPeriodBackup;
+  };
+  return executor
+    ? read(executor)
+    : db.transaction(async (tx) => {
+      await tx.execute(sql`set transaction isolation level repeatable read`);
+      return read(tx);
+    });
 }
 
 export type SalesRouterDependencies = {
@@ -1362,7 +1794,7 @@ export function createSalesRouter(
   router.get("/sales", async (req, res): Promise<void> => {
     if (!(await requireSalesAccess(req, res))) return;
 
-    const sales = await db
+    const sales = await database
       .select()
       .from(salesTable)
       .where(eq(salesTable.status, "active"))
@@ -1373,7 +1805,7 @@ export function createSalesRouter(
 
   router.get("/sales/history", async (req, res): Promise<void> => {
     if (!(await requireSalesAccess(req, res))) return;
-    const sales = await db
+    const sales = await database
       .select()
       .from(salesTable)
       .orderBy(desc(salesTable.saleDate), desc(salesTable.createdAt));
@@ -2103,7 +2535,7 @@ export function createSalesRouter(
     const validated = monthlyBackupV2RuntimeSchema.safeParse(backup);
     if (
       !validated.success ||
-      Buffer.byteLength(JSON.stringify(backup, null, 2), "utf8") >
+      new TextEncoder().encode(JSON.stringify(backup, null, 2)).byteLength >
         10 * 1024 * 1024
     ) {
       res.status(413).json({
@@ -2112,7 +2544,35 @@ export function createSalesRouter(
       });
       return;
     }
-    res.json(GetMonthlySalesBackupResponse.parse(backup));
+    if (!GetMonthlySalesBackupResponse.safeParse(backup).success) {
+      res.status(413).json({ error: "O backup não atende ao formato publicado pela API." });
+      return;
+    }
+    res.json(backup);
+  });
+
+  router.post("/sales/backup/period", async (req, res): Promise<void> => {
+    if (!(await requireSalesAccess(req, res))) return;
+    const parsed = CreateSalesPeriodBackupBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "A seleção do período é inválida." });
+      return;
+    }
+    try {
+      const backup = await database.transaction(async (tx) => {
+        await tx.execute(sql`set transaction isolation level repeatable read`);
+        return buildSalesPeriodBackup(req.body, tx);
+      });
+      res.json(backup);
+    } catch (error) {
+      if (error instanceof SalesPeriodBackupLimitError) {
+        res.status(413).json({ error: error.message });
+      } else if (error instanceof Error) {
+        res.status(400).json({ error: error.message });
+      } else {
+        throw error;
+      }
+    }
   });
 
   async function previewLegacyBackup(backup: MonthlySalesBackupV1) {
@@ -2262,6 +2722,29 @@ export function createSalesRouter(
       res.json(await previewLegacyBackup(parsed.data));
       return;
     }
+    if (parsed.data.schemaVersion === 3) {
+      const backup = salesPeriodBackupV3RuntimeSchema.safeParse(req.body);
+      if (!backup.success) {
+        res.status(400).json({
+          error: backup.error.issues[0]?.message ?? "O backup está inválido.",
+        });
+        return;
+      }
+      const months = backup.data.selection.mode === "all"
+        ? [...new Set([
+          ...backup.data.sales.filter(({ scope }) => scope === "period").map(({ record }) => String(record.saleDate).slice(0, 7)),
+          ...backup.data.refunds.filter(({ scope }) => scope === "period").map(({ record }) => String(record.refundDate).slice(0, 7)),
+          ...backup.data.goals.filter(({ scope }) => scope === "period").map(({ record }) => record.month),
+        ])].sort()
+        : periodSelectionMonths(backup.data.selection);
+      const restoreScope = { periodLabel: backup.data.period, months };
+      const monthlyShape = backup.data as unknown as MonthlySalesBackupV2;
+      const analysis = await database.transaction((tx) =>
+        analyzeMonthlyBackupRestore(tx, monthlyShape, restoreScope),
+      );
+      res.json(PreviewMonthlySalesBackupRestoreResponse.parse(analysis.preview));
+      return;
+    }
     const backup = monthlyBackupV2RuntimeSchema.safeParse(req.body);
     if (!backup.success) {
       res.status(400).json({
@@ -2288,6 +2771,38 @@ export function createSalesRouter(
     }
 
     if ("schemaVersion" in parsed.data) {
+      if (parsed.data.schemaVersion === 3) {
+        const validated = salesPeriodBackupV3RuntimeSchema.safeParse(req.body);
+        if (!validated.success) {
+          res.status(400).json({
+            error: validated.error.issues[0]?.message ?? "O backup está inválido.",
+          });
+          return;
+        }
+        const months = validated.data.selection.mode === "all"
+          ? [...new Set([
+            ...validated.data.sales.filter(({ scope }) => scope === "period").map(({ record }) => String(record.saleDate).slice(0, 7)),
+            ...validated.data.refunds.filter(({ scope }) => scope === "period").map(({ record }) => String(record.refundDate).slice(0, 7)),
+            ...validated.data.goals.filter(({ scope }) => scope === "period").map(({ record }) => record.month),
+          ])].sort()
+          : periodSelectionMonths(validated.data.selection);
+        const restoreScope = { periodLabel: validated.data.period, months };
+        const backup = validated.data as unknown as MonthlySalesBackupV2;
+        const actorId = getUserId(req)!;
+        try {
+          const result = await database.transaction((tx) =>
+            applyMonthlyBackupRestore(tx, backup, actorId, restoreScope),
+          );
+          res.json(RestoreMonthlySalesBackupResponse.parse(result));
+        } catch (error) {
+          if (error instanceof RestoreBlockedError) {
+            res.status(409).json({ error: error.message });
+          } else {
+            throw error;
+          }
+        }
+        return;
+      }
       const validated = monthlyBackupV2RuntimeSchema.safeParse(req.body);
       if (!validated.success) {
         res.status(400).json({

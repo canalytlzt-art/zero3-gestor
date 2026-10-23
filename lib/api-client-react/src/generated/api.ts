@@ -55,6 +55,8 @@ import type {
   SalesImportInput,
   SalesImportOriginsResult,
   SalesImportResult,
+  SalesPeriodBackup,
+  SalesPeriodBackupSelection,
   SalesRefund,
   SalesRefundCandidate,
   SalesRefundRecord,
@@ -2557,6 +2559,94 @@ export function useGetMonthlySalesBackup<TData = Awaited<ReturnType<typeof getMo
 
 
 
+
+export const getCreateSalesPeriodBackupUrl = () => {
+
+
+
+
+  return `/api/sales/backup/period`
+}
+
+/**
+ * @summary Create a financial backup for selected months or dates
+ */
+export const createSalesPeriodBackup = async (salesPeriodBackupSelection: SalesPeriodBackupSelection, options?: Parameters<typeof customFetch>[1]): Promise<SalesPeriodBackup> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<SalesPeriodBackup>(getCreateSalesPeriodBackupUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(salesPeriodBackupSelection)
+  }
+);}
+
+
+
+
+
+export const getCreateSalesPeriodBackupMutationKey = () => ['createSalesPeriodBackup'] as const;
+
+export const getCreateSalesPeriodBackupMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSalesPeriodBackup>>, TError,CreateSalesPeriodBackupMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createSalesPeriodBackup>>, TError,CreateSalesPeriodBackupMutationVariables, TContext> => {
+
+const mutationKey = getCreateSalesPeriodBackupMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createSalesPeriodBackup>>, CreateSalesPeriodBackupMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createSalesPeriodBackup(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateSalesPeriodBackupMutationResult = NonNullable<Awaited<ReturnType<typeof createSalesPeriodBackup>>>
+    export type CreateSalesPeriodBackupMutationBody = BodyType<SalesPeriodBackupSelection>
+    export type CreateSalesPeriodBackupMutationError = ErrorType<ApiError>
+    export type CreateSalesPeriodBackupMutationVariables = {data: BodyType<SalesPeriodBackupSelection>}
+
+    /**
+ * @summary Create a financial backup for selected months or dates
+ */
+export const useCreateSalesPeriodBackup = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSalesPeriodBackup>>, TError,CreateSalesPeriodBackupMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createSalesPeriodBackup>>,
+        TError,
+        CreateSalesPeriodBackupMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateSalesPeriodBackupMutationOptions(options));
+    }
 
 export const getPreviewMonthlySalesBackupRestoreUrl = () => {
 

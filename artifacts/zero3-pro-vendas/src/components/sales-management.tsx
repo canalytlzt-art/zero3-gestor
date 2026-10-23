@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState, type ChangeEvent, type FormEvent, type InputHTMLAttributes } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type InputHTMLAttributes } from 'react';
+import { useUser } from '@clerk/react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -14,7 +15,7 @@ import {
   getGetSalesRefundCandidatesQueryKey,
   getGetSalesRefundsQueryKey,
   getGetSalesScoreboardQueryKey,
-  getMonthlySalesBackup,
+  createSalesPeriodBackup,
   getSalesImportOrigins,
   previewMonthlySalesBackupRestore,
   useCancelSale,
@@ -34,13 +35,14 @@ import {
   useUpdateProduct,
   useUpdateSale,
 } from '@workspace/api-client-react';
-import type { CreateProductInput, MonthlySalesBackupInput, Product, Sale, SaleInput, SalesRestorePreview, SalesRestoreResult, UpdateProductInput } from '@workspace/api-client-react';
+import type { CreateProductInput, MonthlySalesBackupInput, Product, Sale, SaleInput, SalesPeriodBackup, SalesPeriodBackupSelection, SalesRefundRecord, SalesRestorePreview, SalesRestoreResult, UpdateProductInput } from '@workspace/api-client-react';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { PurpleSelect } from '@/components/ui/purple-select';
 import { SuggestionInput } from '@/components/ui/suggestion-input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { downloadMonthlyBackup, parseMonthlySalesBackup } from '@/lib/sales-export';
+import { downloadSalesPeriodBackup, parseMonthlySalesBackup } from '@/lib/sales-export';
+import { downloadSalesCsv, downloadSalesWorkbook, summarizeSalesReport, type SalesExportSelection } from '@/lib/sales-workbook';
 import { formatCents, formatMonthKey, getSaoPauloMonthKey, normalizeProductName, productNameKey } from '@/lib/sales-utils';
 import { mapSalesImportRow, parseImportDate, parseSalesSpreadsheet, type SalesImportField, type SalesImportSheet } from '@/lib/sales-import';
 import { ImportSourceDetails } from './import-source-details';
@@ -166,6 +168,18 @@ function formatGeneratedAt(value: string) {
   }).format(date);
 }
 
+function toWorkbookSelection(selection: SalesPeriodBackupSelection): SalesExportSelection {
+  if (selection.mode === 'all') return { mode: 'all' };
+  if (selection.mode === 'range') {
+    return { mode: 'range', fromDate: selection.fromDate ?? '', toDate: selection.toDate ?? '' };
+  }
+  return { mode: 'months', months: selection.months ?? [] };
+}
+
+function formatBackupPeriod(value: string) {
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(value) ? formatMonthKey(value) : value;
+}
+
 type RestorePreview = {
   backup: MonthlySalesBackupInput;
   report: SalesRestorePreview;
@@ -210,6 +224,7 @@ function Field({ label, name, type = 'text', placeholder, testId, onValueChange,
 }
 
 export default function SalesManagement() {
+  const { user } = useUser();
   const queryClient = useQueryClient();
   const { data: sales, isLoading, isFetching, isError, refetch: refetchSales } = useGetSales({
     query: { queryKey: getGetSalesQueryKey(), refetchOnMount: 'always' },
@@ -285,7 +300,21 @@ export default function SalesManagement() {
   const [importFeedback, setImportFeedback] = useState('');
   const [skippedImportRows, setSkippedImportRows] = useState<Set<string>>(new Set());
   const importFileRef = useRef<HTMLInputElement>(null);
-  const [backupMonth, setBackupMonth] = useState(getSaoPauloMonthKey());
+  const [periodSelection, setPeriodSelection] = useState<SalesPeriodBackupSelection>({
+    mode: 'months',
+    months: [getSaoPauloMonthKey()],
+    productName: null,
+  });
+  const [periodMonthDraft, setPeriodMonthDraft] = useState(getSaoPauloMonthKey());
+  const [periodDialogMode, setPeriodDialogMode] = useState<'report' | 'backup'>('report');
+  const [periodBackupPreview, setPeriodBackupPreview] = useState<SalesPeriodBackup | null>(null);
+  const [periodReportSnapshot, setPeriodReportSnapshot] = useState<{
+    sales: Sale[];
+    refunds: SalesRefundRecord[];
+    products: Product[];
+    refreshedAt: string;
+  } | null>(null);
+  const [selectionStorageUser, setSelectionStorageUser] = useState('');
   const [backupDialogOpen, setBackupDialogOpen] = useState(false);
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -309,6 +338,38 @@ export default function SalesManagement() {
   const pendingRefundKey = useRef<{ fingerprint: string; key: string } | null>(null);
   const [importPendingOnly, setImportPendingOnly] = useState(false);
 
+  useEffect(() => {
+    const userId = user?.id;
+    if (!userId) return;
+    const key = `zero3-pro-sales-report-selection:${userId}`;
+    try {
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        const value = JSON.parse(saved) as SalesPeriodBackupSelection;
+        const validMonths = Array.isArray(value.months)
+          && value.months.every((month) => /^\d{4}-(0[1-9]|1[0-2])$/.test(month));
+        if ((value.mode === 'months' && validMonths)
+          || (value.mode === 'range' && typeof value.fromDate === 'string' && typeof value.toDate === 'string')
+          || value.mode === 'all') {
+          setPeriodSelection(value);
+        }
+      }
+    } catch {
+      // An unreadable local preference must not block sales or reports.
+    }
+    setSelectionStorageUser(userId);
+  }, [user?.id]);
+
+  useEffect(() => {
+    const userId = user?.id;
+    if (!userId || selectionStorageUser !== userId) return;
+    try {
+      localStorage.setItem(`zero3-pro-sales-report-selection:${userId}`, JSON.stringify(periodSelection));
+    } catch {
+      // Local storage is only a convenience for restoring report filters.
+    }
+  }, [periodSelection, selectionStorageUser, user?.id]);
+
   const products = useMemo(() => (productRecords ?? [])
     .slice()
     .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' })), [productRecords]);
@@ -322,6 +383,25 @@ export default function SalesManagement() {
     }
     return [...names.values()].sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
   }, [products, historySales]);
+  const reportSales = periodReportSnapshot?.sales ?? historySales ?? [];
+  const reportRefunds = periodReportSnapshot?.refunds ?? refunds ?? [];
+  const reportProducts = periodReportSnapshot?.products ?? products;
+  const periodReportSummary = useMemo(() => summarizeSalesReport(
+    reportSales,
+    reportRefunds,
+    reportProducts,
+    {
+      selection: toWorkbookSelection(periodSelection),
+      productName: periodSelection.productName ?? '',
+      generatedAt: periodReportSnapshot?.refreshedAt ?? '',
+    },
+  ), [reportSales, reportRefunds, reportProducts, periodSelection, periodReportSnapshot?.refreshedAt]);
+  const validPeriodSelection = periodSelection.mode === 'all'
+    || (periodSelection.mode === 'months' && Boolean(periodSelection.months?.length)
+      && periodSelection.months?.every((month) => /^\d{4}-(0[1-9]|1[0-2])$/.test(month)))
+    || (periodSelection.mode === 'range' && isValidCalendarDate(periodSelection.fromDate ?? '')
+      && isValidCalendarDate(periodSelection.toDate ?? '')
+      && (periodSelection.fromDate ?? '') <= (periodSelection.toDate ?? ''));
 
   const filteredSales = useMemo(
     () => filterSalesForExport(historySales ?? [], fromDate, toDate, filterProduct, products)
@@ -329,14 +409,6 @@ export default function SalesManagement() {
     [historySales, fromDate, toDate, filterProduct, filterStatus, products],
   );
   const visibleProducts = useMemo(() => products.filter((product) => product.name.toLocaleLowerCase('pt-BR').includes(productSearch.trim().toLocaleLowerCase('pt-BR'))), [products, productSearch]);
-  const backupMonthSales = useMemo(
-    () => (historySales ?? []).filter((sale) => sale.saleDate.slice(0, 7) === backupMonth),
-    [historySales, backupMonth],
-  );
-  const backupMonthRefunds = useMemo(
-    () => (refunds ?? []).filter((refund) => refund.refundDate.slice(0, 7) === backupMonth),
-    [refunds, backupMonth],
-  );
   const activeRefundTotalsBySale = useMemo(() => {
     const totals = new Map<string, bigint>();
     for (const refund of refunds ?? []) {
@@ -348,10 +420,6 @@ export default function SalesManagement() {
   }, [refunds]);
   const selectedRefundCandidate = refundCandidates?.find(({ saleId }) => saleId === refundSaleId);
   const refundAmountCents = parseBrlCents(refundAmount);
-  const backupMonthGoals = useMemo(
-    () => (salesGoals ?? []).filter((goal) => goal.month === backupMonth),
-    [salesGoals, backupMonth],
-  );
 
   const productForm = useForm<ProductFormValues>({
     resolver: zodResolver(productFormSchema),
@@ -653,24 +721,65 @@ export default function SalesManagement() {
     if (exportMenuRef.current) exportMenuRef.current.open = false;
   }
 
-  async function exportSpreadsheet() {
-    if (isExporting) return;
+  function updatePeriodSelection(next: SalesPeriodBackupSelection) {
+    setPeriodSelection(next);
+    setPeriodBackupPreview(null);
+    setBackupError('');
+  }
+
+  async function refreshPeriodReportData() {
+    const [salesResult, refundResult, productResult] = await Promise.all([
+      refetchHistory(),
+      refetchRefunds(),
+      refetchProducts(),
+    ]);
+    if (salesResult.isError || !salesResult.data || refundResult.isError || !refundResult.data || productResult.isError || !productResult.data) {
+      throw new Error('Não foi possível atualizar vendas, estornos e produtos para a prévia.');
+    }
+    const snapshot = {
+      sales: salesResult.data,
+      refunds: refundResult.data,
+      products: productResult.data,
+      refreshedAt: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+    };
+    setPeriodReportSnapshot(snapshot);
+    return snapshot;
+  }
+
+  function openPeriodDialog(mode: 'report' | 'backup' = 'report') {
     closeExportMenu();
+    setPeriodDialogMode(mode);
+    setPeriodBackupPreview(null);
+    setBackupError('');
+    setExportError('');
+    setExportFeedback('');
+    setBackupDialogOpen(true);
+    setIsExporting(true);
+    void refreshPeriodReportData()
+      .catch((error) => setExportError(errorMessage(error)))
+      .finally(() => setIsExporting(false));
+  }
+
+  async function exportPeriodReport(format: 'xlsx' | 'csv') {
+    if (isExporting || !validPeriodSelection) return;
     setIsExporting(true);
     setExportError('');
     setExportFeedback('');
     try {
-      const [result, refundResult, productResult] = await Promise.all([refetchHistory(), refetchRefunds(), refetchProducts()]);
-      if (result.isError || !result.data || refundResult.isError || !refundResult.data || productResult.isError || !productResult.data) {
-        throw new Error('Não foi possível atualizar vendas, estornos e produtos antes da exportação.');
-      }
-      const generatedDay = new Date().toISOString().slice(0, 10);
-      const { downloadSalesWorkbook } = await import('@/lib/sales-workbook');
-      downloadSalesWorkbook(result.data, refundResult.data, productResult.data, {
-        fromDate, toDate, productName: filterProduct,
+      const snapshot = await refreshPeriodReportData();
+      const filters = {
+        selection: toWorkbookSelection(periodSelection),
+        productName: periodSelection.productName ?? '',
         generatedAt: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
-      }, `zero3-pro-relatorio-vendas-${generatedDay}.xlsx`);
-      setExportFeedback('Planilha exportada com vendas e estornos válidos dos filtros de data e produto. Cancelamentos não entram no resultado financeiro.');
+      };
+      const dateSuffix = new Date().toISOString().slice(0, 10);
+      if (format === 'xlsx') {
+        downloadSalesWorkbook(snapshot.sales, snapshot.refunds, snapshot.products, filters, `zero3-pro-relatorio-financeiro-${dateSuffix}.xlsx`);
+        setExportFeedback('Relatório Excel exportado com os dados do período, estornos e resumo conciliado.');
+      } else {
+        downloadSalesCsv(snapshot.sales, snapshot.refunds, snapshot.products, filters, `zero3-pro-relatorio-financeiro-${dateSuffix}.csv`);
+        setExportFeedback('CSV exportado com as movimentações válidas do período selecionado.');
+      }
     } catch (error) {
       setExportError(errorMessage(error));
     } finally {
@@ -678,31 +787,29 @@ export default function SalesManagement() {
     }
   }
 
-  function openMonthlyBackupDialog() {
-    closeExportMenu();
-    setBackupMonth(getSaoPauloMonthKey());
-    setBackupError('');
-    setExportError('');
-    setExportFeedback('');
-    setBackupDialogOpen(true);
-    void Promise.all([refetchHistory(), refetchRefunds(), refetchGoals()]);
-  }
-
-  async function generateMonthlyBackup() {
+  async function generatePeriodBackupPreview() {
     if (isGeneratingBackup) return;
     setIsGeneratingBackup(true);
     setBackupError('');
     try {
-      const backup = await getMonthlySalesBackup({ month: backupMonth });
-      downloadMonthlyBackup(backup);
-      setBackupError('');
-      setExportError('');
-      setExportFeedback(`Backup de ${formatMonthKey(backupMonth)}: ${backup.counts.periodSales} vendas, ${backup.counts.periodRefunds} estornos e ${backup.counts.periodGoals} metas do mês; ${backup.counts.dependencySales + backup.counts.dependencyRefunds} dependências preservadas.`);
+      const request: SalesPeriodBackupSelection = {
+        ...periodSelection,
+        productName: periodSelection.productName || null,
+      };
+      const backup = await createSalesPeriodBackup(request);
+      setPeriodBackupPreview(backup);
     } catch (error) {
       setBackupError(errorMessage(error));
     } finally {
       setIsGeneratingBackup(false);
     }
+  }
+
+  function downloadPeriodBackupPreview() {
+    if (!periodBackupPreview) return;
+    downloadSalesPeriodBackup(periodBackupPreview);
+    setBackupError('');
+    setExportFeedback(`Cópia do período criada: ${periodBackupPreview.counts.periodSales} vendas, ${periodBackupPreview.counts.periodRefunds} estornos e ${periodBackupPreview.counts.periodGoals} metas; ${periodBackupPreview.counts.dependencySales + periodBackupPreview.counts.dependencyRefunds} dependências incluídas.`);
   }
 
   async function handleBackupFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -893,13 +1000,13 @@ export default function SalesManagement() {
             <Download size={15} /> Exportar
           </summary>
           <div className="absolute left-0 z-20 mt-2 w-[230px] max-w-[calc(100vw-2rem)] rounded-2xl border border-[#e7e1e9] bg-white p-1.5 shadow-[0_12px_35px_rgba(40,32,56,.15)] sm:left-auto sm:right-0">
-            <button type="button" onClick={() => void exportSpreadsheet()} disabled={isExporting} className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-xs font-semibold text-[#4d4559] transition hover:bg-[#f8f6fa] disabled:opacity-50" data-testid="button-export-spreadsheet">
+            <button type="button" onClick={() => openPeriodDialog('report')} disabled={isExporting} className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-xs font-semibold text-[#4d4559] transition hover:bg-[#f8f6fa] disabled:opacity-50" data-testid="button-export-spreadsheet">
               <FileSpreadsheet size={15} className="text-[#6d9b45]" />
-              <span>Planilha do período (.xlsx)</span>
+              <span>Relatório Excel / CSV</span>
             </button>
-            <button type="button" onClick={openMonthlyBackupDialog} className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-xs font-semibold text-[#4d4559] transition hover:bg-[#f8f6fa]" data-testid="button-open-monthly-backup">
+            <button type="button" onClick={() => openPeriodDialog('backup')} className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-xs font-semibold text-[#4d4559] transition hover:bg-[#f8f6fa]" data-testid="button-open-monthly-backup">
               <Download size={15} className="text-[#7656b8]" />
-              <span>Backup mensal (.json)</span>
+              <span>Backup do período (.json)</span>
             </button>
             <button type="button" onClick={() => { closeExportMenu(); fileInputRef.current?.click(); }} className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-xs font-semibold text-[#4d4559] transition hover:bg-[#f8f6fa]" data-testid="button-open-backup-restore">
               <ArchiveRestore size={15} className="text-[#7656b8]" />
@@ -1052,45 +1159,115 @@ export default function SalesManagement() {
         <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-white text-[#7656b8]"><CalendarDays size={15} /></span>
         <span>Registros compartilhados com a equipe autorizada.</span><span className="ml-auto hidden text-[10px] font-semibold text-[#9993a0] md:block">DADOS ATUALIZADOS</span>
       </div>
-      <Dialog open={backupDialogOpen} onOpenChange={(open) => { if (!isGeneratingBackup) setBackupDialogOpen(open); }}>
-        <DialogContent className="max-w-lg border-[#e7e1e9] bg-[#fffefc] p-6 sm:rounded-[24px]">
+      <Dialog open={backupDialogOpen} onOpenChange={(open) => { if (!isGeneratingBackup && !isExporting) setBackupDialogOpen(open); }}>
+        <DialogContent className="max-h-[92dvh] max-w-xl overflow-y-auto border-[#e7e1e9] bg-[#fffefc] p-5 sm:rounded-[24px] sm:p-6">
           <DialogHeader className="text-left">
-            <DialogTitle className="text-lg font-extrabold tracking-[-.035em] text-[#332d40]">Backup mensal</DialogTitle>
+            <DialogTitle className="text-lg font-extrabold tracking-[-.035em] text-[#332d40]">Relatórios e backups</DialogTitle>
             <DialogDescription className="text-xs leading-5 text-[#827b8b]">
-              Inclui vendas, estornos, metas, produtos e histórico, sem filtro de plano. Vendas de outros meses e seus estornos são incluídos quando necessários aos vínculos, sem mudar suas datas.
+              Escolha um período independente dos filtros da Scoreboard. Relatórios somam vendas pela data da venda e estornos pela data efetiva.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            <label className="block text-[10px] font-bold uppercase tracking-[.1em] text-[#817b89]">Mês do backup
-              <input type="month" value={backupMonth} onChange={(event) => setBackupMonth(event.target.value)} data-testid="input-monthly-backup-month" className="mt-1.5 h-11 w-full rounded-xl border border-[#e7e2ea] bg-[#fcfbfd] px-3.5 text-sm font-medium normal-case tracking-normal text-[#342d43] outline-none focus:border-[#9477bf]" />
-            </label>
-            <div className="grid gap-2 sm:grid-cols-3">
-              <div className="rounded-xl bg-[#f8f6f9] px-3.5 py-3">
-                <p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Lançamentos</p>
-                <p className="mt-1 text-sm font-extrabold tabular-nums text-[#40374e]" data-testid="text-monthly-backup-sales-count">{backupMonthSales.length}</p>
-                <p className="mt-1 text-[10px] text-[#8a8491]">Independente do filtro de plano.</p>
-              </div>
-              <div className="rounded-xl bg-[#f8f6f9] px-3.5 py-3">
-                <p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Estornos do mês</p>
-                <p className="mt-1 text-sm font-extrabold tabular-nums text-[#40374e]">{backupMonthRefunds.length}</p>
-              </div>
-              <div className="rounded-xl bg-[#f8f6f9] px-3.5 py-3">
-                <p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Metas mensais</p>
-                <p className="mt-1 text-sm font-extrabold tabular-nums text-[#40374e]" data-testid="text-monthly-backup-goals-count">{backupMonthGoals.length}</p>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 rounded-xl bg-[#f2eef8] p-1">
+              <button type="button" onClick={() => { setPeriodDialogMode('report'); setPeriodBackupPreview(null); }} className={`rounded-lg px-3 py-2 text-xs font-bold transition ${periodDialogMode === 'report' ? 'bg-white text-[#6848a9] shadow-sm' : 'text-[#817b89]'}`} data-testid="tab-period-report">Relatório Excel / CSV</button>
+              <button type="button" onClick={() => setPeriodDialogMode('backup')} className={`rounded-lg px-3 py-2 text-xs font-bold transition ${periodDialogMode === 'backup' ? 'bg-white text-[#6848a9] shadow-sm' : 'text-[#817b89]'}`} data-testid="tab-period-backup">Backup JSON</button>
+            </div>
+
+            <div>
+              <p className="mb-2 text-[10px] font-bold uppercase tracking-[.1em] text-[#817b89]">Período</p>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { value: 'months', label: 'Mês ou meses' },
+                  { value: 'range', label: 'Intervalo de datas' },
+                  { value: 'all', label: 'Todo o histórico' },
+                ].map((item) => <button key={item.value} type="button" onClick={() => {
+                  if (item.value === 'months') updatePeriodSelection({ mode: 'months', months: periodSelection.mode === 'months' ? periodSelection.months ?? [] : [periodMonthDraft], productName: periodSelection.productName ?? null });
+                  else if (item.value === 'range') updatePeriodSelection({ mode: 'range', fromDate: periodSelection.mode === 'range' ? periodSelection.fromDate : todayLocal(), toDate: periodSelection.mode === 'range' ? periodSelection.toDate : todayLocal(), productName: periodSelection.productName ?? null });
+                  else updatePeriodSelection({ mode: 'all', productName: periodSelection.productName ?? null });
+                }} className={`rounded-lg border px-3 py-2 text-[11px] font-bold transition ${periodSelection.mode === item.value ? 'border-[#7656b8] bg-[#7656b8] text-white' : 'border-[#e5dfeb] bg-white text-[#655b71] hover:bg-[#f8f6fb]'}`} data-testid={`button-period-mode-${item.value}`}>{item.label}</button>)}
               </div>
             </div>
-            <p className="text-[10px] leading-4 text-[#827b8b]">As contagens acima são uma prévia. O arquivo é conferido diretamente no servidor e pode incluir dependências de outros meses.</p>
-            {(isLoading || isFetching || isGoalsLoading || isGoalsFetching) && <p className="text-[11px] text-[#827b8b]" role="status">Atualizando a base para gerar uma cópia recente…</p>}
-            {!isLoading && !isFetching && !isError && backupMonthSales.length === 0 && backupMonthRefunds.length === 0 && <p className="rounded-xl border border-dashed border-[#ded7e7] px-3.5 py-3 text-xs leading-5 text-[#716a79]" data-testid="status-monthly-backup-empty">Nenhuma movimentação neste mês. O arquivo terá zero movimentações; metas existentes serão preservadas. Nenhuma linha fictícia será criada.</p>}
-            {(isError || isGoalsError) && <div className="rounded-xl bg-[#fff5f2] px-3.5 py-3 text-xs text-[#85554e]" role="alert" data-testid="status-monthly-backup-load-error"><p>Não foi possível ler todos os dados para gerar o backup.</p><button type="button" onClick={() => void Promise.all([refetchSales(), refetchGoals()])} className="mt-2 inline-flex items-center gap-1.5 font-bold underline underline-offset-2"><RefreshCw size={12} /> Tentar novamente</button></div>}
+
+            {periodSelection.mode === 'months' && <div className="space-y-2">
+              <div className="flex gap-2">
+                <label className="min-w-0 flex-1 text-[10px] font-bold uppercase tracking-[.1em] text-[#817b89]">Adicionar mês
+                  <input type="month" value={periodMonthDraft} onChange={(event) => setPeriodMonthDraft(event.target.value)} data-testid="input-report-month" className="mt-1 h-10 w-full rounded-xl border border-[#e7e2ea] bg-[#fcfbfd] px-3 text-sm font-medium normal-case tracking-normal text-[#342d43] outline-none focus:border-[#9477bf]" />
+                </label>
+                <button type="button" onClick={() => {
+                  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(periodMonthDraft)) return;
+                  const months = [...new Set([...(periodSelection.months ?? []), periodMonthDraft])].sort();
+                  updatePeriodSelection({ mode: 'months', months, productName: periodSelection.productName ?? null });
+                }} className="mt-5 h-10 rounded-xl border border-[#dcd1eb] bg-[#f5f0fb] px-3 text-xs font-bold text-[#6848a9] transition hover:bg-[#eee6f8]" data-testid="button-add-report-month">Adicionar</button>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {(periodSelection.months ?? []).map((month) => <button key={month} type="button" onClick={() => updatePeriodSelection({ mode: 'months', months: (periodSelection.months ?? []).filter((item) => item !== month), productName: periodSelection.productName ?? null })} className="inline-flex items-center gap-1 rounded-full bg-[#7656b8] px-2.5 py-1 text-[10px] font-bold text-white" aria-label={`Remover mês ${month}`}>{formatMonthKey(month)} <X size={11} /></button>)}
+                {!periodSelection.months?.length && <span className="text-[11px] text-[#9c483f]">Adicione ao menos um mês.</span>}
+              </div>
+            </div>}
+
+            {periodSelection.mode === 'range' && <div className="grid grid-cols-2 gap-2">
+              <label className="text-[10px] font-bold uppercase tracking-[.1em] text-[#817b89]">Data inicial
+                <input type="date" value={periodSelection.fromDate ?? ''} onChange={(event) => updatePeriodSelection({ mode: 'range', fromDate: event.target.value, toDate: periodSelection.toDate, productName: periodSelection.productName ?? null })} className="mt-1 h-10 w-full rounded-xl border border-[#e7e2ea] bg-[#fcfbfd] px-3 text-sm text-[#342d43] outline-none focus:border-[#9477bf]" data-testid="input-report-from-date" />
+              </label>
+              <label className="text-[10px] font-bold uppercase tracking-[.1em] text-[#817b89]">Data final
+                <input type="date" value={periodSelection.toDate ?? ''} onChange={(event) => updatePeriodSelection({ mode: 'range', fromDate: periodSelection.fromDate, toDate: event.target.value, productName: periodSelection.productName ?? null })} className="mt-1 h-10 w-full rounded-xl border border-[#e7e2ea] bg-[#fcfbfd] px-3 text-sm text-[#342d43] outline-none focus:border-[#9477bf]" data-testid="input-report-to-date" />
+              </label>
+              <p className="col-span-2 text-[10px] text-[#827b8b]">As duas datas são incluídas no intervalo.</p>
+            </div>}
+
+            {periodSelection.mode === 'all' && <p className="rounded-xl bg-[#f8f6f9] px-3 py-2.5 text-[11px] leading-5 text-[#716a79]">Todo o histórico está selecionado explicitamente.</p>}
+
+            <label className="block text-[10px] font-bold uppercase tracking-[.1em] text-[#817b89]">Plano / produto
+              <select value={periodSelection.productName ?? ''} onChange={(event) => updatePeriodSelection({ ...periodSelection, productName: event.target.value || null })} data-testid="select-report-product" className="mt-1 h-10 w-full rounded-xl border border-[#e7e2ea] bg-[#fcfbfd] px-3 text-sm font-medium normal-case tracking-normal text-[#342d43] outline-none focus:border-[#7656b8] focus:ring-2 focus:ring-[#7656b8]/10">
+                <option value="">Todos os planos</option>
+                {productNames.map((name) => <option key={productNameKey(name)} value={name}>{name}</option>)}
+              </select>
+            </label>
+
+            {periodDialogMode === 'report' ? <div className="space-y-3">
+              <div className="rounded-xl border border-[#e8e2ed] bg-white p-3.5" data-testid="panel-period-report-preview">
+                <p className="text-[10px] font-bold uppercase tracking-[.1em] text-[#817b89]">Prévia do relatório</p>
+                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {[
+                    ['Faturamento', formatCents(Number(periodReportSummary.salesCents))],
+                    ['Estornos', formatCents(Number(periodReportSummary.refundsCents))],
+                    ['Líquido', formatCents(Number(periodReportSummary.netCents))],
+                    ['Quantidade', periodReportSummary.quantity.toString()],
+                  ].map(([label, value]) => <div key={label} className="rounded-lg bg-[#f8f6f9] px-2.5 py-2">
+                    <p className="text-[9px] font-bold text-[#817b89]">{label}</p>
+                    <p className="mt-1 text-xs font-extrabold tabular-nums text-[#40374e]" data-testid={`text-period-preview-${label.toLowerCase()}`}>{value}</p>
+                  </div>)}
+                </div>
+                <p className="mt-2 text-[10px] text-[#827b8b]">{periodReportSummary.salesCount} vendas válidas · {periodReportSummary.refundsCount} estornos válidos{periodReportSnapshot ? ` · atualizado ${periodReportSnapshot.refreshedAt}` : ''}</p>
+              </div>
+              {isExporting && <p className="text-[10px] text-[#827b8b]" role="status">Atualizando a prévia para exportar…</p>}
+            </div> : <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3 rounded-xl bg-[#f8f6f9] px-3.5 py-3">
+                <span className="text-[11px] leading-5 text-[#716a79]">Prévia conferida no servidor, incluindo vendas e estornos necessários para validar os vínculos.</span>
+                <button type="button" onClick={() => void generatePeriodBackupPreview()} disabled={!validPeriodSelection || isGeneratingBackup} className="shrink-0 rounded-lg border border-[#dcd1eb] bg-white px-3 py-2 text-[10px] font-bold text-[#6848a9] disabled:opacity-50" data-testid="button-preview-period-backup">{isGeneratingBackup ? 'Conferindo…' : periodBackupPreview ? 'Atualizar prévia' : 'Gerar prévia'}</button>
+              </div>
+              {periodBackupPreview && <div className="rounded-xl border border-[#e8e2ed] bg-white p-3.5" data-testid="panel-period-backup-preview">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div><p className="text-sm font-extrabold text-[#40374e]">{periodBackupPreview.period}</p><p className="mt-1 text-[10px] text-[#827b8b]">Gerado {formatGeneratedAt(periodBackupPreview.generatedAt)} · {periodBackupPreview.counts.totalRecords} registros</p></div>
+                  <span className="rounded-full bg-[#f2eef8] px-2.5 py-1 text-[9px] font-bold text-[#6848a9]">{periodBackupPreview.partial ? 'Cópia parcial' : 'Histórico completo'}</span>
+                </div>
+                <p className="mt-2 text-[11px] leading-5 text-[#625a6d]">Vendas {formatCents(periodBackupPreview.totals.salesCents)} · estornos {formatCents(periodBackupPreview.totals.refundsCents)} · líquido {formatCents(periodBackupPreview.totals.netCents)} · quantidade {periodBackupPreview.totals.quantity}</p>
+                <p className="mt-1 text-[10px] text-[#827b8b]">{periodBackupPreview.counts.periodSales} vendas · {periodBackupPreview.counts.periodRefunds} estornos · {periodBackupPreview.counts.periodGoals} metas · {periodBackupPreview.counts.dependencySales + periodBackupPreview.counts.dependencyRefunds} dependências</p>
+                {periodBackupPreview.counts.periodSales === 0 && periodBackupPreview.counts.periodRefunds === 0 && <p className="mt-2 rounded-lg border border-dashed border-[#ded7e7] px-3 py-2 text-[10px] text-[#716a79]">Sem movimentações no período. O arquivo preservará metas existentes sem criar vendas fictícias.</p>}
+              </div>}
+            </div>}
+            {exportError && <p className="rounded-xl bg-[#fff0ed] px-3.5 py-2.5 text-xs font-semibold text-[#9c483f]" role="alert" data-testid="status-period-export-error">{exportError}</p>}
             {backupError && <p className="rounded-xl bg-[#fff0ed] px-3.5 py-2.5 text-xs font-semibold text-[#9c483f]" role="alert" data-testid="status-monthly-backup-error">{backupError}</p>}
           </div>
-          <DialogFooter className="gap-2">
-            <button type="button" onClick={() => setBackupDialogOpen(false)} disabled={isGeneratingBackup} className="h-10 rounded-xl border border-[#e3dfe7] px-4 text-sm font-bold text-[#716a79] transition hover:bg-[#f8f6fa] disabled:opacity-50" data-testid="button-cancel-monthly-backup">Fechar</button>
-            <button type="button" onClick={() => void generateMonthlyBackup()} disabled={isGeneratingBackup || !/^\d{4}-(0[1-9]|1[0-2])$/.test(backupMonth)} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#7656b8] px-4 text-sm font-bold text-white transition hover:bg-[#6848a9] disabled:cursor-wait disabled:opacity-60" data-testid="button-generate-monthly-backup">
+          <DialogFooter className="gap-2 sm:flex-row">
+            <button type="button" onClick={() => setBackupDialogOpen(false)} disabled={isGeneratingBackup || isExporting} className="h-10 rounded-xl border border-[#e3dfe7] px-4 text-sm font-bold text-[#716a79] transition hover:bg-[#f8f6fa] disabled:opacity-50">Fechar</button>
+            {periodDialogMode === 'report' ? <>
+              <button type="button" onClick={() => void exportPeriodReport('csv')} disabled={!validPeriodSelection || isExporting} className="h-10 rounded-xl border border-[#dcd1eb] bg-white px-4 text-sm font-bold text-[#6848a9] disabled:opacity-50" data-testid="button-export-period-csv">Baixar CSV</button>
+              <button type="button" onClick={() => void exportPeriodReport('xlsx')} disabled={!validPeriodSelection || isExporting} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#7656b8] px-4 text-sm font-bold text-white transition hover:bg-[#6848a9] disabled:cursor-wait disabled:opacity-60" data-testid="button-export-period-xlsx">{isExporting ? 'Atualizando…' : 'Baixar Excel'}</button>
+            </> : <button type="button" onClick={periodBackupPreview ? downloadPeriodBackupPreview : () => void generatePeriodBackupPreview()} disabled={!validPeriodSelection || isGeneratingBackup || (!periodBackupPreview && !validPeriodSelection)} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#7656b8] px-4 text-sm font-bold text-white transition hover:bg-[#6848a9] disabled:cursor-wait disabled:opacity-60" data-testid="button-generate-monthly-backup">
               {isGeneratingBackup ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : <Download size={14} />}
-              {isGeneratingBackup ? 'Gerando…' : 'Baixar backup JSON'}
-            </button>
+              {isGeneratingBackup ? 'Conferindo…' : periodBackupPreview ? 'Baixar backup JSON' : 'Gerar prévia do backup'}
+            </button>}
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1103,7 +1280,7 @@ export default function SalesManagement() {
       >
         <DialogContent className="max-h-[90dvh] max-w-lg overflow-y-auto border-[#e7e1e9] bg-[#fffefc] p-6 sm:rounded-[24px]">
           <DialogHeader className="text-left">
-            <DialogTitle className="text-lg font-extrabold tracking-[-.035em] text-[#332d40]">Restaurar backup mensal</DialogTitle>
+            <DialogTitle className="text-lg font-extrabold tracking-[-.035em] text-[#332d40]">Restaurar backup financeiro</DialogTitle>
             <DialogDescription className="text-xs leading-5 text-[#827b8b]">
               Registros idênticos são ignorados. Se o mesmo ID tiver conteúdo diferente, o atual será mantido. Nada é apagado; a aplicação é atômica e uma cópia privada do estado anterior é guardada no servidor.
             </DialogDescription>
@@ -1113,7 +1290,7 @@ export default function SalesManagement() {
           {restorePreview && !restoreResult && (
             <div className="space-y-3">
               <div className="rounded-xl bg-[#f8f6f9] px-3.5 py-3.5" data-testid="panel-backup-restore-preview">
-                <p className="text-sm font-extrabold capitalize text-[#40374e]">{formatMonthKey(restorePreview.report.period)}</p>
+                <p className="text-sm font-extrabold capitalize text-[#40374e]">{formatBackupPeriod(restorePreview.report.period)}</p>
                 <p className="mt-1 text-[10px] text-[#827b8b]">Gerado em {formatGeneratedAt(restorePreview.backup.generatedAt)}</p>
                 <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs font-semibold text-[#625a6d]">
                   <span data-testid="text-restore-preview-sales">{restorePreview.sales.length} vendas no arquivo</span>
@@ -1136,13 +1313,13 @@ export default function SalesManagement() {
                 <p className="font-bold">{restorePreview.report.blocked ? 'Restauração bloqueada por vínculos ou saldo.' : 'Conflitos: os registros atuais serão mantidos.'}</p>
                 <ul className="mt-2 max-h-36 space-y-2 overflow-auto">{restorePreview.report.conflicts.map((conflict, index) => <li key={`${conflict.entityType}-${conflict.id}-${index}`}><span className="break-all font-semibold">{conflict.entityType} · {conflict.id}</span><br />{conflict.reason}</li>)}</ul>
               </div>}
-              <p className="rounded-xl border border-[#e9e0c8] bg-[#fcf8ed] px-3.5 py-3 text-[10px] leading-5 text-[#725d2d]">
-                Ao confirmar, os lançamentos ausentes serão adicionados pelos IDs internos e as metas deste mês serão restauradas ou atualizadas. Nenhum registro fora do mês será alterado.
+                <p className="rounded-xl border border-[#e9e0c8] bg-[#fcf8ed] px-3.5 py-3 text-[10px] leading-5 text-[#725d2d]">
+                 Ao confirmar, registros ausentes e dependências serão adicionados pelos IDs internos. Nada é apagado; IDs com conteúdo diferente permanecem como estão.
               </p>
             </div>
           )}
           {restoreResult && <div className="rounded-xl bg-[#eff6e5] px-3.5 py-3 text-xs leading-5 text-[#55772c]" role="status" data-testid="status-backup-restore-success">
-            Backup de {formatMonthKey(restoreResult.period)} processado: {restoreResult.inserted.sales} vendas, {restoreResult.inserted.refunds} estornos, {restoreResult.inserted.goals} metas, {restoreResult.inserted.products} produtos e {restoreResult.inserted.histories} registros de histórico adicionados. {Object.values(restoreResult.identical).reduce((sum, count) => sum + count, 0)} idênticos ignorados; {restoreResult.conflicts.length} conflitos mantiveram os dados atuais.
+            Backup de {formatBackupPeriod(restoreResult.period)} processado: {restoreResult.inserted.sales} vendas, {restoreResult.inserted.refunds} estornos, {restoreResult.inserted.goals} metas, {restoreResult.inserted.products} produtos e {restoreResult.inserted.histories} registros de histórico adicionados. {Object.values(restoreResult.identical).reduce((sum, count) => sum + count, 0)} idênticos ignorados; {restoreResult.conflicts.length} conflitos mantiveram os dados atuais.
           </div>}
           <DialogFooter className="gap-2">
             <button type="button" onClick={() => setRestoreDialogOpen(false)} disabled={restoreBackup.isPending} className="h-10 rounded-xl border border-[#e3dfe7] px-4 text-sm font-bold text-[#716a79] transition hover:bg-[#f8f6fa] disabled:opacity-50" data-testid="button-cancel-backup-restore">{restoreResult ? 'Concluir' : 'Cancelar'}</button>

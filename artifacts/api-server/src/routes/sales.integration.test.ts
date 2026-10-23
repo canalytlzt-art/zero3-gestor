@@ -8,6 +8,7 @@ import express from "express";
 import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as dbSchema from "@workspace/db/schema";
+import type { SalesPeriodBackupSelection } from "@workspace/api-zod";
 import {
   db,
   idempotencyKeysTable,
@@ -263,6 +264,8 @@ async function recordSale(
   baseUrl: string,
   productName: string,
   saleDate: string,
+  unitAmountCents = 5000,
+  quantity = 1,
 ): Promise<string> {
   const idempotencyKey = randomUUID();
   createdIdempotencyKeys.push(idempotencyKey);
@@ -271,8 +274,8 @@ async function recordSale(
     body: {
       saleDate,
       productName,
-      quantity: 1,
-      unitAmountCents: 5000,
+      quantity,
+      unitAmountCents,
       notes: null,
       idempotencyKey,
     },
@@ -1254,6 +1257,182 @@ test("monthly backup HTTP endpoints enforce access and use the isolated router d
       .from(salesHistoryTable)
       .where(eq(salesHistoryTable.operation, "pre-restore-backup"));
     assert.equal(snapshots.at(-1)?.actorId, "integration-user");
+  });
+});
+
+test("period financial backups reconcile dates, preserve cross-month dependencies, and restore idempotently", async () => {
+  const mainProduct = `Plano período ${randomUUID()}`;
+  const rangeProduct = `Plano intervalo ${randomUUID()}`;
+
+  await withSalesApi(getTestDatabase(), async (baseUrl) => {
+    const octoberSaleId = await recordSale(baseUrl, mainProduct, "2026-10-05", 100000);
+    const novemberSaleId = await recordSale(baseUrl, mainProduct, "2026-11-10", 50000);
+    const outsideSaleId = await recordSale(baseUrl, mainProduct, "2026-12-10", 9900);
+    await recordSale(baseUrl, rangeProduct, "2026-10-31", 100);
+    await recordSale(baseUrl, rangeProduct, "2026-11-01", 200);
+
+    const refundKey = randomUUID();
+    createdIdempotencyKeys.push(refundKey);
+    const refundResponse = await apiRequest(baseUrl, `/sales/${octoberSaleId}/refunds`, {
+      method: "POST",
+      body: {
+        refundDate: "2026-11-20",
+        amountCents: 20000,
+        reason: "Estorno parcial em mês posterior",
+        idempotencyKey: refundKey,
+      },
+    });
+    assert.equal(refundResponse.status, 201);
+    const refund = await refundResponse.json() as { id: string };
+    createdRefundIds.push(refund.id);
+    const octoberGoal = await saveGoal(baseUrl, "2026-10", mainProduct, 110000);
+    const novemberGoal = await saveGoal(baseUrl, "2026-11", mainProduct, 60000);
+
+    async function createBackup(selection: SalesPeriodBackupSelection) {
+      const response = await apiRequest(baseUrl, "/sales/backup/period", {
+        method: "POST",
+        body: selection,
+      });
+      assert.equal(response.status, 200);
+      return response.json() as Promise<{
+        schemaVersion: number;
+        period: string;
+        selection: SalesPeriodBackupSelection;
+        partial: boolean;
+        generatedAt: string;
+        counts: {
+          totalRecords: number;
+          periodSales: number;
+          periodRefunds: number;
+          periodGoals: number;
+          dependencySales: number;
+          dependencyRefunds: number;
+        };
+        totals: { salesCents: number; refundsCents: number; netCents: number; quantity: number };
+        products: Array<{ scope: string; record: { id: string } }>;
+        sales: Array<{ scope: string; record: { id: string; saleDate: string; status: string; notes: string | null } }>;
+        refunds: Array<{ scope: string; record: { id: string; saleId: string; refundDate: string } }>;
+        goals: Array<{ scope: string; record: { id: string } }>;
+        histories: Array<{ scope: string; record: { id: string } }>;
+      }>;
+    }
+
+    const october = await createBackup({
+      mode: "months",
+      months: ["2026-10"],
+      productName: mainProduct,
+    });
+    assert.equal(october.schemaVersion, 3);
+    assert.equal(october.counts.periodSales, 1);
+    assert.equal(october.counts.periodRefunds, 0);
+    assert.equal(october.counts.dependencyRefunds, 1);
+    assert.deepEqual(october.totals, { salesCents: 100000, refundsCents: 0, netCents: 100000, quantity: 1 });
+    assert.equal(october.sales.find(({ record }) => record.id === octoberSaleId)?.record.saleDate, "2026-10-05");
+
+    const november = await createBackup({
+      mode: "months",
+      months: ["2026-11"],
+      productName: mainProduct,
+    });
+    assert.equal(november.counts.periodSales, 1);
+    assert.equal(november.counts.periodRefunds, 1);
+    assert.equal(november.counts.dependencySales, 1);
+    assert.equal(november.goals.some(({ record }) => record.id === novemberGoal.id), true);
+    assert.equal(november.goals.some(({ record }) => record.id === octoberGoal.id), false);
+    assert.deepEqual(november.totals, { salesCents: 50000, refundsCents: 20000, netCents: 30000, quantity: 1 });
+    assert.equal(november.sales.find(({ record }) => record.id === octoberSaleId)?.scope, "dependency");
+
+    const combined = await createBackup({
+      mode: "months",
+      months: ["2026-11", "2026-10"],
+      productName: mainProduct,
+    });
+    assert.deepEqual(combined.selection.months, ["2026-10", "2026-11"]);
+    assert.equal(combined.counts.periodSales, 2);
+    assert.equal(combined.counts.periodRefunds, 1);
+    assert.deepEqual(combined.totals, { salesCents: 150000, refundsCents: 20000, netCents: 130000, quantity: 2 });
+
+    const inclusiveRange = await createBackup({
+      mode: "range",
+      fromDate: "2026-10-31",
+      toDate: "2026-11-01",
+      productName: rangeProduct,
+    });
+    assert.equal(inclusiveRange.counts.periodSales, 2);
+    assert.equal(inclusiveRange.totals.salesCents, 300);
+
+    const empty = await createBackup({ mode: "months", months: ["2027-01"] });
+    assert.equal(empty.counts.periodSales, 0);
+    assert.equal(empty.counts.periodRefunds, 0);
+    assert.equal(empty.counts.totalRecords, 0);
+    assert.deepEqual(empty.totals, { salesCents: 0, refundsCents: 0, netCents: 0, quantity: 0 });
+
+    const allHistory = await createBackup({ mode: "all" });
+    assert.equal(allHistory.partial, false);
+    assert.equal(allHistory.sales.some(({ record }) => record.id === outsideSaleId), true);
+    assert.ok(allHistory.totals.salesCents >= 160200);
+    assert.ok(allHistory.totals.refundsCents >= 20000);
+
+    const database = getTestDatabase();
+    const restoreSaleIds = november.sales.map(({ record }) => record.id);
+    const restoreRefundIds = november.refunds.map(({ record }) => record.id);
+    const restoreGoalIds = november.goals.map(({ record }) => record.id);
+    const restoreHistoryIds = november.histories.map(({ record }) => record.id);
+    await database.delete(salesHistoryTable).where(inArray(salesHistoryTable.id, restoreHistoryIds));
+    await database.delete(salesRefundsTable).where(inArray(salesRefundsTable.id, restoreRefundIds));
+    await database.delete(salesGoalsTable).where(inArray(salesGoalsTable.id, restoreGoalIds));
+    await database.delete(salesTable).where(inArray(salesTable.id, restoreSaleIds));
+
+    const previewResponse = await apiRequest(baseUrl, "/sales/restore/preview", {
+      method: "POST",
+      body: november,
+    });
+    assert.equal(previewResponse.status, 200);
+    const preview = await previewResponse.json() as {
+      period: string;
+      toInsert: { sales: number; refunds: number; goals: number };
+      blocked: boolean;
+    };
+    assert.equal(preview.period, "2026-11");
+    assert.equal(preview.blocked, false);
+    assert.equal(preview.toInsert.sales, 2);
+    assert.equal(preview.toInsert.refunds, 1);
+    assert.equal(preview.toInsert.goals, 1);
+
+    const restoreResponse = await apiRequest(baseUrl, "/sales/restore", {
+      method: "POST",
+      body: november,
+    });
+    assert.equal(restoreResponse.status, 200);
+    const restored = await restoreResponse.json() as { inserted: { sales: number; refunds: number; goals: number } };
+    assert.deepEqual(restored.inserted, { sales: 2, refunds: 1, goals: 1, products: 0, histories: restoreHistoryIds.length });
+
+    const repeatResponse = await apiRequest(baseUrl, "/sales/restore", {
+      method: "POST",
+      body: november,
+    });
+    assert.equal(repeatResponse.status, 200);
+    const repeated = await repeatResponse.json() as { inserted: { sales: number; refunds: number; goals: number }; identical: { sales: number; refunds: number; goals: number } };
+    assert.deepEqual(repeated.inserted, { sales: 0, refunds: 0, goals: 0, products: 0, histories: 0 });
+    assert.equal(repeated.identical.sales, 2);
+    assert.equal(repeated.identical.refunds, 1);
+
+    const corrupt = { ...november, counts: { ...november.counts, totalRecords: november.counts.totalRecords + 1 } };
+    const corruptResponse = await apiRequest(baseUrl, "/sales/restore/preview", { method: "POST", body: corrupt });
+    assert.equal(corruptResponse.status, 400);
+
+    const [novemberSale] = await database.select().from(salesTable).where(eq(salesTable.id, novemberSaleId));
+    await database.update(salesTable).set({ notes: "alteração local", version: novemberSale.version + 1 }).where(eq(salesTable.id, novemberSaleId));
+    const conflictPreviewResponse = await apiRequest(baseUrl, "/sales/restore/preview", { method: "POST", body: november });
+    assert.equal(conflictPreviewResponse.status, 200);
+    const conflictPreview = await conflictPreviewResponse.json() as { conflicts: Array<{ entityType: string; id: string }>; blocked: boolean };
+    assert.equal(conflictPreview.blocked, false);
+    assert.equal(conflictPreview.conflicts.some(({ entityType, id }) => entityType === "sale" && id === novemberSaleId), true);
+
+    const decemberScoreboardResponse = await apiRequest(baseUrl, "/sales/scoreboard?fromDate=2026-12-01&toDate=2026-12-31");
+    assert.equal(decemberScoreboardResponse.status, 200);
+    const decemberScoreboard = await decemberScoreboardResponse.json() as { totals: { quantity: number; salesCents: number; refundCents: number; netCents: number } };
+    assert.deepEqual(decemberScoreboard.totals, { quantity: 1, salesCents: 9900, refundCents: 0, netCents: 9900 });
   });
 });
 

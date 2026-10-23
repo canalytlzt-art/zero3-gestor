@@ -7,5 +7,6 @@
  */
 import type { MonthlySalesBackupV1 } from './monthlySalesBackupV1';
 import type { MonthlySalesBackupV2 } from './monthlySalesBackupV2';
+import type { SalesPeriodBackup } from './salesPeriodBackup';
 
-export type MonthlySalesBackupInput = MonthlySalesBackupV2 | MonthlySalesBackupV1;
+export type MonthlySalesBackupInput = MonthlySalesBackupV2 | SalesPeriodBackup | MonthlySalesBackupV1;

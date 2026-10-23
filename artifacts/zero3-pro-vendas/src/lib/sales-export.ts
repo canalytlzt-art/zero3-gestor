@@ -3,6 +3,7 @@ import type {
   MonthlySalesBackupInput,
   MonthlySalesBackupV1,
   MonthlySalesBackupV2,
+  SalesPeriodBackup,
 } from '@workspace/api-client-react';
 import { normalizeProductName } from './sales-utils';
 
@@ -16,6 +17,22 @@ function isValidDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = Date.parse(`${value}T00:00:00.000Z`);
   return !Number.isNaN(parsed) && new Date(parsed).toISOString().slice(0, 10) === value;
+}
+
+function monthKeysBetween(startMonth: string, endMonth: string): string[] {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(startMonth) || !/^\d{4}-(0[1-9]|1[0-2])$/.test(endMonth) || startMonth > endMonth) return [];
+  const result: string[] = [];
+  let [year, month] = startMonth.split('-').map(Number);
+  const [endYear, endMonthNumber] = endMonth.split('-').map(Number);
+  while (year < endYear || (year === endYear && month <= endMonthNumber)) {
+    result.push(`${year}-${String(month).padStart(2, '0')}`);
+    month += 1;
+    if (month === 13) {
+      year += 1;
+      month = 1;
+    }
+  }
+  return result;
 }
 
 const legacyBackupSchema = z.object({
@@ -261,7 +278,163 @@ const monthlyBackupV2Schema = z.object({
   });
 });
 
+const periodSelectionSchema = z.object({
+  mode: z.enum(['months', 'range', 'all']),
+  months: z.array(z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/)).max(120).optional(),
+  fromDate: z.string().optional(),
+  toDate: z.string().optional(),
+  productName: z.string().max(120).nullable().optional(),
+}).superRefine((selection, context) => {
+  if (selection.mode === 'months') {
+    if (!selection.months?.length || new Set(selection.months).size !== selection.months.length) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['months'], message: 'A seleção de meses está vazia ou contém duplicidades.' });
+    }
+    if (selection.fromDate !== undefined || selection.toDate !== undefined) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['mode'], message: 'Seleção de meses e intervalo personalizado não podem ser usados juntos.' });
+    }
+  } else if (selection.mode === 'range') {
+    if (!selection.fromDate || !selection.toDate || !isValidDate(selection.fromDate) || !isValidDate(selection.toDate) || selection.fromDate > selection.toDate) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['fromDate'], message: 'O intervalo de datas é inválido.' });
+    }
+    if (selection.months !== undefined) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['months'], message: 'Seleção de meses e intervalo personalizado não podem ser usados juntos.' });
+    }
+  } else if (selection.months !== undefined || selection.fromDate !== undefined || selection.toDate !== undefined) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['mode'], message: 'A seleção de todo o histórico não pode conter um filtro de datas.' });
+  }
+});
+
+const salesPeriodBackupV3Schema = z.object({
+  format: z.literal('zero3-pro-financial-backup'),
+  schemaVersion: z.literal(3),
+  module: z.literal('sales'),
+  origin: z.literal('zero3-pro-financial-database'),
+  generatedAt: dateTimeSchema,
+  period: z.string().min(1).max(500),
+  selection: periodSelectionSchema,
+  partial: z.boolean(),
+  currency: z.literal('BRL'),
+  businessTimezone: z.literal('America/Sao_Paulo'),
+  counts: z.object({
+    periodSales: z.number().int().min(0),
+    periodRefunds: z.number().int().min(0),
+    periodGoals: z.number().int().min(0),
+    dependencySales: z.number().int().min(0),
+    dependencyRefunds: z.number().int().min(0),
+    products: z.number().int().min(0),
+    histories: z.number().int().min(0),
+    totalRecords: z.number().int().min(0),
+  }),
+  totals: z.object({
+    salesCents: nonNegativeCentsSchema,
+    refundsCents: nonNegativeCentsSchema,
+    netCents: z.number().int().min(-Number.MAX_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
+    quantity: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  }),
+  products: z.array(scopedRecordSchema(productRecordSchema)).max(MAX_BACKUP_PRODUCTS),
+  sales: z.array(scopedRecordSchema(saleRecordSchema)).max(MAX_BACKUP_SALES),
+  refunds: z.array(scopedRecordSchema(refundRecordSchema)).max(MAX_BACKUP_REFUNDS),
+  goals: z.array(scopedRecordSchema(goalRecordSchema)).max(MAX_BACKUP_GOALS),
+  histories: z.array(scopedRecordSchema(historyRecordSchema)).max(MAX_BACKUP_HISTORIES),
+}).superRefine((backup, context) => {
+  const expectedCounts = {
+    periodSales: backup.sales.filter(({ scope }) => scope === 'period').length,
+    periodRefunds: backup.refunds.filter(({ scope }) => scope === 'period').length,
+    periodGoals: backup.goals.filter(({ scope }) => scope === 'period').length,
+    dependencySales: backup.sales.filter(({ scope }) => scope === 'dependency').length,
+    dependencyRefunds: backup.refunds.filter(({ scope }) => scope === 'dependency').length,
+    products: backup.products.length,
+    histories: backup.histories.length,
+  };
+  for (const [key, count] of Object.entries(expectedCounts)) {
+    if (backup.counts[key as keyof typeof expectedCounts] !== count) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['counts', key], message: 'A quantidade de registros não corresponde ao conteúdo.' });
+    }
+  }
+  if (backup.counts.totalRecords !== Object.values(expectedCounts).reduce((sum, count) => sum + count, 0)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['counts', 'totalRecords'], message: 'A quantidade total não corresponde ao conteúdo.' });
+  }
+  const unique = (records: Array<{ record: { id: string } }>, path: string) => {
+    const ids = new Set<string>();
+    records.forEach(({ record }, index) => {
+      if (ids.has(record.id)) context.addIssue({ code: z.ZodIssueCode.custom, path: [path, index, 'record', 'id'], message: 'O backup contém um ID repetido.' });
+      ids.add(record.id);
+    });
+  };
+  unique(backup.products, 'products');
+  unique(backup.sales, 'sales');
+  unique(backup.refunds, 'refunds');
+  unique(backup.goals, 'goals');
+  unique(backup.histories, 'histories');
+  const productIds = new Set(backup.products.map(({ record }) => record.id));
+  const sales = new Map(backup.sales.map(({ record }) => [record.id, record]));
+  const matchesPlan = (name: string) => !backup.selection.productName
+    || normalizeProductName(name).toLocaleLowerCase('pt-BR') === normalizeProductName(backup.selection.productName).toLocaleLowerCase('pt-BR');
+  const months = backup.selection.mode === 'months'
+    ? backup.selection.months ?? []
+    : backup.selection.mode === 'range'
+      ? monthKeysBetween(backup.selection.fromDate!.slice(0, 7), backup.selection.toDate!.slice(0, 7))
+      : [...new Set([
+        ...backup.sales.map(({ record }) => record.saleDate.slice(0, 7)),
+        ...backup.refunds.map(({ record }) => record.refundDate.slice(0, 7)),
+        ...backup.goals.map(({ record }) => record.month),
+      ])];
+  const includesDate = (date: string) => backup.selection.mode === 'all'
+    || (backup.selection.mode === 'months' ? months.includes(date.slice(0, 7))
+      : date >= backup.selection.fromDate! && date <= backup.selection.toDate!);
+  const periodSales = backup.sales.filter(({ scope }) => scope === 'period');
+  periodSales.forEach(({ scope, record }, index) => {
+    if ((scope === 'period') !== (includesDate(record.saleDate) && matchesPlan(record.productName))) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['sales', index, 'scope'], message: 'A venda está classificada fora do período ou filtro.' });
+    }
+    const total = record.quantity * record.unitAmountCents;
+    if (!Number.isSafeInteger(total) || total !== record.totalCents) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['sales', index, 'record', 'totalCents'], message: 'O total da venda não confere.' });
+    }
+    if (record.productId !== null && !productIds.has(record.productId)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['sales', index, 'record', 'productId'], message: 'O produto associado não está incluído.' });
+    }
+  });
+  backup.refunds.forEach(({ scope, record }, index) => {
+    const sale = sales.get(record.saleId);
+    if (!sale || ((scope === 'period') !== (includesDate(record.refundDate) && matchesPlan(sale.productName)))) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['refunds', index, 'record'], message: 'O estorno ou sua venda original não está corretamente incluído.' });
+    }
+    if (sale && record.status === 'active' && (sale.status !== 'active' || record.refundDate < sale.saleDate)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['refunds', index, 'record'], message: 'Estorno ativo sem venda válida relacionada.' });
+    }
+  });
+  backup.goals.forEach(({ scope, record }, index) => {
+    if (scope !== 'period' || !months.includes(record.month)
+      || (record.productId !== null && !productIds.has(record.productId))
+      || (Boolean(backup.selection.productName) && record.productId === null)
+      || (record.productId !== null && !matchesPlan(record.productName ?? ''))) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['goals', index, 'record'], message: 'A meta não pertence ao período ou filtro.' });
+    }
+  });
+  const activeSales = periodSales.filter(({ record }) => record.status === 'active');
+  const salesCents = activeSales.reduce((sum, { record }) => sum + BigInt(record.totalCents), 0n);
+  const refundsCents = backup.refunds
+    .filter(({ scope, record }) => scope === 'period' && record.status === 'active' && sales.get(record.saleId)?.status === 'active')
+    .reduce((sum, { record }) => sum + BigInt(record.amountCents), 0n);
+  const quantity = activeSales.reduce((sum, { record }) => sum + BigInt(record.quantity), 0n);
+  if (salesCents > BigInt(Number.MAX_SAFE_INTEGER) || refundsCents > BigInt(Number.MAX_SAFE_INTEGER)
+    || quantity > BigInt(Number.MAX_SAFE_INTEGER) || backup.totals.salesCents !== Number(salesCents)
+    || backup.totals.refundsCents !== Number(refundsCents)
+    || backup.totals.netCents !== Number(salesCents - refundsCents)
+    || backup.totals.quantity !== Number(quantity)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['totals'], message: 'Os totais de conferência não correspondem aos registros.' });
+  }
+});
+
 export function parseMonthlySalesBackup(value: unknown): MonthlySalesBackupInput {
+  if (value && typeof value === 'object' && 'schemaVersion' in value && value.schemaVersion === 3) {
+    const parsed = salesPeriodBackupV3Schema.safeParse(value);
+    if (!parsed.success) {
+      throw new Error(parsed.error.issues[0]?.message ?? 'O arquivo de período não é válido.');
+    }
+    return parsed.data as SalesPeriodBackup;
+  }
   if (value && typeof value === 'object' && 'schemaVersion' in value && value.schemaVersion === 2) {
     const parsed = monthlyBackupV2Schema.safeParse(value);
     if (!parsed.success) {
@@ -281,6 +454,17 @@ export function downloadMonthlyBackup(backup: MonthlySalesBackupV2) {
   const link = document.createElement('a');
   link.href = url;
   link.download = `zero3-pro-backup-${backup.period}.json`;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export function downloadSalesPeriodBackup(backup: SalesPeriodBackup) {
+  const contents = JSON.stringify(backup, null, 2);
+  const blob = new Blob([contents], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `zero3-pro-backup-periodo-${new Date().toISOString().slice(0, 10)}.json`;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
