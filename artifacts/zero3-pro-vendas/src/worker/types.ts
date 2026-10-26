@@ -30,6 +30,8 @@ export interface WorkerEnv {
   DB: D1Database;
   ASSETS: WorkerAssets;
   CLERK_SECRET_KEY?: string;
+  CLERK_JWT_KEY?: string;
+  CLERK_ISSUER?: string;
   ZERO3_ALLOWED_EMAILS?: string;
   CLERK_AUTHORIZED_PARTIES?: string;
 }

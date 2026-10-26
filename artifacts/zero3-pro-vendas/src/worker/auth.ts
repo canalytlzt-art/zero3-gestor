@@ -45,6 +45,15 @@ const verifierInfrastructureReasons = new Set<string>([
   TokenVerificationErrorReason.JWKFailedToResolve,
 ]);
 
+function safeJwksUpstreamStatus(error: TokenVerificationError): number | undefined {
+  const match = /^Error loading Clerk JWKS from https:\/\/\S+ with code=(\d{3})$/.exec(
+    error.message,
+  );
+  if (!match) return undefined;
+  const status = Number(match[1]);
+  return status >= 100 && status <= 599 ? status : undefined;
+}
+
 export function classifyTokenVerificationFailure(error: unknown): AuthFailure {
   if (!(error instanceof TokenVerificationError)) {
     return authFailure(
@@ -73,7 +82,7 @@ export function classifyTokenVerificationFailure(error: unknown): AuthFailure {
       503,
       "clerk_verification_unavailable",
       "Não foi possível validar a sessão no momento. Tente novamente mais tarde.",
-      undefined,
+      safeJwksUpstreamStatus(error),
       verificationReason,
     );
   }
@@ -102,6 +111,68 @@ function cookieValue(request: Request, name: string): string | null {
   return null;
 }
 
+function parseHttpsOrigin(value: string, allowLocalHttp = false): string | null {
+  try {
+    const parsed = new URL(value);
+    const isLoopback = ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname);
+    if (
+      (parsed.protocol !== "https:" &&
+        !(allowLocalHttp && parsed.protocol === "http:" && isLoopback)) ||
+      parsed.username ||
+      parsed.password ||
+      parsed.pathname !== "/" ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      return null;
+    }
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+function configuredAuthorizedOrigins(value: string | undefined): Set<string> {
+  const entries = (value ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
+  const origins = new Set<string>();
+  for (const entry of entries) {
+    const origin = parseHttpsOrigin(entry, true);
+    if (!origin) return new Set();
+    origins.add(origin);
+  }
+  return origins;
+}
+
+function requestOrigin(
+  request: Request,
+  env: WorkerEnv,
+): string | AuthFailure {
+  const configuredOrigins = configuredAuthorizedOrigins(env.CLERK_AUTHORIZED_PARTIES);
+  if (configuredOrigins.size === 0) {
+    return authFailure(
+      503,
+      "clerk_authorized_parties_missing",
+      "As origens autorizadas do Clerk não estão configuradas no Worker.",
+    );
+  }
+
+  const originHeader = request.headers.get("origin");
+  let origin: string | null = null;
+  if (originHeader) {
+    origin = parseHttpsOrigin(originHeader, true);
+  } else {
+    origin = parseHttpsOrigin(new URL(request.url).origin, true);
+  }
+  if (!origin || !configuredOrigins.has(origin)) {
+    return authFailure(
+      403,
+      "request_origin_not_authorized",
+      "A origem desta requisição não está autorizada.",
+    );
+  }
+  return origin;
+}
+
 export function sessionToken(request: Request): string | null {
   // The web app authenticates with Clerk's same-origin session cookie.
   // Prefer it over an incidental Authorization header; bearer remains a fallback
@@ -117,8 +188,9 @@ export function sessionToken(request: Request): string | null {
 
 async function verifiedUserId(
   request: Request,
-  env: WorkerEnv,
-  secretKey: string,
+  jwtKey: string,
+  issuer: string,
+  authorizedOrigin: string,
 ): Promise<string | AuthFailure> {
   const token = sessionToken(request);
   if (!token) {
@@ -129,15 +201,11 @@ async function verifiedUserId(
     );
   }
 
-  const parties = (env.CLERK_AUTHORIZED_PARTIES ?? new URL(request.url).origin)
-    .split(",")
-    .map((party) => party.trim())
-    .filter(Boolean);
-
   try {
     const claims = await verifyToken(token, {
-      secretKey,
-      authorizedParties: parties,
+      jwtKey,
+      issuer,
+      authorizedParties: [authorizedOrigin],
     });
     return typeof claims.sub === "string" && claims.sub
       ? claims.sub
@@ -249,7 +317,33 @@ export async function getAuthContext(
     );
   }
 
-  const verifiedId = await verifiedUserId(request, env, secretKey);
+  const jwtKey = env.CLERK_JWT_KEY?.trim();
+  if (!jwtKey) {
+    return authFailure(
+      503,
+      "clerk_jwt_key_missing",
+      "A chave pública JWT do Clerk não está configurada no Worker.",
+    );
+  }
+
+  const issuer = parseHttpsOrigin(env.CLERK_ISSUER ?? "");
+  if (!issuer) {
+    return authFailure(
+      503,
+      "clerk_issuer_missing_or_invalid",
+      "O emissor Clerk não está configurado corretamente no Worker.",
+    );
+  }
+
+  const authorizedOrigin = requestOrigin(request, env);
+  if (typeof authorizedOrigin !== "string") return authorizedOrigin;
+
+  const verifiedId = await verifiedUserId(
+    request,
+    jwtKey,
+    issuer,
+    authorizedOrigin,
+  );
   if (typeof verifiedId !== "string") return verifiedId;
 
   const emailResult = await verifiedPrimaryEmail(verifiedId, secretKey);
