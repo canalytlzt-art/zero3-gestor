@@ -10,18 +10,21 @@ O estado de cada critério de aceite, incluindo ambiente e limites da evidência
 - Garantir build com pnpm 10.26.1, `PORT`, `BASE_PATH`, assets em `dist/public`, fallback SPA e rotas `/api/*` no Worker.
 - Comparar endpoints `lib/api-spec/openapi.yaml`, Express `artifacts/api-server/src/routes/` e Worker `src/worker/`.
 - Garantir resposta 404 para uma rota `/api` desconhecida; o Worker atualmente retorna 501 nesse caso.
+- Testar o Worker no runtime local compatível e registrar build, rotas e comportamento observado. Não publicar em produção nesta etapa.
 - Critério: build reprodutível, dry-run Wrangler válido e mapa de paridade das rotas; sem publicar.
 
 ## T03 — Clerk e autorização
 
 - Verificar a sessão same-origin, proxy Clerk, JWT local, emissor, origem autorizada e `ZERO3_ALLOWED_EMAILS`.
 - Usar a mesma instância Clerk Development no build e Runtime. Não imprimir nem gravar credenciais.
+- Testar acesso autorizado e não autorizado, renovação e falhas de sessão; quando faltar configuração, indicar o nome do campo e a tela do Cloudflare sem pedir o segredo no chat.
 - Critério: teste de Worker para sessão válida, ausente, expirada, inválida e não autorizada; validação real só quando o Runtime correto estiver configurado.
 
 ## T04 — D1, migrações e conciliação
 
 - **Pré-requisito:** obter/configurar um D1 de homologação independente; substituir o ID compartilhado em `wrangler.test.jsonc` antes de deploy.
 - Revalidar migrações e snapshot local com `--local` e `--persist-to` explícito. Planejar qualquer mudança estrutural com cópia, migração versionada, reexecução idempotente, conciliação e recuperação.
+- Confirmar o banco/manifesto existente e conciliar contagens, IDs, vínculos e totais; repetir a importação em ambiente isolado para provar idempotência.
 - Não consultar, migrar, recriar ou alterar o D1 principal nesta etapa sem autorização.
 
 ## T05 — Vendas, importação e Scoreboard
@@ -52,3 +55,7 @@ O estado de cada critério de aceite, incluindo ambiente e limites da evidência
 ## Bloqueio conhecido
 
 `artifacts/zero3-pro-vendas/wrangler.test.jsonc` atualmente usa o mesmo `database_id` da configuração principal. Não executar `deploy:cloudflare:test` até criar/configurar um D1 realmente separado e confirmar o ID. Não substituir essa referência por um UUID inventado.
+
+## Protocolo para tentativas repetidas
+
+Se uma correção falhar repetidamente, interromper mudanças especulativas, ler `ESTADO.md`, reproduzir o erro atual e identificar sua causa antes de editar. Preservar validações aprovadas e limitar a correção aos arquivos necessários; não reiniciar toda a migração.

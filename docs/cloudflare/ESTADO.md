@@ -5,7 +5,7 @@ Atualizado em 2026-10-26.
 ## Etapa atual
 
 - T01 — auditoria do repositório e plano: **concluída**.
-- Análise e fontes fornecidas pelo proprietário incorporadas como requisitos a validar, não como comprovação de que o código já os cumpre.
+- Análise/fontes e mensagens por etapa fornecidas pelo proprietário incorporadas como requisitos de execução, não como comprovação de que o código já os cumpre.
 - Próxima etapa proposta: T02 — build reproduzível, Worker e paridade da API. A implementação aguarda a escolha do proprietário.
 
 ## Arquivos alterados nesta etapa

@@ -58,6 +58,7 @@ O escopo deste gestor inclui vendas, produtos, cancelamentos/estornos, metas, Sc
 - O importador `scripts/d1/import_snapshot_to_d1.py` é local-only e deve continuar usando `--local` e seu `--persist-to` explícito.
 - A configuração de Runtime do Worker, as variáveis de build `VITE_*` e o processo Express são camadas separadas.
 - A lista de testes npm atual não executa todos os testes existentes de ocupação/importação nem testa as rotas de negócio do Worker.
+- Se houver tentativas repetidas sem progresso, leia `docs/cloudflare/ESTADO.md`, reproduza o erro atual e faça uma correção limitada; preserve o que já passou em vez de reiniciar a migração.
 
 ## Pointers
 
