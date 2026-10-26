@@ -1,5 +1,7 @@
 # Matriz de testes Cloudflare
 
+O registro item a item do checklist oficial está em [`ACEITE.md`](./ACEITE.md). Ele distingue evidência local/mock de validação Workers/Cloudflare e mantém “Não executado” explícito.
+
 ## Evidência registrada
 
 Na última validação anterior à auditoria T01: 33 testes do app passaram, assim como typecheck, build Vite e `wrangler deploy --dry-run`. Esses resultados cobrem código local e empacotamento; não comprovam login real, D1 remoto ou deploy integrado.

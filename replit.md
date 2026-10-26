@@ -63,5 +63,6 @@ O escopo deste gestor inclui vendas, produtos, cancelamentos/estornos, metas, Sc
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
 - Leia `docs/cloudflare/ESTADO.md` ao retomar trabalho Cloudflare.
+- Registre cada critério executado em `docs/cloudflare/ACEITE.md`; diferencie testes locais/mock de testes reais em Workers/homologação.
 - Siga as etapas de `docs/cloudflare/PLANO.md`; valide interface, API, persistência e testes para cada função.
 - Nunca trate build, preview do Replit ou dry-run como prova de publicação integrada.

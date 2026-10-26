@@ -2,11 +2,14 @@
 
 Plano da auditoria T01, baseado nos arquivos atuais. Cada etapa deve ter alteração pequena, validação própria e commit revisável. Não publicar em produção, alterar o D1 principal ou executar restauração destrutiva sem autorização específica.
 
+O estado de cada critério de aceite, incluindo ambiente e limites da evidência, fica em [`ACEITE.md`](./ACEITE.md). Não converter “Aprovado local” em aprovação de homologação.
+
 ## T02 — Build reproduzível e API no runtime Workers
 
 - Conferir `artifacts/zero3-pro-vendas/vite.config.ts`, scripts de `package.json`, `wrangler.jsonc`, `worker/index.ts` e dependências usadas no Worker.
 - Garantir build com pnpm 10.26.1, `PORT`, `BASE_PATH`, assets em `dist/public`, fallback SPA e rotas `/api/*` no Worker.
 - Comparar endpoints `lib/api-spec/openapi.yaml`, Express `artifacts/api-server/src/routes/` e Worker `src/worker/`.
+- Garantir resposta 404 para uma rota `/api` desconhecida; o Worker atualmente retorna 501 nesse caso.
 - Critério: build reprodutível, dry-run Wrangler válido e mapa de paridade das rotas; sem publicar.
 
 ## T03 — Clerk e autorização

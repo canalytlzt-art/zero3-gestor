@@ -18,6 +18,7 @@ Atualizado em 2026-10-26.
 - `docs/cloudflare/CONTRATOS_API.md`
 - `docs/cloudflare/CONCILIACAO.md`
 - `docs/cloudflare/TESTES.md`
+- `docs/cloudflare/ACEITE.md`
 - `docs/cloudflare/OPERACAO.md`
 - Requisitos extraídos de `ANALISE_E_FONTES.md` registrados no inventário, plano, conciliação e matriz de testes.
 
@@ -34,6 +35,7 @@ Atualizado em 2026-10-26.
 - Nenhum teste/build/dry-run foi executado especificamente nesta auditoria T01.
 - Última evidência registrada antes desta etapa: 33 testes do app, typecheck, build Vite e Wrangler dry-run aprovados; isso não comprova login real nem execução integrada remota.
 - Nenhum deploy, migração, consulta ao D1 remoto ou alteração de dados foi realizado.
+- Checklist `CHECKLIST_ACEITE.md` registrado item a item em `docs/cloudflare/ACEITE.md`; o compartilhamento do D1 entre configs de teste e principal está reprovado.
 
 ## Pendências que bloqueiam homologação
 
