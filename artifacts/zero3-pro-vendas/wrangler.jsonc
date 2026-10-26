@@ -11,8 +11,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "zero3-pro-local-copy",
-      "database_id": "00000000-0000-4000-8000-000000000034",
+      "database_name": "zero3-pro-gestao-db",
+      "database_id": "e2cf36df-1146-48bc-8975-19d2400410cd",
       "migrations_dir": "../../scripts/d1/migrations"
     }
   ],
