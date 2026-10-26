@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "hello": "tsx ./src/hello.ts",
+    "d1:import-local": "python3 d1/import_snapshot_to_d1.py",
+    "d1:test-sqlite": "python3 -m unittest d1/test_import_snapshot.py",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
