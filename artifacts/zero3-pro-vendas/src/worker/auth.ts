@@ -1,6 +1,35 @@
 import { verifyToken } from "@clerk/backend";
 import type { AuthContext, WorkerEnv } from "./types";
 
+type AuthFailure = {
+  ok: false;
+  status: number;
+  code: string;
+  message: string;
+  upstreamStatus?: number;
+};
+
+type AuthValidation =
+  | { ok: true; context: AuthContext }
+  | AuthFailure;
+
+type EmailValidation =
+  | { ok: true; email: string }
+  | AuthFailure;
+
+const authFailure = (
+  status: number,
+  code: string,
+  message: string,
+  upstreamStatus?: number,
+): AuthFailure => ({
+  ok: false,
+  status,
+  code,
+  message,
+  ...(upstreamStatus === undefined ? {} : { upstreamStatus }),
+});
+
 function cookieValue(request: Request, name: string): string | null {
   const cookieHeader = request.headers.get("cookie");
   if (!cookieHeader) return null;
@@ -26,10 +55,16 @@ function sessionToken(request: Request): string | null {
 async function verifiedUserId(
   request: Request,
   env: WorkerEnv,
-): Promise<string | null> {
+  secretKey: string,
+): Promise<string | AuthFailure> {
   const token = sessionToken(request);
-  const secretKey = env.CLERK_SECRET_KEY;
-  if (!token || !secretKey) return null;
+  if (!token) {
+    return authFailure(
+      401,
+      "session_missing",
+      "O Worker não recebeu uma sessão Clerk. Entre novamente.",
+    );
+  }
 
   const parties = (env.CLERK_AUTHORIZED_PARTIES ?? new URL(request.url).origin)
     .split(",")
@@ -41,22 +76,70 @@ async function verifiedUserId(
       secretKey,
       authorizedParties: parties,
     });
-    return typeof claims.sub === "string" && claims.sub ? claims.sub : null;
+    return typeof claims.sub === "string" && claims.sub
+      ? claims.sub
+      : authFailure(401, "session_invalid", "A sessão Clerk não contém um usuário válido. Entre novamente.");
   } catch {
-    return null;
+    return authFailure(
+      401,
+      "session_invalid",
+      "O Worker recusou a sessão Clerk. Entre novamente e, se persistir, confira se as chaves pertencem à mesma instância.",
+    );
   }
 }
 
 async function verifiedPrimaryEmail(
   userId: string,
   secretKey: string,
-): Promise<string | null> {
-  const response = await fetch(
-    `https://api.clerk.com/v1/users/${encodeURIComponent(userId)}`,
-    { headers: { authorization: `Bearer ${secretKey}` } },
-  );
-  if (!response.ok) return null;
-  const user = (await response.json()) as {
+): Promise<EmailValidation> {
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://api.clerk.com/v1/users/${encodeURIComponent(userId)}`,
+      { headers: { authorization: `Bearer ${secretKey}` } },
+    );
+  } catch {
+    return authFailure(
+      503,
+      "clerk_unavailable",
+      "Não foi possível conectar à API do Clerk para verificar o usuário.",
+    );
+  }
+
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      return authFailure(
+        503,
+        "clerk_secret_rejected",
+        "O Clerk rejeitou a chave secreta configurada no Worker.",
+        response.status,
+      );
+    }
+    if (response.status === 404) {
+      return authFailure(
+        401,
+        "clerk_instance_mismatch",
+        "O usuário da sessão não existe na instância Clerk consultada pelo Worker.",
+        response.status,
+      );
+    }
+    if (response.status === 429 || response.status >= 500) {
+      return authFailure(
+        503,
+        "clerk_unavailable",
+        "A API do Clerk está temporariamente indisponível.",
+        response.status,
+      );
+    }
+    return authFailure(
+      502,
+      "clerk_user_lookup_failed",
+      "O Clerk não conseguiu confirmar o usuário autenticado.",
+      response.status,
+    );
+  }
+
+  let user: {
     primary_email_address_id?: unknown;
     email_addresses?: Array<{
       id?: unknown;
@@ -64,6 +147,17 @@ async function verifiedPrimaryEmail(
       verification?: { status?: unknown } | null;
     }>;
   };
+  try {
+    user = (await response.json()) as typeof user;
+  } catch {
+    return authFailure(
+      502,
+      "clerk_user_response_invalid",
+      "O Clerk retornou uma resposta inválida ao consultar o usuário.",
+      response.status,
+    );
+  }
+
   const primary = user.email_addresses?.find(
     (email) => email.id === user.primary_email_address_id,
   );
@@ -71,32 +165,58 @@ async function verifiedPrimaryEmail(
     typeof primary?.email_address !== "string" ||
     primary.verification?.status !== "verified"
   ) {
-    return null;
+    return authFailure(
+      403,
+      "verified_email_required",
+      "A conta Clerk precisa ter um e-mail principal verificado.",
+    );
   }
-  return primary.email_address.trim().toLocaleLowerCase("en-US");
+  return {
+    ok: true,
+    email: primary.email_address.trim().toLocaleLowerCase("en-US"),
+  };
 }
 
 export async function getAuthContext(
   request: Request,
   env: WorkerEnv,
-): Promise<AuthContext | null> {
-  const userId = await verifiedUserId(request, env);
-  if (!userId) return null;
-
+): Promise<AuthValidation> {
   const secretKey = env.CLERK_SECRET_KEY;
-  if (!secretKey) return null;
-  const email = await verifiedPrimaryEmail(userId, secretKey);
+  if (!secretKey) {
+    return authFailure(
+      503,
+      "clerk_secret_missing",
+      "A chave secreta do Clerk não está configurada no Worker.",
+    );
+  }
+
+  const verifiedId = await verifiedUserId(request, env, secretKey);
+  if (typeof verifiedId !== "string") return verifiedId;
+
+  const emailResult = await verifiedPrimaryEmail(verifiedId, secretKey);
+  if (!emailResult.ok) return emailResult;
+
   const allowedEmails = new Set(
     (env.ZERO3_ALLOWED_EMAILS ?? "")
       .split(",")
       .map((value) => value.trim().toLocaleLowerCase("en-US"))
       .filter(Boolean),
   );
+  if (allowedEmails.size === 0) {
+    return authFailure(
+      503,
+      "admin_allowlist_missing",
+      "A lista de administradores não está configurada no Worker.",
+    );
+  }
 
   return {
-    userId,
-    email,
-    authorized: Boolean(email && allowedEmails.has(email)),
+    ok: true,
+    context: {
+      userId: verifiedId,
+      email: emailResult.email,
+      authorized: allowedEmails.has(emailResult.email),
+    },
   };
 }
 

@@ -4,8 +4,8 @@ export const json = (value: unknown, status = 200): Response =>
     headers: { "cache-control": "no-store" },
   });
 
-export function apiError(status: number, message: string): Response {
-  return json({ error: message }, status);
+export function apiError(status: number, message: string, code?: string): Response {
+  return json({ error: message, ...(code ? { code } : {}) }, status);
 }
 
 export async function readJson(request: Request): Promise<unknown> {

@@ -26,13 +26,45 @@ async function handleApi(request: Request, env: WorkerEnv): Promise<Response> {
     });
   }
 
-  const auth = await getAuthContext(request, env);
-  if (!auth) return apiError(401, "Autenticação necessária.");
+  const validation = await getAuthContext(request, env);
+  if (!validation.ok) {
+    console.warn(JSON.stringify({
+      event: "auth.validation_failed",
+      route: path,
+      status: validation.status,
+      code: validation.code,
+      message: validation.message,
+      ...(validation.upstreamStatus === undefined
+        ? {}
+        : { upstreamStatus: validation.upstreamStatus }),
+      rayId: request.headers.get("cf-ray") ?? undefined,
+    }));
+    return apiError(validation.status, validation.message, validation.code);
+  }
+
+  const auth = validation.context;
   if (path === "/access-status" && request.method === "GET") {
-    return json({ authorized: auth.authorized });
+    if (!auth.authorized) {
+      console.warn(JSON.stringify({
+        event: "auth.access_denied",
+        route: path,
+        status: 403,
+        code: "admin_not_allowlisted",
+        message: "Authenticated Clerk email is not in ZERO3_ALLOWED_EMAILS.",
+        rayId: request.headers.get("cf-ray") ?? undefined,
+      }));
+    }
+    return json({
+      authorized: auth.authorized,
+      code: auth.authorized ? "authorized" : "admin_not_allowlisted",
+    });
   }
   if (!auth.authorized) {
-    return apiError(403, "Acesso restrito à equipe autorizada.");
+    return apiError(
+      403,
+      "Acesso restrito à equipe autorizada.",
+      "admin_not_allowlisted",
+    );
   }
 
   const salesResponse = await handleSalesRequest(request, env, auth, path);
