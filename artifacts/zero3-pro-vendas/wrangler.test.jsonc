@@ -14,7 +14,7 @@
       "binding": "DB",
       "database_name": "zero3-pro-gestao-db-teste",
       // Temporary valid UUID for dry-run only; replace after creating the test D1.
-      "database_id": "00000000-0000-4000-8000-000000000001",
+      "database_id": "e2cf36df-1146-48bc-8975-19d2400410cd",
       "migrations_dir": "../../scripts/d1/migrations"
     }
   ],
