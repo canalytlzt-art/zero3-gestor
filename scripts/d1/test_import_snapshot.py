@@ -47,7 +47,8 @@ class SnapshotImportTests(unittest.TestCase):
         with closing(sqlite3.connect(self.database)) as connection:
             self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
             self.assertEqual(
-                connection.execute("SELECT COUNT(*) FROM _d1_migrations").fetchone()[0], 1
+                connection.execute("SELECT COUNT(*) FROM _d1_migrations").fetchone()[0],
+                len(list(import_snapshot.MIGRATIONS_DIR.glob("[0-9][0-9][0-9][0-9]_*.sql"))),
             )
             self.assertEqual(
                 connection.execute("SELECT COUNT(*) FROM sales").fetchone()[0], 80

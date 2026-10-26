@@ -276,7 +276,7 @@ def main() -> int:
             "database": DATABASE,
             "environment": "Wrangler local D1 only",
             "persistPath": str(PERSIST_DIR.relative_to(ROOT)),
-            "migration": "0001_zero3_schema.sql",
+            "migrations": sorted(path.name for path in snapshot.MIGRATIONS_DIR.glob("*.sql")),
             "importSqlFiles": file_count,
             "tableCounts": manifest["manifest"]["tableCounts"],
             "totalRows": manifest["manifest"]["totalRows"],
