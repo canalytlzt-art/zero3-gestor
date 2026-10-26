@@ -1,0 +1,22 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "zero3-gestor-teste",
+  "main": "./src/worker/index.ts",
+  "compatibility_date": "2026-10-26",
+  "assets": {
+    "directory": "./dist/public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"],
+    "not_found_handling": "single-page-application"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "zero3-pro-gestao-db-teste",
+      // Temporary valid UUID for dry-run only; replace after creating the test D1.
+      "database_id": "00000000-0000-4000-8000-000000000001",
+      "migrations_dir": "../../scripts/d1/migrations"
+    }
+  ],
+  "workers_dev": true
+}

@@ -8,6 +8,9 @@
     "build": "vite build --config vite.config.ts",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "deploy:cloudflare": "cd ../.. && PORT=5173 BASE_PATH=/ NODE_ENV=production pnpm --filter @workspace/zero3-pro-vendas run build && pnpm --filter @workspace/scripts exec wrangler deploy --config artifacts/zero3-pro-vendas/wrangler.jsonc --cwd ..",
+    "build:cloudflare:test": "cd ../.. && : \"${VITE_CLERK_PUBLISHABLE_KEY:?Set VITE_CLERK_PUBLISHABLE_KEY to the Clerk Development publishable key}\" && : \"${VITE_CLERK_PROXY_URL:?Set VITE_CLERK_PROXY_URL to the test Worker Clerk proxy URL}\" && PORT=5173 BASE_PATH=/ NODE_ENV=production pnpm --filter @workspace/zero3-pro-vendas run build",
+    "deploy:cloudflare:test:dry-run": "pnpm --filter @workspace/zero3-pro-vendas run build:cloudflare:test && pnpm --filter @workspace/scripts exec wrangler deploy --dry-run --config artifacts/zero3-pro-vendas/wrangler.test.jsonc --cwd ..",
+    "deploy:cloudflare:test": "pnpm --filter @workspace/zero3-pro-vendas run build:cloudflare:test && pnpm --filter @workspace/scripts exec wrangler deploy --config artifacts/zero3-pro-vendas/wrangler.test.jsonc --cwd ..",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test src/lib/sales-utils.test.ts src/lib/sales-workbook.test.ts src/lib/sales-export.test.ts"
   },
