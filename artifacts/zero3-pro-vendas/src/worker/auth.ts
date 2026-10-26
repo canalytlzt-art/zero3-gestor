@@ -1,4 +1,8 @@
 import { verifyToken } from "@clerk/backend";
+import {
+  TokenVerificationError,
+  TokenVerificationErrorReason,
+} from "@clerk/backend/errors";
 import type { AuthContext, WorkerEnv } from "./types";
 
 type AuthFailure = {
@@ -7,6 +11,7 @@ type AuthFailure = {
   code: string;
   message: string;
   upstreamStatus?: number;
+  verificationReason?: string;
 };
 
 type AuthValidation =
@@ -22,13 +27,65 @@ const authFailure = (
   code: string,
   message: string,
   upstreamStatus?: number,
+  verificationReason?: string,
 ): AuthFailure => ({
   ok: false,
   status,
   code,
   message,
   ...(upstreamStatus === undefined ? {} : { upstreamStatus }),
+  ...(verificationReason === undefined ? {} : { verificationReason }),
 });
+
+const verifierInfrastructureReasons = new Set<string>([
+  TokenVerificationErrorReason.InvalidSecretKey,
+  TokenVerificationErrorReason.RemoteJWKFailedToLoad,
+  TokenVerificationErrorReason.RemoteJWKInvalid,
+  TokenVerificationErrorReason.RemoteJWKMissing,
+  TokenVerificationErrorReason.JWKFailedToResolve,
+]);
+
+export function classifyTokenVerificationFailure(error: unknown): AuthFailure {
+  if (!(error instanceof TokenVerificationError)) {
+    return authFailure(
+      503,
+      "clerk_verification_unavailable",
+      "Não foi possível validar a sessão no momento. Tente novamente mais tarde.",
+      undefined,
+      "unclassified_verifier_error",
+    );
+  }
+
+  const verificationReason = error.reason;
+
+  if (verificationReason === TokenVerificationErrorReason.TokenExpired) {
+    return authFailure(
+      401,
+      "session_expired",
+      "Sua sessão expirou. Entre novamente.",
+      undefined,
+      verificationReason,
+    );
+  }
+
+  if (verifierInfrastructureReasons.has(verificationReason)) {
+    return authFailure(
+      503,
+      "clerk_verification_unavailable",
+      "Não foi possível validar a sessão no momento. Tente novamente mais tarde.",
+      undefined,
+      verificationReason,
+    );
+  }
+
+  return authFailure(
+    401,
+    "session_invalid",
+    "A sessão não pôde ser validada. Entre novamente.",
+    undefined,
+    verificationReason,
+  );
+}
 
 function cookieValue(request: Request, name: string): string | null {
   const cookieHeader = request.headers.get("cookie");
@@ -45,11 +102,17 @@ function cookieValue(request: Request, name: string): string | null {
   return null;
 }
 
-function sessionToken(request: Request): string | null {
+export function sessionToken(request: Request): string | null {
+  // The web app authenticates with Clerk's same-origin session cookie.
+  // Prefer it over an incidental Authorization header; bearer remains a fallback
+  // for clients that cannot send browser cookies.
+  const cookie = cookieValue(request, "__session") ??
+    cookieValue(request, "__session_legacy");
+  if (cookie) return cookie;
+
   const bearer = request.headers.get("authorization");
   if (bearer?.startsWith("Bearer ")) return bearer.slice(7).trim() || null;
-  return cookieValue(request, "__session") ??
-    cookieValue(request, "__session_legacy");
+  return null;
 }
 
 async function verifiedUserId(
@@ -79,12 +142,8 @@ async function verifiedUserId(
     return typeof claims.sub === "string" && claims.sub
       ? claims.sub
       : authFailure(401, "session_invalid", "A sessão Clerk não contém um usuário válido. Entre novamente.");
-  } catch {
-    return authFailure(
-      401,
-      "session_invalid",
-      "O Worker recusou a sessão Clerk. Entre novamente e, se persistir, confira se as chaves pertencem à mesma instância.",
-    );
+  } catch (error) {
+    return classifyTokenVerificationFailure(error);
   }
 }
 

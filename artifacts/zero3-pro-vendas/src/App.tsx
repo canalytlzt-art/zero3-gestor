@@ -598,7 +598,9 @@ function accessValidationError(error: unknown) {
 
   const descriptions: Record<string, string> = {
     session_missing: "O Worker não recebeu a sessão. Saia da conta e entre novamente.",
-    session_invalid: "O Worker recusou a sessão. Entre novamente e confira se as chaves do Clerk pertencem à mesma instância.",
+    session_expired: "Sua sessão expirou. Entre novamente.",
+    session_invalid: "A sessão não pôde ser validada. Entre novamente.",
+    clerk_verification_unavailable: "Não foi possível validar a sessão no momento. Tente novamente mais tarde.",
     clerk_secret_missing: "A chave secreta do Clerk não está configurada no Worker.",
     clerk_secret_rejected: "O Clerk rejeitou a chave secreta configurada no Worker.",
     clerk_instance_mismatch: "O usuário não existe na instância Clerk consultada pelo Worker. Confira se o frontend e o Worker usam a mesma instância.",

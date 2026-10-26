@@ -30,10 +30,13 @@ async function handleApi(request: Request, env: WorkerEnv): Promise<Response> {
   if (!validation.ok) {
     console.warn(JSON.stringify({
       event: "auth.validation_failed",
-      route: path,
+      route: path === "/access-status" ? "access-status" : "protected-api",
+      method: request.method,
       status: validation.status,
       code: validation.code,
-      message: validation.message,
+      ...(validation.verificationReason
+        ? { verificationReason: validation.verificationReason }
+        : {}),
       ...(validation.upstreamStatus === undefined
         ? {}
         : { upstreamStatus: validation.upstreamStatus }),
@@ -47,10 +50,10 @@ async function handleApi(request: Request, env: WorkerEnv): Promise<Response> {
     if (!auth.authorized) {
       console.warn(JSON.stringify({
         event: "auth.access_denied",
-        route: path,
+        route: "access-status",
+        method: request.method,
         status: 403,
         code: "admin_not_allowlisted",
-        message: "Authenticated Clerk email is not in ZERO3_ALLOWED_EMAILS.",
         rayId: request.headers.get("cf-ray") ?? undefined,
       }));
     }

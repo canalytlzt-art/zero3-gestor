@@ -360,7 +360,14 @@ export async function customFetch<T = unknown>(
 
   const requestInfo = { method, url: resolveUrl(input) };
 
-  const response = await fetch(input, { ...init, method, headers });
+  const response = await fetch(input, {
+    ...init,
+    method,
+    headers,
+    // Web API calls use Clerk's same-origin session cookie by default.
+    // Native clients can still provide an explicit credential mode or bearer token.
+    credentials: init.credentials ?? "same-origin",
+  });
 
   if (!response.ok) {
     const errorData = await parseErrorBody(response, method);
