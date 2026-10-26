@@ -39,6 +39,8 @@ Aplicativo administrativo para vendas, Scoreboard financeira, ocupação das aul
 - O frontend usa o cliente gerado e cookies Clerk same-origin; a allowlist administrativa é `ZERO3_ALLOWED_EMAILS`.
 - Valores financeiros são persistidos em centavos inteiros; datas de negócio são datas civis e ocupação tem registros diários e mensais.
 - Importações e restaurações devem ser idempotentes, auditáveis e conciliadas antes de qualquer alteração de dados.
+- Importação financeira precisa aceitar cliente, data de venda e valor; plano/produto é opcional. Usar `Data de início` como data da venda quando presente, senão resolver uma data inequívoca; nunca substituir por hoje.
+- Preservar ocupação medida por presenças/capacidade e os percentuais legados sem inventar capacidade nem misturar taxas incompatíveis. Conferir a origem antes de mudar fórmulas.
 
 ## Product
 

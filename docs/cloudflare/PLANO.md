@@ -25,11 +25,15 @@ Plano da auditoria T01, baseado nos arquivos atuais. Cada etapa deve ter altera�
 
 - Cobrir cadastro/edição de vendas e produtos, cliente, filtros, cancelamentos, estornos, metas, histórico, importações, exportações e backup/restauração.
 - Comparar resultados do Worker/D1 com contratos, testes e regras financeiras existentes; conciliar quantidades, centavos, datas e estados.
+- Na importação, validar todas as abas/linhas com dados; cliente, data e valor são obrigatórios e produto é opcional. Priorizar `Data de início` como data de venda; não usar a data atual como fallback.
+- Conferir a data efetiva considerada para estornos em cada relatório e preservar o comportamento vigente.
 
 ## T06 — Ocupação
 
 - Cobrir modalidades e vínculos, registros diários/mensais, exclusão auditável, importação, filtros, consolidações e gráficos.
 - Preservar a compatibilidade das planilhas de importação e os registros legados apenas percentuais.
+- Confirmar as origens e fórmulas atuais antes de alterar cálculos: não somar percentuais, inventar capacidade nem substituir silenciosamente taxa ponderada por média simples.
+- Manter os gráficos de Ocupação separados dos de Faturamento e os filtros de relatórios/backups independentes dos filtros do dashboard.
 
 ## T07 — Relatórios e backups
 

@@ -36,3 +36,5 @@ Nesta auditoria foram consultados apenas a origem, data e contagens do manifesto
 ## Próxima conciliação
 
 Na T04, revalidar a cópia local usando exatamente `--local` e `--persist-to` do importador; executar o teste de reimportação e comparar contagens, campos e totais do manifesto. Só depois planejar a homologação com D1 separado. Não copiar os arquivos privados para Git.
+
+Na T05/T06, conciliar também as regras da origem: linhas financeiras importáveis sem produto, datas de venda resolvidas sem preencher com hoje, estornos pela data efetiva confirmada no contrato atual e ocupação medida separada de percentuais legados. Não alterar dados para fazer totais coincidirem sem identificar a causa.

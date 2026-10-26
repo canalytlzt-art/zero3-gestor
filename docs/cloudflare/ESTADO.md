@@ -5,6 +5,7 @@ Atualizado em 2026-10-26.
 ## Etapa atual
 
 - T01 — auditoria do repositório e plano: **concluída**.
+- Análise e fontes fornecidas pelo proprietário incorporadas como requisitos a validar, não como comprovação de que o código já os cumpre.
 - Próxima etapa proposta: T02 — build reproduzível, Worker e paridade da API. A implementação aguarda a escolha do proprietário.
 
 ## Arquivos alterados nesta etapa
@@ -18,6 +19,7 @@ Atualizado em 2026-10-26.
 - `docs/cloudflare/CONCILIACAO.md`
 - `docs/cloudflare/TESTES.md`
 - `docs/cloudflare/OPERACAO.md`
+- Requisitos extraídos de `ANALISE_E_FONTES.md` registrados no inventário, plano, conciliação e matriz de testes.
 
 ## Inspeção e comandos
 

@@ -23,3 +23,10 @@ Nesta auditoria não foram executados testes nem comandos de banco.
 3. Testar login Clerk Development real, origem autorizada, allowlist, ausência/expiração/rejeição de sessão.
 4. Conferir exportações/restaurações e conciliar Scoreboard, vendas, estornos e ocupação.
 5. Guardar evidência de que produção não foi alterada durante os testes.
+
+## Critérios funcionais extraídos da análise fornecida
+
+- Importação de vendas deve testar múltiplas abas, todas as linhas com conteúdo, produto opcional, `Data de início` como prioridade e ausência de fallback para hoje.
+- Ocupação precisa exercitar dados medidos (presenças/capacidade) e registros legados só com percentual, sem mistura indevida nem médias silenciosas.
+- Relatórios precisam provar filtros de período próprios e visões separadas de Faturamento e Ocupação.
+- Testes financeiros devem confirmar a data usada para contabilizar estornos antes de qualquer alteração dessa regra.

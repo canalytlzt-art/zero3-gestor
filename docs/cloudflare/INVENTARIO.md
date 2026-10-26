@@ -26,6 +26,14 @@ Auditoria T01 do repositório em 2026-10-26. O inventário identifica código e 
 | Gráficos, filtros e relatórios de ocupação | `components/occupancy-charts-page.tsx`, `occupancy-reports-dialog.tsx` | `/api/occupancy` e produtos/modalidades de apoio | D1 `occupancy_records`, `products`, `occupancy_modalities` | Há testes de agregação, filtros e planilha; não estão todos no comando padrão de testes. |
 | Backup/restauração de ocupação | `components/occupancy-import-dialog.tsx`, `occupancy-reports-dialog.tsx` | `/api/occupancy/backup/period`, prévia e restauração | D1 registros, modalidades e histórico | `occupancy-backup.integration.test.ts` existe, mas não está no comando `test:integration` atual. |
 
+## Requisitos de negócio a validar (não são comprovação de implementação)
+
+- **Importação financeira:** ler todas as abas, colunas e linhas com conteúdo. Cliente, data da venda e valor são os dados obrigatórios; plano/produto pode ficar vazio e ser corrigido depois. `Data de início` tem precedência como data da venda; se ausente, resolver uma coluna inequívoca de data de venda/principal. Nunca preencher com a data atual. Não classificar linhas modelo auxiliares como vendas.
+- **Ocupação:** a análise fornecida aponta desenhos históricos diferentes. O esquema atual contém tanto presenças/capacidade quanto percentuais legados. Confirmar a proveniência de cada fonte e preservar cálculo ponderado, percentuais reportados e registros legados sem inventar presenças/vagas ou misturar escalas.
+- **Gráficos e relatórios:** manter visões de Faturamento e Ocupação separadas; filtros de período para relatório/backup devem ser independentes dos filtros do painel.
+- **Estornos:** confirmar no código/contrato/testes qual data de movimento afeta cada relatório; não alterar a regra financeira durante a migração sem requisito comprovado.
+- **Histórico de incidentes:** os erros de publicação e Clerk citados na análise são relatos históricos. Não assumir que todos ainda ocorrem; o vínculo D1 repetido na configuração de teste foi confirmado no código atual.
+
 ## Dados e implantação
 
 - Migrações D1 rastreadas: `scripts/d1/migrations/0001_zero3_schema.sql` e `0002_sales_import_origin_unique.sql`.
@@ -41,3 +49,13 @@ Auditoria T01 do repositório em 2026-10-26. O inventário identifica código e 
 3. Validar rotas de vendas e ocupação executando o Worker com D1 de homologação, não apenas o Express/PostgreSQL.
 4. Ampliar os comandos de teste para incluir testes já existentes e contratos executados no Worker.
 5. Revalidar a cópia D1 local com persistência explícita; não inferir estado do D1 remoto.
+
+## Fontes oficiais fornecidas
+
+As versões instaladas devem ser conferidas ao executar as etapas; os links orientam a pesquisa, não substituem o teste no runtime:
+
+- [Cloudflare Workers Node.js compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/)
+- [Static Assets](https://developers.cloudflare.com/workers/static-assets/) e [SPA routing](https://developers.cloudflare.com/workers/static-assets/routing/single-page-application/)
+- [Wrangler environments](https://developers.cloudflare.com/workers/wrangler/environments/) e [Secrets](https://developers.cloudflare.com/workers/configuration/secrets/)
+- [D1 migrations](https://developers.cloudflare.com/d1/reference/migrations/), [Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/), [Workers testing](https://developers.cloudflare.com/workers/testing/) e [rollback](https://developers.cloudflare.com/workers/versions-and-deployments/rollbacks/)
+- Clerk [`authenticateRequest`](https://clerk.com/docs/reference/backend/authenticate-request) e [`verifyToken`](https://clerk.com/docs/reference/backend/verify-token)
