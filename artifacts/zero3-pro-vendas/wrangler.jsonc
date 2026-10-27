@@ -2,6 +2,7 @@
   "name": "zero3-gestor",
   "main": "./src/worker/index.ts",
   "compatibility_date": "2026-10-26",
+  "keep_vars": true,
   "assets": {
     "directory": "./dist/public",
     "binding": "ASSETS",
