@@ -1603,24 +1603,24 @@ export default function SalesManagement() {
       </Dialog>
 
       <Dialog open={!!cancelling} onOpenChange={(open) => { if (!cancelSale.isPending && !open) { setCancelling(null); setCancellationReason(''); setCancellationError(''); setCancellationConflict(false); } }}>
-        <DialogContent className="max-w-lg border-[#e7e1e9] bg-[#fffefc] p-6 sm:rounded-[24px]">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-lg max-h-[calc(100dvh-2rem)] min-w-0 overflow-y-auto border-[#e7e1e9] bg-[#fffefc] p-4 sm:rounded-[24px] sm:p-6">
           <DialogHeader className="text-left">
             <DialogTitle className="text-lg font-extrabold tracking-[-.035em] text-[#332d40]">Cancelar venda</DialogTitle>
             <DialogDescription className="text-xs leading-5 text-[#827b8b]">O cancelamento mantém o registro no histórico e não apaga seus dados.</DialogDescription>
           </DialogHeader>
           {cancelling && <div className="rounded-xl bg-[#f8f6fa] px-3.5 py-3" data-testid="panel-cancellation-sale">
-            <p className="text-sm font-bold text-[#40374e]">{cancelling.productName}</p>
+            <p className="break-words text-sm font-bold text-[#40374e] [overflow-wrap:anywhere]">{cancelling.productName}</p>
             <p className="mt-1 text-xs text-[#817b89]">{formatDate(cancelling.saleDate)} · {cancelling.quantity} un. · {formatCents(cancelling.totalCents)}</p>
           </div>}
           <label className="block text-[11px] font-bold text-[#665f70]">Motivo do cancelamento
-            <textarea value={cancellationReason} onChange={(event) => setCancellationReason(event.target.value)} maxLength={500} rows={4} placeholder="Descreva o motivo" data-testid="input-cancellation-reason" className="mt-1.5 w-full rounded-xl border border-[#e7e2ea] bg-[#fcfbfd] px-3.5 py-3 text-sm font-normal text-[#342d43] outline-none focus:border-[#9477bf]" />
+            <textarea value={cancellationReason} onChange={(event) => setCancellationReason(event.target.value)} maxLength={500} rows={4} placeholder="Descreva o motivo" data-testid="input-cancellation-reason" className="mt-1.5 block w-full max-w-full resize-y rounded-xl border border-[#e7e2ea] bg-[#fcfbfd] px-3.5 py-3 text-sm font-normal text-[#342d43] outline-none focus:border-[#9477bf]" />
           </label>
-          <p className="text-[10px] text-[#8a8491]">{cancellationReason.trim().length}/500 caracteres. O motivo ficará visível no histórico.</p>
-          {cancellationError && <p className="rounded-xl bg-[#fff0ed] px-3.5 py-2.5 text-xs font-semibold text-[#9c483f]" role="alert" data-testid="status-cancellation-error">{cancellationError}</p>}
-          <DialogFooter className="gap-2">
-            {cancellationConflict && <button type="button" onClick={async () => { await Promise.all([refetchHistory(), refetchSales()]); setCancelling(null); setCancellationError(''); setCancellationConflict(false); }} className="h-10 rounded-xl border border-[#ded7e7] px-4 text-xs font-bold text-[#5d4a78] hover:bg-[#f7f4fa]" data-testid="button-refresh-cancel-conflict">Atualizar venda</button>}
-            <button type="button" onClick={() => setCancelling(null)} disabled={cancelSale.isPending} className="h-10 rounded-xl border border-[#e3dfe7] px-4 text-sm font-bold text-[#716a79] hover:bg-[#f8f6fa]" data-testid="button-cancel-cancellation">Manter venda</button>
-            <button type="button" onClick={() => void confirmCancellation()} disabled={!cancellationReason.trim() || cancellationReason.trim().length > 500 || busy} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#a84940] px-4 text-sm font-bold text-white hover:bg-[#963c35] disabled:opacity-55" data-testid="button-confirm-cancellation">
+          <p className="break-words text-[10px] text-[#8a8491]">{cancellationReason.trim().length}/500 caracteres. O motivo ficará visível no histórico.</p>
+          {cancellationError && <p className="break-words rounded-xl bg-[#fff0ed] px-3.5 py-2.5 text-xs font-semibold text-[#9c483f]" role="alert" data-testid="status-cancellation-error">{cancellationError}</p>}
+          <DialogFooter className="w-full min-w-0 gap-2 sm:flex-row sm:space-x-0">
+            {cancellationConflict && <button type="button" onClick={async () => { await Promise.all([refetchHistory(), refetchSales()]); setCancelling(null); setCancellationError(''); setCancellationConflict(false); }} className="h-10 w-full rounded-xl border border-[#ded7e7] px-4 text-xs font-bold text-[#5d4a78] hover:bg-[#f7f4fa] sm:w-auto" data-testid="button-refresh-cancel-conflict">Atualizar venda</button>}
+            <button type="button" onClick={() => setCancelling(null)} disabled={cancelSale.isPending} className="h-10 w-full rounded-xl border border-[#e3dfe7] px-4 text-sm font-bold text-[#716a79] hover:bg-[#f8f6fa] sm:w-auto" data-testid="button-cancel-cancellation">Cancelar</button>
+            <button type="button" onClick={() => void confirmCancellation()} disabled={!cancellationReason.trim() || cancellationReason.trim().length > 500 || busy} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#a84940] px-4 text-sm font-bold text-white hover:bg-[#963c35] disabled:opacity-55 sm:w-auto" data-testid="button-confirm-cancellation">
               {cancelSale.isPending ? 'Cancelando…' : <><X size={14} /> Confirmar cancelamento</>}
             </button>
           </DialogFooter>
