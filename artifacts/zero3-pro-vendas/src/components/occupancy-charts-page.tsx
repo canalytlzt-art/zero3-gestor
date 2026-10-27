@@ -17,7 +17,7 @@ import { ChartContainer } from '@/components/ui/chart';
 import { PurpleSelect } from '@/components/ui/purple-select';
 import { buildFinancialChartAnalytics } from '@/lib/financial-chart-data';
 import { buildOccupancyChartAnalytics, type OccupancyChartSupportRow } from '@/lib/occupancy-chart-data';
-import { formatCents, formatMonthKey, getSaoPauloMonthKey, getSalesGoalComparison, isCompleteCalendarMonthRange, monthKeysBetween } from '@/lib/sales-utils';
+import { formatCents, formatMonthKey, getSaoPauloMonthKey, getSalesGoalComparison, isCompleteCalendarMonthRange, monthKeysBetween, monthsForYearQuarter } from '@/lib/sales-utils';
 import {
   changeOccupancyPeriod,
   clearOccupancyFilters,
@@ -122,7 +122,7 @@ function CoverageNote({ covered, available }: { covered: number; available: numb
   );
 }
 
-type FinancialPeriodMode = 'current' | 'single' | 'multiple' | 'range' | 'all';
+type FinancialPeriodMode = 'current' | 'single' | 'multiple' | 'quarter' | 'year' | 'range' | 'all';
 type ShareBy = 'modality' | 'product';
 
 const financeColors = ['#7655a8', '#a9d75a', '#4d8d7b', '#d18b57', '#8b789b', '#6c9cb5', '#c16e78', '#b3a46b'];
@@ -133,6 +133,8 @@ function FinancialCharts({ onOccupancy }: { onOccupancy: () => void }) {
   const [singleMonth, setSingleMonth] = useState(currentMonth);
   const [months, setMonths] = useState<string[]>([currentMonth]);
   const [monthToAdd, setMonthToAdd] = useState(currentMonth);
+  const [selectedYear, setSelectedYear] = useState(currentMonth.slice(0, 4));
+  const [selectedQuarter, setSelectedQuarter] = useState(String(Math.ceil(Number(currentMonth.slice(5, 7)) / 3)));
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [productId, setProductId] = useState('');
@@ -141,12 +143,16 @@ function FinancialCharts({ onOccupancy }: { onOccupancy: () => void }) {
 
   const invalid = (periodMode === 'single' && !singleMonth)
     || (periodMode === 'multiple' && months.length === 0)
+    || ((periodMode === 'quarter' || periodMode === 'year')
+      && monthsForYearQuarter(selectedYear, periodMode === 'quarter' ? selectedQuarter : undefined).length === 0)
     || (periodMode === 'range' && (!fromDate || !toDate || fromDate > toDate));
   const params = useMemo<GetSalesScoreboardParams>(() => {
     const query: GetSalesScoreboardParams = {};
     if (periodMode === 'current') query.months = [currentMonth];
     if (periodMode === 'single' && singleMonth) query.months = [singleMonth];
     if (periodMode === 'multiple' && months.length) query.months = [...new Set(months)].sort();
+    if (periodMode === 'quarter') query.months = monthsForYearQuarter(selectedYear, selectedQuarter);
+    if (periodMode === 'year') query.months = monthsForYearQuarter(selectedYear);
     if (periodMode === 'range' && fromDate && toDate && fromDate <= toDate) {
       query.fromDate = fromDate;
       query.toDate = toDate;
@@ -154,7 +160,7 @@ function FinancialCharts({ onOccupancy }: { onOccupancy: () => void }) {
     if (productId) query.productId = productId;
     if (modalityId) query.modalityId = modalityId;
     return query;
-  }, [periodMode, currentMonth, singleMonth, months, fromDate, toDate, productId, modalityId]);
+  }, [periodMode, currentMonth, singleMonth, months, selectedYear, selectedQuarter, fromDate, toDate, productId, modalityId]);
 
   const scoreboard = useGetSalesScoreboard(params, {
     query: {
@@ -191,9 +197,11 @@ function FinancialCharts({ onOccupancy }: { onOccupancy: () => void }) {
     if (periodMode === 'current') return [currentMonth];
     if (periodMode === 'single') return singleMonth ? [singleMonth] : [];
     if (periodMode === 'multiple') return [...new Set(months)].sort();
+    if (periodMode === 'quarter') return monthsForYearQuarter(selectedYear, selectedQuarter);
+    if (periodMode === 'year') return monthsForYearQuarter(selectedYear);
     if (periodMode === 'range') return invalid || !isCompleteCalendarMonthRange(fromDate, toDate) ? [] : monthKeysBetween(fromDate.slice(0, 7), toDate.slice(0, 7));
     return allMonths;
-  }, [periodMode, currentMonth, singleMonth, months, invalid, fromDate, toDate, allMonths]);
+  }, [periodMode, currentMonth, singleMonth, months, selectedYear, selectedQuarter, invalid, fromDate, toDate, allMonths]);
   const goalMode = periodMode === 'range'
     ? invalid ? 'invalid' : isCompleteCalendarMonthRange(fromDate, toDate) ? 'complete' : 'partial-range'
     : goalMonths.length ? 'complete' : 'invalid';
@@ -215,6 +223,8 @@ function FinancialCharts({ onOccupancy }: { onOccupancy: () => void }) {
     setPeriodMode('all');
     setSingleMonth(currentMonth);
     setMonths([currentMonth]);
+    setSelectedYear(currentMonth.slice(0, 4));
+    setSelectedQuarter(String(Math.ceil(Number(currentMonth.slice(5, 7)) / 3)));
     setFromDate('');
     setToDate('');
     setProductId('');
@@ -247,13 +257,14 @@ function FinancialCharts({ onOccupancy }: { onOccupancy: () => void }) {
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[1fr_1.25fr_1fr_1fr]">
           <label className={labelClass}>Período
             <select value={periodMode} onChange={(event) => setPeriodMode(event.target.value as FinancialPeriodMode)} className={fieldClass} data-testid="select-financial-period">
-              <option value="current">Mês atual</option><option value="single">Um mês</option><option value="multiple">Vários meses</option><option value="range">Intervalo de datas</option><option value="all">Todo o período</option>
+              <option value="current">Mês atual</option><option value="single">Um mês</option><option value="multiple">Vários meses</option><option value="quarter">Trimestre</option><option value="year">Ano</option><option value="range">Intervalo de datas</option><option value="all">Todo o período</option>
             </select>
           </label>
           <div className="min-w-0">
             {periodMode === 'current' && <div className="pt-5 text-xs font-semibold capitalize text-[#5f5967]" data-testid="text-financial-current-month">{formatMonthKey(currentMonth)}</div>}
             {periodMode === 'single' && <label className={labelClass}>Mês<input type="month" className={fieldClass} value={singleMonth} onChange={(event) => setSingleMonth(event.target.value)} data-testid="input-financial-month" /></label>}
             {periodMode === 'multiple' && <div><label className={labelClass}>Adicionar mês</label><div className="flex gap-2"><input type="month" className={fieldClass} value={monthToAdd} onChange={(event) => setMonthToAdd(event.target.value)} data-testid="input-financial-month-add" /><button type="button" onClick={addMonth} className="mt-1.5 h-10 shrink-0 rounded-xl bg-[#ece6f4] px-3 text-xs font-bold text-[#65479c]" data-testid="button-financial-month-add">Adicionar</button></div><div className="mt-2 flex flex-wrap gap-1.5" data-testid="list-financial-months">{months.map((month) => <span key={month} className="rounded-full bg-[#f2edf6] px-2.5 py-1 text-[10px] font-bold capitalize text-[#65479c]" data-testid={`chip-financial-month-${month}`}>{formatMonthKey(month)} <button type="button" aria-label={`Remover ${formatMonthKey(month)}`} onClick={() => setMonths((items) => items.filter((item) => item !== month))} data-testid={`button-financial-month-remove-${month}`}>×</button></span>)}</div></div>}
+            {(periodMode === 'quarter' || periodMode === 'year') && <div className={`grid gap-2 ${periodMode === 'quarter' ? 'grid-cols-2' : 'grid-cols-1'}`}><label className={labelClass}>Ano<input type="number" min="1000" max="9999" step="1" value={selectedYear} onChange={(event) => setSelectedYear(event.target.value)} className={fieldClass} data-testid="input-financial-year" /></label>{periodMode === 'quarter' && <label className={labelClass}>Trimestre<select value={selectedQuarter} onChange={(event) => setSelectedQuarter(event.target.value)} className={fieldClass} data-testid="select-financial-quarter"><option value="1">1º trimestre</option><option value="2">2º trimestre</option><option value="3">3º trimestre</option><option value="4">4º trimestre</option></select></label>}</div>}
             {periodMode === 'range' && <div className="grid grid-cols-2 gap-2"><label className={labelClass}>De<input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} className={fieldClass} data-testid="input-financial-from" /></label><label className={labelClass}>Até<input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} className={fieldClass} data-testid="input-financial-to" /></label></div>}
             {periodMode === 'all' && <div className="pt-5 text-xs text-[#716879]" data-testid="text-financial-all-time">Todo o histórico registrado</div>}
           </div>
@@ -283,7 +294,7 @@ function FinancialCharts({ onOccupancy }: { onOccupancy: () => void }) {
           </label>
         </div>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-          {invalid ? <p className="flex items-center gap-2 text-xs font-semibold text-[#a24f4d]" role="alert" data-testid="status-financial-invalid-filter"><CircleAlert size={14} />{periodMode === 'range' ? 'Informe um intervalo válido, com data inicial e final.' : 'Selecione ao menos um mês para consultar.'}</p> : productModalityConflict ? <p className="text-xs font-semibold text-[#765c31]" role="status" data-testid="status-financial-scope-conflict">O produto selecionado não está vinculado à modalidade escolhida. A combinação não tem vendas classificadas.</p> : <span className="text-[10px] text-[#837b8b]" data-testid="status-financial-filter-scope">Filtros aplicados diretamente ao Scoreboard oficial.</span>}
+          {invalid ? <p className="flex items-center gap-2 text-xs font-semibold text-[#a24f4d]" role="alert" data-testid="status-financial-invalid-filter"><CircleAlert size={14} />{periodMode === 'range' ? 'Informe um intervalo válido, com data inicial e final.' : periodMode === 'quarter' || periodMode === 'year' ? 'Informe um ano válido entre 1000 e 9999.' : 'Selecione ao menos um mês para consultar.'}</p> : productModalityConflict ? <p className="text-xs font-semibold text-[#765c31]" role="status" data-testid="status-financial-scope-conflict">O produto selecionado não está vinculado à modalidade escolhida. A combinação não tem vendas classificadas.</p> : <span className="text-[10px] text-[#837b8b]" data-testid="status-financial-filter-scope">Filtros aplicados diretamente ao Scoreboard oficial.</span>}
           <button type="button" onClick={clearFilters} className="rounded-lg px-3 py-2 text-xs font-semibold text-[#766d83] hover:bg-[#f6f3f8]" data-testid="button-financial-clear-filters">Limpar filtros</button>
         </div>
       </section>

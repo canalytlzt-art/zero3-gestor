@@ -26,7 +26,7 @@ import { Link, Redirect, Route, Switch, useLocation, Router as WouterRouter } fr
 import SalesManagement from '@/components/sales-management';
 import ScoreboardGoals from '@/components/scoreboard-goals';
 import OccupancyManagement from '@/components/occupancy-management';
-import { buildScoreboardQueryParams, formatCents, formatMonthKey, getSaoPauloMonthKey, isCompleteCalendarMonthRange, monthKeysBetween, productNameKey } from '@/lib/sales-utils';
+import { buildScoreboardQueryParams, formatCents, formatMonthKey, getSaoPauloMonthKey, isCompleteCalendarMonthRange, monthKeysBetween, monthsForYearQuarter, productNameKey, type ScoreboardPeriodMode } from '@/lib/sales-utils';
 
 const queryClient = new QueryClient();
 const OccupancyChartsPage = lazy(() => import('@/components/occupancy-charts-page'));
@@ -202,7 +202,7 @@ function MetricCard({
 
 function ScoreboardContent() {
   const { data: productRecords, isLoading: isProductsLoading, isFetching: isProductsFetching, isError: isProductsError, refetch: refetchProducts } = useGetProducts({
-    query: { queryKey: getGetProductsQueryKey(), refetchOnMount: 'always' },
+    query: { queryKey: getGetProductsQueryKey(), refetchOnMount: 'always', refetchOnWindowFocus: true },
   });
   const {
     data: salesGoals,
@@ -211,30 +211,38 @@ function ScoreboardContent() {
     isError: isGoalsError,
     refetch: refetchSalesGoals,
   } = useGetSalesGoals({
-    query: { queryKey: getGetSalesGoalsQueryKey(), refetchOnMount: 'always' },
+    query: { queryKey: getGetSalesGoalsQueryKey(), refetchOnMount: 'always', refetchOnWindowFocus: true },
   });
   const currentMonthKey = getSaoPauloMonthKey();
-  const [periodMode, setPeriodMode] = useState<'current' | 'single' | 'multiple' | 'range' | 'all'>('current');
+  const currentYear = currentMonthKey.slice(0, 4);
+  const currentQuarter = String(Math.ceil(Number(currentMonthKey.slice(5, 7)) / 3));
+  const [periodMode, setPeriodMode] = useState<ScoreboardPeriodMode>('current');
   const [selectedMonth, setSelectedMonth] = useState(currentMonthKey);
   const [selectedMonths, setSelectedMonths] = useState<string[]>([currentMonthKey]);
   const [monthToAdd, setMonthToAdd] = useState(currentMonthKey);
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const [selectedQuarter, setSelectedQuarter] = useState(currentQuarter);
   const [filterProduct, setFilterProduct] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const invalidRange = periodMode === 'range' && (!dateFrom || !dateTo || dateFrom > dateTo);
   const invalidMonthSelection = (periodMode === 'single' && !selectedMonth)
     || (periodMode === 'multiple' && selectedMonths.length === 0);
+  const invalidYearSelection = (periodMode === 'year' || periodMode === 'quarter')
+    && monthsForYearQuarter(selectedYear, periodMode === 'quarter' ? selectedQuarter : undefined).length === 0;
   const scoreboardParams = useMemo<GetSalesScoreboardParams>(() => {
     return buildScoreboardQueryParams({
       periodMode,
       currentMonthKey,
       selectedMonth,
       selectedMonths,
+      selectedYear,
+      selectedQuarter,
       dateFrom,
       dateTo,
       filterProduct,
     });
-  }, [periodMode, currentMonthKey, selectedMonth, selectedMonths, invalidRange, dateFrom, dateTo, filterProduct]);
+  }, [periodMode, currentMonthKey, selectedMonth, selectedMonths, selectedYear, selectedQuarter, dateFrom, dateTo, filterProduct]);
   const {
     data: scoreboardData,
     isLoading: isScoreboardLoading,
@@ -244,8 +252,9 @@ function ScoreboardContent() {
   } = useGetSalesScoreboard(scoreboardParams, {
     query: {
       queryKey: getGetSalesScoreboardQueryKey(scoreboardParams),
-      enabled: !invalidRange && !invalidMonthSelection,
+      enabled: !invalidRange && !invalidMonthSelection && !invalidYearSelection,
       refetchOnMount: 'always',
+      refetchOnWindowFocus: true,
     },
   });
   const products = useMemo(() => (productRecords ?? [])
@@ -265,12 +274,16 @@ function ScoreboardContent() {
         return selectedMonth ? [selectedMonth] : [];
       case 'multiple':
         return [...new Set(selectedMonths)].sort();
+      case 'quarter':
+        return monthsForYearQuarter(selectedYear, selectedQuarter);
+      case 'year':
+        return monthsForYearQuarter(selectedYear);
       case 'range':
         return invalidRange ? [] : monthKeysBetween(dateFrom.slice(0, 7), dateTo.slice(0, 7));
       case 'all':
         return allMonthKeys;
     }
-  }, [periodMode, currentMonthKey, selectedMonth, selectedMonths, invalidRange, dateFrom, dateTo, allMonthKeys]);
+  }, [periodMode, currentMonthKey, selectedMonth, selectedMonths, selectedYear, selectedQuarter, invalidRange, dateFrom, dateTo, allMonthKeys]);
   const goalComparisonMode = periodMode === 'range'
     ? invalidRange
       ? 'invalid'
@@ -285,7 +298,7 @@ function ScoreboardContent() {
     products: [],
     months: [],
   };
-  const report = invalidRange || invalidMonthSelection ? emptyScoreboard : scoreboardData ?? emptyScoreboard;
+  const report = invalidRange || invalidMonthSelection || invalidYearSelection ? emptyScoreboard : scoreboardData ?? emptyScoreboard;
   const selectedProductName = filterProduct
     ? products.find((product) => product.id === filterProduct)?.name ?? null
     : null;
@@ -295,7 +308,7 @@ function ScoreboardContent() {
   const refreshScoreboard = () => {
     void Promise.all([refetchScoreboard(), refetchProducts(), refetchSalesGoals()]);
   };
-  const changePeriodMode = (mode: 'current' | 'single' | 'multiple' | 'range' | 'all') => {
+  const changePeriodMode = (mode: ScoreboardPeriodMode) => {
     setPeriodMode(mode);
     if (mode === 'range') {
       setSelectedMonth('');
@@ -352,6 +365,8 @@ function ScoreboardContent() {
               <option value="current">Mês atual</option>
               <option value="single">Mês específico</option>
               <option value="multiple">Vários meses</option>
+              <option value="quarter">Trimestre específico</option>
+              <option value="year">Ano específico</option>
               <option value="range">Intervalo personalizado</option>
               <option value="all">Todos os meses</option>
             </select>
@@ -387,6 +402,18 @@ function ScoreboardContent() {
                 </div>
               </div>
             )}
+            {(periodMode === 'quarter' || periodMode === 'year') && (
+              <div className={`grid gap-2 ${periodMode === 'quarter' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                <label className="block text-[10px] font-bold uppercase tracking-[.1em] text-[#817b89]">Ano
+                  <input type="number" min="1000" max="9999" step="1" value={selectedYear} onChange={(event) => setSelectedYear(event.target.value)} data-testid="input-scoreboard-year" className="mt-1.5 h-10 w-full rounded-lg border border-[#e7e2ea] bg-[#fffefc] px-3 text-xs font-medium normal-case tracking-normal text-[#443d50] outline-none focus:border-[#9477bf]" />
+                </label>
+                {periodMode === 'quarter' && <label className="block text-[10px] font-bold uppercase tracking-[.1em] text-[#817b89]">Trimestre
+                  <select value={selectedQuarter} onChange={(event) => setSelectedQuarter(event.target.value)} data-testid="select-scoreboard-quarter" className="mt-1.5 h-10 w-full rounded-lg border border-[#e7e2ea] bg-[#fffefc] px-3 text-xs font-medium normal-case tracking-normal text-[#443d50] outline-none focus:border-[#9477bf]">
+                    <option value="1">1º trimestre</option><option value="2">2º trimestre</option><option value="3">3º trimestre</option><option value="4">4º trimestre</option>
+                  </select>
+                </label>}
+              </div>
+            )}
             {periodMode === 'range' && (
               <div className="grid grid-cols-2 gap-2">
                 <label className="block text-[10px] font-bold uppercase tracking-[.1em] text-[#817b89]">Data inicial
@@ -420,6 +447,7 @@ function ScoreboardContent() {
         </div>
         {invalidRange && <p className="mt-3 text-xs font-semibold text-[#a24f45]" role="alert" data-testid="status-scoreboard-date-range">{!dateFrom || !dateTo ? 'Informe as datas inicial e final para consultar o intervalo.' : 'A data inicial deve ser anterior ou igual à data final.'}</p>}
         {invalidMonthSelection && <p className="mt-3 text-xs font-semibold text-[#a24f45]" role="alert" data-testid="status-scoreboard-month">Selecione o mês que deseja consultar.</p>}
+        {invalidYearSelection && <p className="mt-3 text-xs font-semibold text-[#a24f45]" role="alert" data-testid="status-scoreboard-year">Informe um ano válido entre 1000 e 9999.</p>}
       </section>
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Resumo do período">

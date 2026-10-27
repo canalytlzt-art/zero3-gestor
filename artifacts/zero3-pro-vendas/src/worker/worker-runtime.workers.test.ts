@@ -173,6 +173,26 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
         netCents: 7_500,
       },
     ]);
+
+    const quarterResponse = await handleSalesRequest(
+      new Request(
+        "https://zero3.test/api/sales/scoreboard?months=2026-10&months=2026-11&months=2026-12",
+      ),
+      workerEnv,
+      authorizedFixture,
+      "/sales/scoreboard",
+    );
+    expect(quarterResponse?.status).toBe(200);
+    const quarterScoreboard = await quarterResponse!.json() as typeof scoreboard;
+    expect(quarterScoreboard.totals).toEqual(scoreboard.totals);
+    expect(quarterScoreboard.months).toHaveLength(3);
+    expect(quarterScoreboard.months[2]).toEqual({
+      month: "2026-12",
+      quantity: 0,
+      salesCents: 0,
+      refundCents: 0,
+      netCents: 0,
+    });
   });
 
   it("persists the sales, refunds, products, goals, and occupancy Worker routes in D1", async () => {
@@ -207,6 +227,32 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
     expect(history.response.status).toBe(200);
     expect(sales.payload.some((row: { id: string }) => row.id === saleId)).toBe(true);
     expect(history.payload.some((row: { id: string }) => row.id === saleId)).toBe(true);
+
+    const updatedSale = await callSales(`/sales/${saleId}`, "PATCH", {
+      saleDate: "2026-12-03",
+      productName,
+      quantity: 3,
+      unitAmountCents: 1_500,
+      customerName: "Cliente atualizado",
+      notes: "Venda editada no teste D1",
+      idempotencyKey: crypto.randomUUID(),
+      expectedVersion: sale.payload.version,
+    });
+    expect(updatedSale.response.status).toBe(200);
+    expect(updatedSale.payload).toMatchObject({
+      id: saleId,
+      quantity: 3,
+      unitAmountCents: 1_500,
+      totalCents: 4_500,
+      customerName: "Cliente atualizado",
+      version: 2,
+    });
+    const reloadedSales = await callSales("/sales");
+    expect(reloadedSales.payload.find((row: { id: string }) => row.id === saleId)).toMatchObject({
+      quantity: 3,
+      totalCents: 4_500,
+      customerName: "Cliente atualizado",
+    });
 
     const refund = await callSales(`/sales/${saleId}/refunds`, "POST", {
       refundDate: "2026-12-04",
@@ -263,13 +309,51 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
     expect(occupancyRows.response.status).toBe(200);
     expect(occupancyRows.payload.some((row: { id: string }) => row.id === occupancy.payload.id)).toBe(true);
 
+    const updatedOccupancy = await callOccupancy(`/occupancy/${occupancy.payload.id}`, "PATCH", {
+      kind: "daily",
+      period: "2026-12-03",
+      modalityId: modality.payload.id,
+      modalityName,
+      presences: 4,
+      capacity: 5,
+      startTime: "06:30",
+      endTime: "07:30",
+      className: "Turma atualizada",
+      notes: "Observação persistida no D1 local",
+      version: occupancy.payload.version,
+    });
+    expect(updatedOccupancy.response.status).toBe(200);
+    expect(updatedOccupancy.payload).toMatchObject({
+      id: occupancy.payload.id,
+      presences: 4,
+      capacity: 5,
+      percentage: 80,
+      startTime: "06:30",
+      endTime: "07:30",
+      className: "Turma atualizada",
+      notes: "Observação persistida no D1 local",
+      version: 2,
+    });
+    const reloadedOccupancy = await callOccupancy(
+      "/occupancy?fromDate=2026-12-03&toDate=2026-12-03",
+    );
+    expect(reloadedOccupancy.payload.find((row: { id: string }) => row.id === occupancy.payload.id))
+      .toMatchObject({
+        presences: 4,
+        capacity: 5,
+        percentage: 80,
+        startTime: "06:30",
+        endTime: "07:30",
+        notes: "Observação persistida no D1 local",
+      });
+
     const scoreboard = await callSales("/sales/scoreboard?months=2026-12");
     expect(scoreboard.response.status).toBe(200);
     expect(scoreboard.payload.totals).toMatchObject({
-      quantity: 2,
-      salesCents: 2_900,
+      quantity: 3,
+      salesCents: 4_500,
       refundCents: 500,
-      netCents: 2_400,
+      netCents: 4_000,
     });
   });
 });

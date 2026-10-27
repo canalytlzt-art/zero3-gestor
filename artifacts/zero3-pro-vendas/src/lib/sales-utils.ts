@@ -44,13 +44,26 @@ export function monthKeysBetween(first: string, last: string): string[] {
   });
 }
 
-export type ScoreboardPeriodMode = 'current' | 'single' | 'multiple' | 'range' | 'all';
+export type ScoreboardPeriodMode = 'current' | 'single' | 'multiple' | 'quarter' | 'year' | 'range' | 'all';
+
+export function monthsForYearQuarter(year: string, quarter?: string): string[] {
+  if (!/^[1-9]\d{3}$/.test(year)) return [];
+  if (quarter !== undefined && !/^[1-4]$/.test(quarter)) return [];
+
+  const firstMonth = quarter === undefined ? 1 : (Number(quarter) - 1) * 3 + 1;
+  const monthCount = quarter === undefined ? 12 : 3;
+  return Array.from({ length: monthCount }, (_, index) =>
+    `${year}-${String(firstMonth + index).padStart(2, '0')}`,
+  );
+}
 
 export function buildScoreboardQueryParams({
   periodMode,
   currentMonthKey,
   selectedMonth,
   selectedMonths,
+  selectedYear = currentMonthKey.slice(0, 4),
+  selectedQuarter = String(Math.ceil(Number(currentMonthKey.slice(5, 7)) / 3)),
   dateFrom,
   dateTo,
   filterProduct,
@@ -59,6 +72,8 @@ export function buildScoreboardQueryParams({
   currentMonthKey: string;
   selectedMonth: string;
   selectedMonths: string[];
+  selectedYear?: string;
+  selectedQuarter?: string;
   dateFrom: string;
   dateTo: string;
   filterProduct: string;
@@ -80,6 +95,8 @@ export function buildScoreboardQueryParams({
   if (periodMode === 'multiple' && selectedMonths.length) {
     params.months = [...new Set(selectedMonths)].sort();
   }
+  if (periodMode === 'quarter') params.months = monthsForYearQuarter(selectedYear, selectedQuarter);
+  if (periodMode === 'year') params.months = monthsForYearQuarter(selectedYear);
   if (periodMode === 'range' && dateFrom && dateTo && dateFrom <= dateTo) {
     params.fromDate = dateFrom;
     params.toDate = dateTo;

@@ -4,6 +4,7 @@ import {
   buildScoreboardQueryParams,
   getSalesGoalComparison,
   isCompleteCalendarMonthRange,
+  monthsForYearQuarter,
 } from './sales-utils.ts';
 
 test('builds the exact query filters used by the Scoreboard period controls', () => {
@@ -25,6 +26,24 @@ test('builds the exact query filters used by the Scoreboard period controls', ()
   assert.deepEqual(buildScoreboardQueryParams({ ...common, periodMode: 'multiple' }), {
     months: ['2097-10', '2097-12'],
   });
+  assert.deepEqual(buildScoreboardQueryParams({
+    ...common,
+    periodMode: 'quarter',
+    selectedYear: '2097',
+    selectedQuarter: '4',
+    filterProduct: 'product-id',
+  }), {
+    months: ['2097-10', '2097-11', '2097-12'],
+    productId: 'product-id',
+  });
+  assert.deepEqual(buildScoreboardQueryParams({
+    ...common,
+    periodMode: 'year',
+    selectedYear: '2096',
+  }).months, [
+    '2096-01', '2096-02', '2096-03', '2096-04', '2096-05', '2096-06',
+    '2096-07', '2096-08', '2096-09', '2096-10', '2096-11', '2096-12',
+  ]);
   assert.deepEqual(buildScoreboardQueryParams({ ...common, periodMode: 'range' }), {
     fromDate: '2097-11-01',
     toDate: '2097-11-30',
@@ -37,6 +56,13 @@ test('builds the exact query filters used by the Scoreboard period controls', ()
     filterProduct: 'product-id',
   }), { productId: 'product-id' });
   assert.deepEqual(buildScoreboardQueryParams({ ...common, periodMode: 'all' }), {});
+});
+
+test('creates calendar months for a year or quarter and rejects invalid selections', () => {
+  assert.deepEqual(monthsForYearQuarter('2028', '1'), ['2028-01', '2028-02', '2028-03']);
+  assert.equal(monthsForYearQuarter('2028').length, 12);
+  assert.deepEqual(monthsForYearQuarter('0000'), []);
+  assert.deepEqual(monthsForYearQuarter('2028', '5'), []);
 });
 
 const singleMonth = ['2026-01'];

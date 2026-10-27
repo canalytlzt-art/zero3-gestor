@@ -104,7 +104,7 @@ export default {
       }
       return env.ASSETS.fetch(request);
     } catch (error) {
-      return routeError(error);
+      return routeError(error, request);
     }
   },
 };
