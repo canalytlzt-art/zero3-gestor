@@ -13,6 +13,8 @@ Arquivo de build: `artifacts/zero3-pro-vendas/vite.config.ts`; script principal 
 
 As duas variáveis `VITE_*` são incorporadas ao frontend durante o build e não são Secrets de Runtime.
 
+Para o ambiente de teste, `VITE_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `CLERK_JWT_KEY` e `CLERK_ISSUER` precisam pertencer à mesma instância Clerk Development. O proxy do Worker usa o caminho `/api/__clerk`; configure `VITE_CLERK_PROXY_URL` com a URL HTTPS do Worker de teste e esse caminho. `CLERK_AUTHORIZED_PARTIES` deve conter a origem HTTPS exata usada pelo navegador. Não copie valores para este arquivo.
+
 ## Runtime do Worker
 
 Bindings tipados em `artifacts/zero3-pro-vendas/src/worker/types.ts`; configuração de recursos em `wrangler.jsonc`.

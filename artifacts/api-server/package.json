@@ -12,8 +12,8 @@
     "verify-sales-backup": "tsx scripts/verify-sales-backup.ts"
   },
   "dependencies": {
-    "@clerk/express": "^2.1.81",
-    "@clerk/shared": "^4.41.0",
+    "@clerk/express": "^2.1.83",
+    "@clerk/shared": "^4.41.1",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
     "cookie-parser": "^1.4.7",

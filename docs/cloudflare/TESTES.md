@@ -21,6 +21,16 @@ Nenhuma validação consultou ou alterou o D1 remoto.
 
 O primeiro smoke Worker revelou que o wildcard `/api/*` não abrangia o caminho exato `/api`; a configuração foi corrigida para incluir ambos. O Worker local foi encerrado após os testes.
 
+## Resultados T03 — Clerk e autorização
+
+- `pnpm --filter @workspace/zero3-pro-vendas run test` → 44 testes aprovados; inclui JWT local (assinatura, expiração e emissor), origem/allowlist, configuração faltante, instância incompatível, sanitização de logs e repasse do proxy Clerk com cookies.
+- `pnpm run typecheck` → aprovado para bibliotecas, API, app e scripts.
+- Build Vite → aprovado, 2.585 módulos, assets em `dist/public`; dry-run Wrangler 4.152.0 → aprovado, 8 assets, sem publicar.
+- Pacotes Clerk atualizados dentro das faixas existentes e após `minimumReleaseAge`: `@clerk/react` 6.18.1, `@clerk/localizations` 4.24.1, `@clerk/express` 2.1.83, `@clerk/shared` 4.41.1. `@clerk/backend` permaneceu em 3.26.2.
+- Workflows web e API reiniciados; o API-server compilou e iniciou. Capturas locais de `/` e `/sign-in` mostraram a página pública e o formulário Clerk com Google/e-mail.
+- O navegador exibiu o aviso de chave de desenvolvimento esperado. O agente não concluiu login, não acessou o domínio Cloudflare e não verificou credenciais/Secrets de Runtime.
+- A verificação do proxy é simulada: prova encaminhamento de uma requisição FAPI e retorno de `Set-Cookie`, não renovação de sessão real. Login Google/e-mail, origem e correspondência real das chaves seguem pendentes no Cloudflare Runtime.
+
 ## Testes existentes e comandos atuais
 
 - `pnpm --filter @workspace/zero3-pro-vendas run test` chama um subconjunto explícito: vendas utilitárias/workbook/export, auth/session e custom fetch.

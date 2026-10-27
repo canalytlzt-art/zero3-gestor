@@ -6,7 +6,10 @@ import {
   TokenVerificationErrorReason,
 } from "@clerk/backend/errors";
 import { apiError } from "./http";
-import { classifyTokenVerificationFailure, getAuthContext } from "./auth";
+import {
+  classifyTokenVerificationFailure,
+  getAuthContext,
+} from "./auth";
 import worker from "./index";
 import type { WorkerEnv } from "./types";
 
@@ -325,6 +328,161 @@ test("fails closed when the local Clerk public key is not configured", async () 
   if (!result.ok) {
     assert.equal(result.status, 503);
     assert.equal(result.code, "clerk_jwt_key_missing");
+  }
+});
+
+test("fails closed with a distinct code for each missing Worker Clerk setting", async () => {
+  const cases: Array<{
+    env: Partial<WorkerEnv>;
+    code: string;
+  }> = [
+    { env: { CLERK_SECRET_KEY: undefined }, code: "clerk_secret_missing" },
+    { env: { CLERK_ISSUER: undefined }, code: "clerk_issuer_missing_or_invalid" },
+    {
+      env: { CLERK_AUTHORIZED_PARTIES: undefined },
+      code: "clerk_authorized_parties_missing",
+    },
+  ];
+
+  for (const { env, code } of cases) {
+    const result = await getAuthContext(
+      requestWithSession(makeSessionToken()),
+      makeWorkerEnv(env),
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 503);
+      assert.equal(result.code, code);
+    }
+  }
+});
+
+test("fails closed when ZERO3_ALLOWED_EMAILS is missing", async () => {
+  const mock = mockClerkUserLookup("admin@example.test");
+  try {
+    const result = await getAuthContext(
+      requestWithSession(makeSessionToken()),
+      makeWorkerEnv({ ZERO3_ALLOWED_EMAILS: undefined }),
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 503);
+      assert.equal(result.code, "admin_allowlist_missing");
+    }
+  } finally {
+    mock.restore();
+  }
+});
+
+test("classifies a Clerk user not found by the configured secret as an instance mismatch", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response("{}", { status: 404 })) as typeof fetch;
+
+  try {
+    const result = await getAuthContext(
+      requestWithSession(makeSessionToken()),
+      makeWorkerEnv(),
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 401);
+      assert.equal(result.code, "clerk_instance_mismatch");
+      assert.equal(result.upstreamStatus, 404);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Clerk session proxy forwards FAPI requests and response cookies", async () => {
+  const originalFetch = globalThis.fetch;
+  let upstreamRequest: Request | undefined;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    upstreamRequest =
+      input instanceof Request ? input : new Request(input, init);
+    return new Response("refresh-result", {
+      status: 200,
+      headers: {
+        "content-type": "text/plain",
+        "set-cookie": "__session=rotated-session; Path=/; HttpOnly; Secure",
+      },
+    });
+  }) as typeof fetch;
+
+  try {
+    const response = await worker.fetch(
+      new Request(
+        `${testOrigin}/api/__clerk/v1/client/sessions/session_test/tokens?template=default`,
+        {
+          method: "POST",
+          headers: {
+            cookie: "__client=client-session; __session=current-session",
+            "cf-connecting-ip": "203.0.113.12",
+          },
+        },
+      ),
+      makeWorkerEnv(),
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), "refresh-result");
+    assert.equal(
+      response.headers.get("set-cookie"),
+      "__session=rotated-session; Path=/; HttpOnly; Secure",
+    );
+    assert.equal(
+      upstreamRequest?.url,
+      "https://frontend-api.clerk.dev/v1/client/sessions/session_test/tokens?template=default",
+    );
+    assert.equal(
+      upstreamRequest?.headers.get("clerk-proxy-url"),
+      `${testOrigin}/api/__clerk`,
+    );
+    assert.equal(upstreamRequest?.headers.get("clerk-secret-key"), "test-secret-only");
+    assert.equal(
+      upstreamRequest?.headers.get("cookie"),
+      "__client=client-session; __session=current-session",
+    );
+    assert.equal(upstreamRequest?.headers.get("x-forwarded-for"), "203.0.113.12");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Worker auth diagnostics exclude session cookies and include only safe correlation fields", async () => {
+  const originalWarn = console.warn;
+  const messages: string[] = [];
+  console.warn = (...values: unknown[]) => {
+    messages.push(values.map(String).join(" "));
+  };
+
+  try {
+    const token = makeSessionToken();
+    const [header, payload, signature] = token.split(".");
+    const forgedToken =
+      `${header}.${payload}.${signature[0] === "A" ? "B" : "A"}${signature.slice(1)}`;
+    const response = await worker.fetch(
+      new Request(`${testOrigin}/api/access-status`, {
+        headers: {
+          origin: testOrigin,
+          cookie: `__session=${forgedToken}`,
+          "cf-ray": "ray-safe-test",
+        },
+      }),
+      makeWorkerEnv(),
+    );
+
+    assert.equal(response.status, 401);
+    const log = messages.join("\n");
+    assert.match(log, /auth\.validation_failed/);
+    assert.match(log, /session_invalid/);
+    assert.match(log, /ray-safe-test/);
+    assert.equal(log.includes(forgedToken), false);
+    assert.equal(log.includes("__session"), false);
+    assert.equal(log.includes("admin@example.test"), false);
+    assert.equal(log.includes("test-secret-only"), false);
+  } finally {
+    console.warn = originalWarn;
   }
 });
 

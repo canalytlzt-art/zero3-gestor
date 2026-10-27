@@ -16,10 +16,12 @@ O estado de cada critério de aceite, incluindo ambiente e limites da evidência
 
 ## T03 — Clerk e autorização
 
+- **Estado:** concluída em código e testes locais; login real e configuração do Cloudflare Runtime não foram verificados.
 - Verificar a sessão same-origin, proxy Clerk, JWT local, emissor, origem autorizada e `ZERO3_ALLOWED_EMAILS`.
 - Usar a mesma instância Clerk Development no build e Runtime. Não imprimir nem gravar credenciais.
-- Testar acesso autorizado e não autorizado, renovação e falhas de sessão; quando faltar configuração, indicar o nome do campo e a tela do Cloudflare sem pedir o segredo no chat.
-- Critério: teste de Worker para sessão válida, ausente, expirada, inválida e não autorizada; validação real só quando o Runtime correto estiver configurado.
+- Testes locais cobrem acesso autorizado/não autorizado, sessão ausente/expirada/inválida, rejeição de outra instância, origem, configuração ausente, logs e proxy de sessão.
+- Quando faltar configuração, a UI indica o nome do campo e o painel Cloudflare sem pedir o segredo.
+- Critério local atendido; login Google/e-mail, renovação real e mesma instância no Runtime só podem ser confirmados no Cloudflare após configurar os valores corretos.
 
 ## T04 — D1, migrações e conciliação
 
