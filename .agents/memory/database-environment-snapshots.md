@@ -21,6 +21,12 @@ Para testes de runtime Workers, configure explicitamente D1 local no Miniflare e
 
 **How to apply:** Compare os IDs antes de qualquer execução remota. Se não houver D1 físico exclusivo, use binding local efêmera para testes Workers e deixe a publicação de homologação bloqueada.
 
+Para aplicar migrations manualmente pelo Console D1, use a tabela e o formato `d1_migrations` do Wrangler (`id`, `name`, `applied_at`) e registre os nomes exatos dos arquivos. A tabela `_d1_migrations` com hashes usada pelo importador do snapshot é privada desse script e não substitui o controle do Wrangler.
+
+**Why:** O Wrangler verifica `d1_migrations`; marcar apenas `_d1_migrations` faria as migrations parecerem pendentes e elas poderiam ser reaplicadas.
+
+**How to apply:** Antes de montar um procedimento manual, confira a versão local do Wrangler e a definição efetiva da tabela; valide o script em D1 local isolado e interrompa se a consulta prévia encontrar tabelas de aplicação existentes.
+
 Na versão instalada `@cloudflare/vitest-plugin` 1.4.7, `readD1Migrations` é exportado pelo pacote raiz, embora a documentação consulte um subcaminho `/config`. Confira os `exports` da versão resolvida antes de copiar o caminho de importação da documentação.
 
 **Why:** O subcaminho documentado não está exportado por essa versão e falha na resolução do módulo.

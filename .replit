@@ -23,6 +23,7 @@ timeoutMs = 20000
 
 [userenv.shared]
 ZERO3_ALLOWED_EMAILS = "canalytlzt@gmail.com"
+CLOUDFLARE_ACCOUNT_ID = "24201f977ffcb6a805355375e6490dc5"
 
 [nix]
 channel = "stable-25_05"

@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "3gRMVZBSAkWleNsnhEudJ"
+uri = "file://docs/cloudflare/zero3-pro-gestao-d1-console-init.sql"
+type = "unspecified"
+title = "SQL de inicialização do D1"
+description = "Migrations oficiais do ZERO3 PRO, controle compatível com Wrangler e consultas de verificação. Validado em D1 local isolado; não foi executado no banco remoto."
+logical_id = "63542ae1-39cd-4468-814b-aaed081cfbfe"
+content_hash = "sha256:45eaf17049947301fbcb3aa2f22734b7dda9aa9b1472d0d6032b301b7c8af373"
+size = 13075
+mtime_ms = 1793138177544
+storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:c91b3b47-0600-408b-85d9-1acffd854e30/63542ae1-39cd-4468-814b-aaed081cfbfe/1b0387a5-92b6-40ed-8c65-0db908bbd7fb"
+storage_version_token = "1793138237509641"
+content_type = "application/octet-stream"
