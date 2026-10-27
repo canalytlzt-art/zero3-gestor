@@ -9,3 +9,4 @@
 - [Seleção do banco por ambiente](database-environment-snapshots.md) — para cópias e migrações, selecione explicitamente o banco de desenvolvimento; não confie no ambiente padrão do processo.
 - [Roteamento do prefixo API no Worker](workers-api-root-routing.md) — `run_worker_first` precisa cobrir `/api` e `/api/*`; a curinga sozinha deixa o caminho exato cair no fallback SPA.
 - [Limites de backup de ocupação no Worker](occupancy-backup-limits.md) — filtre no D1 antes de montar o arquivo e mantenha contagens, resumo e limites alinhados ao conteúdo exportado.
+- [Autenticação Wrangler não interativa](wrangler-noninteractive-auth.md) — `wrangler whoami` pode não comprovar que comandos D1 remotos têm credencial de API disponível.

@@ -1,15 +1,65 @@
 import { SELF } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
+import { handleOccupancyRequest } from "./occupancy";
 import { handleSalesRequest } from "./sales";
 import type { AuthContext, WorkerEnv } from "./types";
 
 const workerEnv = env as unknown as WorkerEnv;
+const testOrigin = "https://zero3.test";
 const authorizedFixture: AuthContext = {
   userId: "vitest-admin-fixture",
   email: "worker-test@example.invalid",
   authorized: true,
 };
+
+async function callSales(
+  path: string,
+  method = "GET",
+  body?: unknown,
+): Promise<{ response: Response; payload: any }> {
+  const request = new Request(`${testOrigin}/api${path}`, {
+    method,
+    ...(body === undefined
+      ? {}
+      : {
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+  });
+  const response = await handleSalesRequest(
+    request,
+    workerEnv,
+    authorizedFixture,
+    path.split("?")[0]!,
+  );
+  expect(response, `${method} ${path} should match a Worker route`).toBeTruthy();
+  return { response: response!, payload: response!.status === 204 ? null : await response!.json() };
+}
+
+async function callOccupancy(
+  path: string,
+  method = "GET",
+  body?: unknown,
+): Promise<{ response: Response; payload: any }> {
+  const request = new Request(`${testOrigin}/api${path}`, {
+    method,
+    ...(body === undefined
+      ? {}
+      : {
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+  });
+  const response = await handleOccupancyRequest(
+    request,
+    workerEnv,
+    authorizedFixture,
+    path.split("?")[0]!,
+  );
+  expect(response, `${method} ${path} should match a Worker route`).toBeTruthy();
+  return { response: response!, payload: response!.status === 204 ? null : await response!.json() };
+}
 
 async function insertSale(input: {
   id: string;
@@ -60,7 +110,7 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
 
   it("queries reconciled sales totals from the local D1 binding", async () => {
     await insertSale({
-      id: "vitest-sale-october",
+      id: "10000000-0000-4000-8000-000000000001",
       saleDate: "2026-10-10",
       productName: "Plano 12 aulas",
       quantity: 2,
@@ -68,7 +118,7 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
       customerName: "Cliente de teste",
     });
     await insertSale({
-      id: "vitest-sale-november",
+      id: "10000000-0000-4000-8000-000000000002",
       saleDate: "2026-11-02",
       productName: "Aula avulsa",
       quantity: 1,
@@ -123,5 +173,103 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
         netCents: 7_500,
       },
     ]);
+  });
+
+  it("persists the sales, refunds, products, goals, and occupancy Worker routes in D1", async () => {
+    const unique = crypto.randomUUID();
+    const productName = `Worker route ${unique}`;
+    const sale = await callSales("/sales", "POST", {
+      saleDate: "2026-12-03",
+      productName,
+      quantity: 2,
+      unitAmountCents: 1_450,
+      customerName: "Cliente sintético",
+      notes: "Teste D1 local",
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(sale.response.status).toBe(201);
+    expect(sale.payload).toMatchObject({
+      productName,
+      quantity: 2,
+      unitAmountCents: 1_450,
+      totalCents: 2_900,
+      customerName: "Cliente sintético",
+    });
+
+    const saleId = sale.payload.id as string;
+    const products = await callSales("/products");
+    expect(products.response.status).toBe(200);
+    expect(products.payload.some((product: { name: string }) => product.name === productName)).toBe(true);
+
+    const sales = await callSales("/sales");
+    const history = await callSales("/sales/history");
+    expect(sales.response.status).toBe(200);
+    expect(history.response.status).toBe(200);
+    expect(sales.payload.some((row: { id: string }) => row.id === saleId)).toBe(true);
+    expect(history.payload.some((row: { id: string }) => row.id === saleId)).toBe(true);
+
+    const refund = await callSales(`/sales/${saleId}/refunds`, "POST", {
+      refundDate: "2026-12-04",
+      amountCents: 500,
+      reason: "Estorno parcial de teste",
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(refund.response.status).toBe(201);
+    expect(refund.payload.amountCents).toBe(500);
+    expect((await callSales("/sales/refund-candidates")).response.status).toBe(200);
+    const refunds = await callSales("/sales/refunds");
+    expect(refunds.response.status).toBe(200);
+    expect(refunds.payload.some((row: { id: string }) => row.id === refund.payload.id)).toBe(true);
+
+    const goal = await callSales("/sales-goals", "PUT", {
+      month: "2026-12",
+      productName,
+      targetCents: 5_000,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(goal.response.status).toBe(200);
+    const goals = await callSales("/sales-goals");
+    expect(goals.response.status).toBe(200);
+    expect(goals.payload.some((row: { productName: string }) => row.productName === productName)).toBe(true);
+
+    const modalityName = `Modalidade ${unique}`;
+    const modality = await callOccupancy("/occupancy/modalities", "POST", {
+      name: modalityName,
+    });
+    expect(modality.response.status).toBe(201);
+    expect((await callOccupancy("/occupancy/modalities")).response.status).toBe(200);
+
+    const occupancy = await callOccupancy("/occupancy", "POST", {
+      kind: "daily",
+      period: "2026-12-03",
+      modalityId: modality.payload.id,
+      modalityName,
+      presences: 3,
+      capacity: 4,
+      startTime: "06:00",
+      endTime: "07:00",
+      className: "Turma sintética",
+    });
+    expect(occupancy.response.status).toBe(201);
+    expect(occupancy.payload).toMatchObject({
+      modalityName,
+      presences: 3,
+      capacity: 4,
+      percentage: 75,
+    });
+    const occupancyRows = await callOccupancy(
+      "/occupancy?fromDate=2026-12-03&toDate=2026-12-03",
+    );
+    expect(occupancyRows.response.status).toBe(200);
+    expect(occupancyRows.payload.some((row: { id: string }) => row.id === occupancy.payload.id)).toBe(true);
+
+    const scoreboard = await callSales("/sales/scoreboard?months=2026-12");
+    expect(scoreboard.response.status).toBe(200);
+    expect(scoreboard.payload.totals).toMatchObject({
+      quantity: 2,
+      salesCents: 2_900,
+      refundCents: 500,
+      netCents: 2_400,
+    });
   });
 });
