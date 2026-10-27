@@ -34,6 +34,10 @@ No Worker atual, `CLERK_JWT_KEY` verifica localmente a assinatura do JWT; `CLERK
 
 `wrangler.test.jsonc` define o nome `zero3-gestor-teste` e o nome lógico `zero3-pro-gestao-db-teste`, mas atualmente carrega o mesmo `database_id` da configuração principal. Tratar como **inseguro para deploy** até que um D1 de teste seja criado e seu ID correto seja configurado. O nome do recurso não isola um binding quando o ID referencia outro banco.
 
+## Testes locais do runtime Workers
+
+`artifacts/zero3-pro-vendas/vitest.config.ts` usa `@cloudflare/vitest-plugin`/Miniflare com um D1 efêmero, migrações versionadas e `remoteBindings: false`. A suíte não carrega `wrangler.test.jsonc`, não recebe um ID de Cloudflare e não pode alcançar D1 remoto. O identificador `zero3-vitest-local-only` é apenas o nome local do banco Miniflare.
+
 ## Ambiente Replit
 
 O servidor Express e Drizzle exigem `DATABASE_URL` (PostgreSQL); `CLERK_PUBLISHABLE_KEY` e `CLERK_SECRET_KEY` são lidas pelo middleware Clerk do processo Node. Essas variáveis são para o backend Express e não substituem o binding D1 nem os bindings Clerk do Worker.

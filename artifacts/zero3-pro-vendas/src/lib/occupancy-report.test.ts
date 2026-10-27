@@ -8,6 +8,7 @@ import {
   createOccupancyWorkbook,
   selectEffectiveOccupancyRecords,
 } from './occupancy-report';
+import { assertWorkbookReadableIndependently } from './xlsx-openxml-test-utils';
 
 function record(
   id: string,
@@ -69,6 +70,12 @@ test('uses weighted occupancy, retains zero and above-capacity values, and separ
   assert.ok(effective.includes(rows[4]!));
 
   const workbook = createOccupancyWorkbook(rows, july);
+  const workbookBytes = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' }) as Buffer;
+  assertWorkbookReadableIndependently(workbookBytes, [
+    'Lançamentos',
+    'Resumo modalidade-mês',
+    'Comparação por horário',
+  ]);
   const detailRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets.Lançamentos!);
   assert.equal(detailRows.find((item) => item['Data'] === '2026-07-03')?.['Presenças/Vagas'], '0/18');
   assert.equal(detailRows.find((item) => item['Data'] === '2026-07-03')?.['Ocupação (%)'], 0);
@@ -127,4 +134,27 @@ test('the detailed workbook keeps the importer-compatible headers and reopens wi
   assert.equal(parsed.entries[0]?.capacity, 18);
   assert.equal(parsed.entries[0]?.startTime, '06:00');
   assert.equal(parsed.entries[0]?.endTime, '07:00');
+});
+
+test('occupancy exports keep formula-like text inert in XLSX and CSV', () => {
+  const source = record('formula-text', {
+    modalityName: '=1+1',
+    notes: '@SUM(1,1)',
+    className: '+class-text',
+  });
+  const workbook = createOccupancyWorkbook([source], july);
+  const bytes = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' }) as Buffer;
+  const independent = assertWorkbookReadableIndependently(bytes, [
+    'Lançamentos',
+    'Resumo modalidade-mês',
+    'Comparação por horário',
+  ]);
+  assert.ok(independent.strings.includes('=1+1'));
+  assert.ok(independent.strings.includes('@SUM(1,1)'));
+  assert.ok(independent.strings.includes('+class-text'));
+
+  const csv = createOccupancyCsv([source]);
+  assert.ok(csv.includes("'=1+1"));
+  assert.ok(csv.includes("'@SUM(1,1)"));
+  assert.ok(csv.includes("'+class-text"));
 });

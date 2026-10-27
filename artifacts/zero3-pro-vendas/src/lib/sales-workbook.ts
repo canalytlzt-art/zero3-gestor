@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import type { Product, Sale, SalesRefundRecord } from '@workspace/api-client-react';
 import { productNameKey } from './sales-utils';
+import { protectSpreadsheetCsvText, protectWorksheetForCsv } from './spreadsheet-csv-safety';
 
 const MAX_SAFE_INTEGER_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 
@@ -331,9 +332,12 @@ export function createSalesCsv(sales: Sale[], refunds: SalesRefundRecord[], prod
     : filters.selection.mode === 'range'
       ? `${filters.selection.fromDate} a ${filters.selection.toDate}`
       : filters.selection.months.join(', ');
-  const csvCell = (value: string) => /[;"\r\n]/.test(value)
-    ? `"${value.replaceAll('"', '""')}"`
-    : value;
+  const csvCell = (value: string) => {
+    const safeValue = protectSpreadsheetCsvText(value);
+    return /[;"\r\n]/.test(safeValue)
+      ? `"${safeValue.replaceAll('"', '""')}"`
+      : safeValue;
+  };
   const metadata = [
     ['Relatório financeiro Zero3 PRO'],
     ['Período', selectionLabel],
@@ -341,7 +345,7 @@ export function createSalesCsv(sales: Sale[], refunds: SalesRefundRecord[], prod
     ['Gerado em', filters.generatedAt],
     [],
   ].map((row) => row.map((cell) => csvCell(String(cell ?? ''))).join(';')).join('\r\n');
-  return `\uFEFF${metadata}\r\n${XLSX.utils.sheet_to_csv(worksheet, { FS: ';', RS: '\r\n' })}`;
+  return `\uFEFF${metadata}\r\n${XLSX.utils.sheet_to_csv(protectWorksheetForCsv(worksheet), { FS: ';', RS: '\r\n' })}`;
 }
 
 export function downloadSalesCsv(sales: Sale[], refunds: SalesRefundRecord[], products: Product[], filters: ExportFilters, filename: string) {

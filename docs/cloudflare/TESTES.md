@@ -45,22 +45,35 @@ T03 também confirmou que as duas chaves do Worker têm funções distintas: a c
 
 ## Testes existentes e comandos atuais
 
-- `pnpm --filter @workspace/zero3-pro-vendas run test` chama um subconjunto explícito: vendas utilitárias/workbook/export, auth/session e custom fetch.
-- Há arquivos de teste adicionais não incluídos nesse script: `sales-import.test.ts`, `occupancy-import.test.ts`, testes de relatórios, charts e dados de gráficos.
-- `pnpm --filter @workspace/api-server run test:integration` executa apenas `sales.integration.test.ts`.
-- `occupancy.integration.test.ts` e `occupancy-backup.integration.test.ts` existem, mas não fazem parte desse comando.
-- Não há teste de integração do Worker para as rotas de vendas e ocupação; há testes de auth/session e helpers.
+- `pnpm --filter @workspace/zero3-pro-vendas run test` executa os testes Node existentes de vendas, importação/exportação, gráficos/relatórios de ocupação, auth/session, Worker helpers e custom fetch.
+- `pnpm --filter @workspace/zero3-pro-vendas run test:workers` é um comando separado para os testes que usam o runtime Workers; a cobertura atual é limitada a sessão ausente e leitura do Scoreboard com D1 local.
+- `pnpm --filter @workspace/api-server run test:integration` executa `sales.integration.test.ts`; os testes de ocupação e backup foram executados diretamente com `tsx --test` nesta etapa.
+- Ainda faltam testes no Worker para CRUD, produtos/modalidades, importação, exportação, gráficos, ocupação e backups/restauração. A cobertura parcial de Scoreboard não equivale às 39 operações.
 - `pnpm run typecheck` verifica o workspace; `pnpm run build` faz typecheck e builds recursivos.
 - `pnpm --filter @workspace/zero3-pro-vendas run deploy:cloudflare:test:dry-run` requer chaves públicas/URL de proxy no build. Não executar enquanto o D1 de teste apontar para o mesmo ID do principal.
 
-## Lacunas para T08
+## Resultados T08 — validação local de release
 
-1. Executar todos os testes existentes e ajustar scripts para não deixar testes funcionais fora do fluxo padrão.
-2. Testar endpoints de negócio no runtime Workers com D1 isolado.
-3. Testar login Clerk Development real, origem autorizada, allowlist, ausência/expiração/rejeição de sessão.
-4. Conferir exportações/restaurações e conciliar Scoreboard, vendas, estornos e ocupação.
-5. Guardar evidência de que produção não foi alterada durante os testes.
-6. Testar as 39 operações com comportamento/persistência real em Workers e D1 isolado; a verificação T02 foi de presença estática, com smoke limitado.
+- `pnpm install --frozen-lockfile` → concluído com pnpm 10.26.1. A integração oficial atual foi instalada como Vitest 4.1.12 e `@cloudflare/vitest-plugin` 1.4.7; o pacote antigo `@cloudflare/vitest-pool-workers` não é usado.
+- `pnpm --filter @workspace/zero3-pro-vendas run test` → 95 passaram, 1 foi pulado (conferência manual da planilha original), 0 falharam.
+- `pnpm --filter @workspace/zero3-pro-vendas run test:workers` → 2 passaram no runtime Workerd/Miniflare com D1 local efêmero e `remoteBindings: false`. Migrações de `scripts/d1/migrations` foram aplicadas; nenhuma configuração de D1 remoto foi carregada.
+- O teste Workers exercita `GET /api/access-status` sem sessão (401) e a consulta real de Scoreboard do handler com duas vendas sintéticas em D1 (quantidade, total e resumo de dois meses conciliados). A consulta do handler recebe um ator de fixture; isso não é login Clerk nem teste de acesso autorizado pelo Worker.
+- `pnpm run typecheck` → aprovado para os projetos do workspace.
+- `PORT=5173 BASE_PATH=/ NODE_ENV=production pnpm --filter @workspace/zero3-pro-vendas run build` → aprovado, Vite compilou 2.586 módulos e gerou `dist/public`. Permanecem avisos não bloqueantes de sourcemap e chunk acima de 500 KB.
+- `pnpm --filter @workspace/scripts exec wrangler deploy --dry-run --config artifacts/zero3-pro-vendas/wrangler.jsonc --cwd ..` → Wrangler 4.152.0 empacotou 8 assets e mostrou `DB` ligado a `zero3-pro-gestao-db`; nenhum deploy ocorreu.
+- `pnpm --filter @workspace/api-server run test:integration` → 10 testes de integração de vendas passaram. Os testes `occupancy.integration.test.ts` e `occupancy-backup.integration.test.ts` executados diretamente passaram (12 no total). São evidências Express, não Worker.
+- `pnpm --filter @workspace/scripts exec wrangler whoami` → sem autenticação. Não foi feita reconciliação do painel nem consulta, migração ou alteração do D1 remoto.
+- O D1 isolado da suíte usa `d1Databases: { DB: "zero3-vitest-local-only" }` em Miniflare; esse identificador é local e não é um ID Cloudflare. `wrangler.test.jsonc` permanece fora da suíte e continua inseguro para publicação por compartilhar o ID principal.
+
+## Pendências T08
+
+1. O Worker/D1 local cobre apenas autorização sem sessão e leitura mensal do Scoreboard; não executa CRUD completo nem todas as 39 operações.
+2. Testar login Clerk Development real por Google/e-mail, origem, allowlist, renovação e logout no Worker `workers.dev`.
+3. Executar E2E hospedado para venda/importação/edição, gráficos, ocupação manual/importada, exportação, backup/restauração, navegação, erro/retry e bloqueio pós-logout.
+4. Testar datas limite, reprocessamento parcial, falhas transitórias e restauração repetida no D1 físico de homologação, que precisa ser separado e confirmado antes.
+5. Registrar configuração live, versão do Worker, recursos, migrações/schema e origem de dados; isso está pendente porque `wrangler whoami` não está autenticado.
+6. Registrar versão estável anterior e validar recuperação do D1 em ambiente isolado; nenhum procedimento remoto foi executado.
+7. A ausência de consulta/escrita ao D1 remoto e de deploy foi confirmada nesta execução. A URL real de produção não foi testada; produção não pode ser declarada validada.
 
 ## Critérios funcionais extraídos da análise fornecida
 

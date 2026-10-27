@@ -1000,11 +1000,10 @@ function backupMatches(row: Row, selection: OccupancyBackupSelection) {
     if (!selection.fromDate || !selection.toDate) return false;
     if (kind === "daily") {
       if (!date || date < selection.fromDate || date > selection.toDate) return false;
-    } else if (
-      month < selection.fromDate.slice(0, 7) ||
-      month > selection.toDate.slice(0, 7)
-    ) {
-      return false;
+    } else {
+      const [year, monthNumber] = month.split("-").map(Number);
+      const monthEnd = new Date(Date.UTC(year!, monthNumber!, 0)).toISOString().slice(0, 10);
+      if (`${month}-01` < selection.fromDate || monthEnd > selection.toDate) return false;
     }
   }
   if (selection.startTimes?.length || selection.weekdays?.length) {
@@ -1024,6 +1023,107 @@ function backupMatches(row: Row, selection: OccupancyBackupSelection) {
   return true;
 }
 
+function completeMonthsInRange(fromDate: string, toDate: string): string[] {
+  const months: string[] = [];
+  let [year, month] = fromDate.slice(0, 7).split("-").map(Number);
+  const [endYear, endMonth] = toDate.slice(0, 7).split("-").map(Number);
+  while (year! < endYear! || (year === endYear && month! <= endMonth!)) {
+    const key = `${year}-${String(month).padStart(2, "0")}`;
+    const monthEnd = new Date(Date.UTC(year!, month!, 0)).toISOString().slice(0, 10);
+    if (`${key}-01` >= fromDate && monthEnd <= toDate) months.push(key);
+    month! += 1;
+    if (month === 13) {
+      year! += 1;
+      month = 1;
+    }
+  }
+  return months;
+}
+
+async function selectedOccupancyBackupRows(
+  env: WorkerEnv,
+  selection: OccupancyBackupSelection,
+): Promise<Row[]> {
+  const clauses = ["r.deleted_at IS NULL"];
+  const values: unknown[] = [];
+  if (selection.mode === "months" && selection.months?.length) {
+    clauses.push(`r.month IN (${selection.months.map(() => "?").join(",")})`);
+    values.push(...selection.months);
+  } else if (selection.mode === "quarter" && selection.year && selection.quarter) {
+    const firstMonth = (selection.quarter - 1) * 3 + 1;
+    const lastMonth = firstMonth + 2;
+    clauses.push("r.month BETWEEN ? AND ?");
+    values.push(
+      `${selection.year}-${String(firstMonth).padStart(2, "0")}`,
+      `${selection.year}-${String(lastMonth).padStart(2, "0")}`,
+    );
+  } else if (selection.mode === "range" && selection.fromDate && selection.toDate) {
+    const fullMonths = completeMonthsInRange(selection.fromDate, selection.toDate);
+    const monthlyClause = fullMonths.length
+      ? ` OR (r.kind = 'monthly' AND r.month IN (${fullMonths.map(() => "?").join(",")}))`
+      : "";
+    clauses.push(`((r.kind = 'daily' AND r.date BETWEEN ? AND ?)${monthlyClause})`);
+    values.push(selection.fromDate, selection.toDate, ...fullMonths);
+  }
+
+  if (selection.modalityId) {
+    clauses.push("r.modality_id = ?");
+    values.push(selection.modalityId);
+  }
+  if (selection.className) {
+    const scope = keyOf(selection.className);
+    clauses.push("(r.scope_key = ? OR substr(r.scope_key, 1, length(? || '::restore:')) = ? || '::restore:')");
+    values.push(scope, scope, scope);
+  }
+  if (selection.startTimes?.length || selection.weekdays?.length) {
+    clauses.push("r.kind = 'daily'");
+  }
+  if (selection.startTimes?.length) {
+    clauses.push(`substr(r.start_time, 1, 5) IN (${selection.startTimes.map(() => "?").join(",")})`);
+    values.push(...selection.startTimes);
+  }
+  if (selection.weekdays?.length) {
+    const sqliteWeekdays = selection.weekdays.map((weekday) => weekday === 7 ? 0 : weekday);
+    clauses.push(`CAST(strftime('%w', r.date) AS INTEGER) IN (${sqliteWeekdays.map(() => "?").join(",")})`);
+    values.push(...sqliteWeekdays);
+  }
+
+  let statement = env.DB.prepare(
+    `SELECT r.*, m.name AS modality_name FROM occupancy_records r
+     JOIN occupancy_modalities m ON m.id=r.modality_id
+     WHERE ${clauses.join(" AND ")}
+     ORDER BY r.month, r.date, m.normalized_name LIMIT 50001`,
+  );
+  if (values.length) statement = statement.bind(...values);
+  const rows = await all(statement);
+  return rows.filter((row) => backupMatches(row, selection));
+}
+
+function effectiveOccupancyRows(records: Row[]): Row[] {
+  const groups = new Map<string, { daily: Row[]; monthly: Row[] }>();
+  for (const record of records) {
+    const scope = JSON.stringify([
+      record.month,
+      record.modality_id,
+      keyOf(record.class_name === null || record.class_name === undefined ? "" : String(record.class_name)),
+    ]);
+    const group = groups.get(scope) ?? { daily: [], monthly: [] };
+    group[String(record.kind) === "monthly" ? "monthly" : "daily"].push(record);
+    groups.set(scope, group);
+  }
+
+  const effective: Row[] = [];
+  for (const { daily, monthly } of groups.values()) {
+    const monthlyMeasured = monthly.filter((record) => record.presences !== null && record.capacity !== null);
+    const monthlyLegacy = monthly.filter((record) => record.presences === null || record.capacity === null);
+    const dailyMeasured = daily.filter((record) => record.presences !== null && record.capacity !== null);
+    const dailyLegacy = daily.filter((record) => record.presences === null || record.capacity === null);
+    effective.push(...(monthlyMeasured.length ? monthlyMeasured : dailyMeasured));
+    effective.push(...(monthlyLegacy.length ? monthlyLegacy : dailyLegacy));
+  }
+  return effective;
+}
+
 function occupancyPeriodLabel(selection: OccupancyBackupSelection) {
   if (selection.mode === "all") return "Todos os períodos";
   if (selection.mode === "months") return (selection.months ?? []).join(", ");
@@ -1037,7 +1137,8 @@ async function createOccupancyBackup(
 ): Promise<Response> {
   const input = parse(CreateOccupancyBackupBody, await readJson(request));
   if (
-    (input.mode === "months" && (!input.months?.length || input.year || input.quarter)) ||
+    (input.mode === "months" &&
+      (!input.months?.length || new Set(input.months).size !== input.months.length || input.year || input.quarter)) ||
     (input.mode === "quarter" && (!input.year || !input.quarter || input.months)) ||
     (input.mode === "range" &&
       (!input.fromDate || !input.toDate || !validDate(input.fromDate) || !validDate(input.toDate) ||
@@ -1046,15 +1147,15 @@ async function createOccupancyBackup(
   ) {
     throw new ApiFailure(400, "A seleção do backup de ocupação é inválida.");
   }
-  const allRecords = await allOccupancyRecords(env);
-  const records = allRecords.filter((row) => backupMatches(row, input));
+  const records = await selectedOccupancyBackupRows(env, input);
   if (records.length > 50000) throw new ApiFailure(413, "O backup excede o limite de registros.");
   const usedModalityIds = new Set(records.map((row) => String(row.modality_id)));
   const modalities = await all(
     env.DB.prepare("SELECT id, name, version FROM occupancy_modalities ORDER BY normalized_name"),
   );
   const selectedModalities = modalities.filter((row) => usedModalityIds.has(String(row.id)));
-  const measured = records.filter((row) => row.presences !== null && row.capacity !== null);
+  const effectiveRecords = effectiveOccupancyRows(records);
+  const measured = effectiveRecords.filter((row) => row.presences !== null && row.capacity !== null);
   const presences = measured.reduce((sum, row) => sum + Number(row.presences), 0);
   const capacity = measured.reduce((sum, row) => sum + Number(row.capacity), 0);
   const selection = {
@@ -1083,11 +1184,11 @@ async function createOccupancyBackup(
       dailyRecords: records.filter((row) => row.kind === "daily").length,
       monthlyRecords: records.filter((row) => row.kind === "monthly").length,
       modalities: selectedModalities.length,
-      totalRecords: allRecords.length,
+      totalRecords: records.length,
     },
     summary: {
       measuredRecords: measured.length,
-      legacyRecords: records.length - measured.length,
+      legacyRecords: effectiveRecords.length - measured.length,
       presences,
       capacity,
       weightedPercentage: capacity ? Number(((presences / capacity) * 100).toFixed(6)) : null,
@@ -1103,8 +1204,8 @@ async function createOccupancyBackup(
       record: recordOut(row),
     })),
   };
-  if (new TextEncoder().encode(JSON.stringify(backup)).byteLength > 10 * 1024 * 1024) {
-    throw new ApiFailure(413, "O arquivo de backup excede 10 MB.");
+  if (new TextEncoder().encode(JSON.stringify(backup)).byteLength > 8 * 1024 * 1024) {
+    throw new ApiFailure(413, "O arquivo de backup excede 8 MB.");
   }
   return json(CreateOccupancyBackupResponse.parse(backup));
 }

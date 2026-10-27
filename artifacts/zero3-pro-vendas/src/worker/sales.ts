@@ -882,6 +882,25 @@ async function importSales(
   actor: AuthContext,
 ): Promise<Response> {
   const raw = await readJson(request);
+  const rawRows = raw && typeof raw === "object" && "rows" in raw
+    ? (raw as { rows?: unknown }).rows
+    : undefined;
+  if (Array.isArray(rawRows)) {
+    const invalidDateRow = rawRows.find((candidate) =>
+      !candidate
+      || typeof candidate !== "object"
+      || !dateOnly((candidate as Row).saleDate),
+    );
+    if (invalidDateRow) {
+      const row = typeof invalidDateRow === "object" && invalidDateRow !== null
+        ? invalidDateRow as Row
+        : {};
+      throw new ApiFailure(
+        400,
+        `Data da venda inválida na aba ${String(row.sourceSheet ?? "Planilha")}, linha ${String(row.sourceRow ?? "?")}.`,
+      );
+    }
+  }
   const input = bodyParse(ImportSalesBody, raw);
   const normalizedRows = input.rows.map((row) => {
     const rawRow = row as typeof row & { saleDate: Date | string };

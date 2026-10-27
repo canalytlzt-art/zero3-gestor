@@ -21,6 +21,12 @@ Ao misturar detalhe diário com resumo mensal, escolher a fonte por modalidade/t
 
 **How to apply:** Resolver substituição dentro de cada mês antes de juntar meses em um trimestre. Para gráficos por horário e dia da semana, usar dados diários com esses atributos e manter totais mensais fora dessas quebras.
 
+Gráficos de rosca “ocupado/complemento” podem agregar contagens válidas no mesmo recorte. Quando houver somente percentuais legados, a rosca só pode representar uma única observação de uma modalidade e período selecionados; nunca combine percentuais de modalidades diferentes como partes de um total comum. Use barras/evolução para comparações entre modalidades ou múltiplos escopos.
+
+**Why:** Percentuais sem presenças e vagas não compartilham um denominador que permita formar um total de ocupado/complemento.
+
+**How to apply:** Mantenha a origem do percentual visível; bloqueie a rosca quando o recorte depender de médias de vários registros legados ou modalidades.
+
 O modelo de aula não exige cliente, professor, venda ou cadastro individual de participantes. “Vagas” é capacidade total, não vagas restantes. Horário inicial distingue aulas da mesma modalidade no mesmo dia; horário final pode faltar.
 
 **Why:** A ocupação é uma medida operacional por aula, e a mesma turma pode ter várias sessões no mesmo dia.

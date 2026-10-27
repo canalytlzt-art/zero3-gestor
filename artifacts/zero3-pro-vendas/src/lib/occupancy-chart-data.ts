@@ -548,19 +548,26 @@ export function buildOccupancyChartAnalytics(
     .map((point) => point.percentage as number);
   const donutPresences = measuredDonutPoints.reduce((total, point) => total + (point.presences ?? 0), 0);
   const donutCapacity = measuredDonutPoints.reduce((total, point) => total + (point.capacity ?? 0), 0);
+  const donutCoveredPeriods = new Set(donutPoints.filter((point) => point.percentage !== null).map((point) => point.period)).size;
+  const donutAvailablePeriods = availablePeriodCount(filters, donutCoveredPeriods);
+  const legacySupportRows = filters.modalityId
+    ? supportRows.filter((row) => row.modalityId === filters.modalityId && row.source !== 'weighted')
+    : [];
+  const singleLegacyDonutIsValid = filters.viewMode !== 'quarterly'
+    && legacyDonutValues.length === 1
+    && legacySupportRows.length === 1
+    && legacySupportRows[0]?.recordCount === 1
+    && donutCoveredPeriods === donutAvailablePeriods;
   const donutValue = measuredDonutPoints.length
     ? donutCapacity > 0 ? (donutPresences / donutCapacity) * 100 : 0
-    : legacyDonutValues.length ? average(legacyDonutValues) : null;
-  const donutSource = measuredDonutPoints.length
-    ? 'weighted' as const
-    : legacyDonutValues.length > 1 ? 'average' as const : 'reported' as const;
-  const donutCoveredPeriods = new Set(donutPoints.filter((point) => point.percentage !== null).map((point) => point.period)).size;
+    : singleLegacyDonutIsValid ? legacyDonutValues[0] ?? null : null;
+  const donutSource = measuredDonutPoints.length ? 'weighted' as const : 'reported' as const;
   const donut: OccupancyDonutData = donutValue === null ? null : {
     occupied: donutValue,
     unoccupied: Math.max(0, 100 - donutValue),
     source: donutSource,
     coveredPeriods: donutCoveredPeriods,
-    availablePeriods: availablePeriodCount(filters, donutCoveredPeriods),
+    availablePeriods: donutAvailablePeriods,
     presences: measuredDonutPoints.length ? donutPresences : null,
     capacity: measuredDonutPoints.length ? donutCapacity : null,
   };

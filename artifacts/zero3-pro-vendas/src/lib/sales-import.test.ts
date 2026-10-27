@@ -133,7 +133,7 @@ test("accepts quoted CSV and exact Brazilian/ISO/Excel values while rejecting in
 export const originalSalesFile = new URL("../../../../attached_assets/0_Clientes_Individuais_1792690299275.xlsx", import.meta.url);
 
 test("reconciles all six original worksheets and inspects March rows 29 and 30 directly", {
-  skip: !existsSync(originalSalesFile),
+  skip: !existsSync(originalSalesFile) || process.env.ZERO3_RUN_SOURCE_WORKBOOK_TEST !== "1",
 }, async () => {
   const bytes = readFileSync(originalSalesFile);
   const original = XLSX.read(bytes, { type: "buffer", cellNF: true });

@@ -3,6 +3,7 @@ import test from 'node:test';
 import * as XLSX from 'xlsx';
 import type { Product, Sale, SalesRefundRecord } from '@workspace/api-client-react';
 import { createSalesCsv, createSalesWorkbook, summarizeSalesReport } from './sales-workbook';
+import { assertWorkbookReadableIndependently } from './xlsx-openxml-test-utils';
 
 const productId = 'product-plan-12';
 const octoberSale = {
@@ -65,7 +66,9 @@ test('multi-month workbook and CSV reconcile sales by sale date and refunds by e
   });
 
   const workbook = createSalesWorkbook(sales, refunds, products, filters);
-  const reopened = XLSX.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' });
+  const bytes = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  assertWorkbookReadableIndependently(bytes, ['Lançamentos', 'Resumo por plano']);
+  const reopened = XLSX.read(bytes, { type: 'buffer' });
   assert.deepEqual(reopened.SheetNames, ['Lançamentos', 'Resumo por plano']);
   const detailRows = XLSX.utils.sheet_to_json(reopened.Sheets['Lançamentos']!, { header: 1 }) as unknown[][];
   assert.equal(detailRows.length, 4);
@@ -150,4 +153,31 @@ test('exports every matching record beyond a 500-row screen page', () => {
     netCents: 620n,
   });
   assert.ok(createSalesCsv(bulkSales, [], products, filters).includes('sale-bulk-619'));
+});
+
+test('financial exports keep user text inert in XLSX and protect formula-like CSV values', () => {
+  const formulaSale = {
+    ...octoberSale,
+    productName: '=1+1',
+    customerName: '@SUM(1,1)',
+    notes: '+CMD|not-a-command',
+  } as Sale;
+  const formulaProduct = [{ id: productId, name: '=1+1' }] as Product[];
+  const filters = {
+    selection: { mode: 'months', months: ['2026-10'] } as const,
+    productName: '=1+1',
+    generatedAt,
+  };
+  const workbook = createSalesWorkbook([formulaSale], [], formulaProduct, filters);
+  const bytes = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  const independent = assertWorkbookReadableIndependently(bytes, ['Lançamentos', 'Resumo por plano']);
+  assert.ok(independent.strings.includes('=1+1'));
+  assert.ok(independent.strings.includes('@SUM(1,1)'));
+  assert.ok(independent.strings.includes('+CMD|not-a-command'));
+
+  const csv = createSalesCsv([formulaSale], [], formulaProduct, filters);
+  assert.ok(csv.includes("Plano/produto;'=1+1"));
+  assert.ok(csv.includes("'=1+1"));
+  assert.ok(csv.includes("'@SUM(1,1)"));
+  assert.ok(csv.includes("'+CMD|not-a-command"));
 });

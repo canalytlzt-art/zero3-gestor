@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import type { OccupancyBackupSelection, OccupancyRecord } from '@workspace/api-client-react';
+import { protectWorksheetForCsv } from './spreadsheet-csv-safety';
 
 type EffectiveGroup = { daily: OccupancyRecord[]; monthly: OccupancyRecord[] };
 
@@ -204,7 +205,7 @@ export function createOccupancyWorkbook(records: readonly OccupancyRecord[], sel
 
 export function createOccupancyCsv(records: readonly OccupancyRecord[]) {
   const sheet = jsonSheet(detailedRows(records), occupancyColumns);
-  return `\uFEFF${XLSX.utils.sheet_to_csv(sheet, { FS: ';', RS: '\r\n' })}`;
+  return `\uFEFF${XLSX.utils.sheet_to_csv(protectWorksheetForCsv(sheet), { FS: ';', RS: '\r\n' })}`;
 }
 
 export function occupancyWeekdayName(weekday: number) {

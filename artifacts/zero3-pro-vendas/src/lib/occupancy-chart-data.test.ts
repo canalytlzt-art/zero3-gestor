@@ -55,8 +55,7 @@ test('daily view uses only daily values and averages independent class scopes', 
   assert.equal(analytics.evolution.length, 1);
   assert.equal(analytics.evolution[0].percentage, 75);
   assert.equal(analytics.evolution[0].source, 'average');
-  assert.equal(analytics.donut?.occupied, 75);
-  assert.equal(analytics.donut?.unoccupied, 25);
+  assert.equal(analytics.donut, null);
   assert.equal(analytics.comparison.find((item) => item.modalityId === 'yoga')?.percentage, 40);
 });
 
@@ -76,7 +75,7 @@ test('monthly view prefers each class consolidated value and averages daily-only
   assert.deepEqual(analytics.supportRows.map((row) => row.percentage), [80, 60]);
   assert.equal(analytics.evolution[0].percentage, 70);
   assert.equal(analytics.evolution[0].source, 'average');
-  assert.equal(analytics.donut?.occupied, 70);
+  assert.equal(analytics.donut, null);
 });
 
 test('partial-month interval ignores monthly records and uses only daily entries', () => {
@@ -106,9 +105,7 @@ test('multi-month indicators average available month results and never fill miss
   });
 
   assert.deepEqual(analytics.evolution.map((point) => point.percentage), [60, null, 80]);
-  assert.equal(analytics.donut?.occupied, 70);
-  assert.equal(analytics.donut?.coveredPeriods, 2);
-  assert.equal(analytics.donut?.availablePeriods, 3);
+  assert.equal(analytics.donut, null);
 });
 
 test('daily evolution leaves missing dates null instead of turning them into zero-percent bars', () => {
@@ -125,8 +122,8 @@ test('daily evolution leaves missing dates null instead of turning them into zer
   assert.equal(analytics.evolution[0].percentage, 50);
   assert.equal(analytics.evolution[1].percentage, null);
   assert.equal(analytics.evolution[2].percentage, 70);
-  assert.equal(analytics.donut?.coveredPeriods, 2);
-  assert.equal(analytics.donut?.availablePeriods, 31);
+  assert.equal(analytics.evolution.filter((point) => point.percentage !== null).length, 2);
+  assert.equal(analytics.donut, null);
 });
 
 test('modality comparison keeps independent modalities separate and reports period coverage', () => {
@@ -140,6 +137,29 @@ test('modality comparison keeps independent modalities separate and reports peri
   assert.equal(analytics.comparison.find((item) => item.modalityId === 'pilates')?.coveredPeriods, 2);
   assert.equal(analytics.comparison.find((item) => item.modalityId === 'yoga')?.percentage, 25);
   assert.equal(analytics.comparison.find((item) => item.modalityId === 'yoga')?.coveredPeriods, 1);
+});
+
+test('legacy donut is limited to one observation in one selected modality and period', () => {
+  const single = record('single', 'daily', '2026-10-05', 'pilates', 'Pilates', 75);
+  const filters = {
+    viewMode: 'daily' as const,
+    fromDate: '2026-10-05',
+    toDate: '2026-10-05',
+    modalityId: 'pilates',
+  };
+
+  const oneObservation = buildOccupancyChartAnalytics([single], filters);
+  assert.equal(oneObservation.donut?.occupied, 75);
+  assert.equal(oneObservation.donut?.source, 'reported');
+
+  const sameModalityOtherClass = record('second-class', 'daily', '2026-10-05', 'pilates', 'Pilates', 45, 'Noite');
+  assert.equal(buildOccupancyChartAnalytics([single, sameModalityOtherClass], filters).donut, null);
+
+  const otherModality = record('yoga', 'daily', '2026-10-05', 'yoga', 'Yoga', 65);
+  assert.equal(buildOccupancyChartAnalytics([single, otherModality], {
+    ...filters,
+    modalityId: undefined,
+  }).donut, null);
 });
 
 test('measured classes use weighted totals across dates and keep legacy percentages separate', () => {

@@ -43,3 +43,43 @@ test('opens a serialized v3 financial backup and rejects inconsistent counts', (
   }), /quantidade total/i);
 });
 
+test('continues to accept valid legacy v1 and v2 financial backups', () => {
+  const v1 = {
+    format: 'zero3-pro-monthly-backup',
+    version: 1,
+    month: '2026-10',
+    generatedAt: '2026-10-23T15:00:00.000Z',
+    recordCount: 0,
+    goalCount: 0,
+    sales: [],
+    goals: [],
+  };
+  const parsedV1 = parseMonthlySalesBackup(JSON.parse(JSON.stringify(v1)));
+  assert.equal('version' in parsedV1 && parsedV1.version, 1);
+
+  const v2 = {
+    schemaVersion: 2,
+    generatedAt: '2026-10-23T15:00:00.000Z',
+    period: '2026-10',
+    currency: 'BRL',
+    businessTimezone: 'America/Sao_Paulo',
+    counts: {
+      periodSales: 0,
+      periodRefunds: 0,
+      periodGoals: 0,
+      dependencySales: 0,
+      dependencyRefunds: 0,
+      products: 0,
+      histories: 0,
+      totalRecords: 0,
+    },
+    products: [],
+    sales: [],
+    refunds: [],
+    goals: [],
+    histories: [],
+  };
+  const parsedV2 = parseMonthlySalesBackup(JSON.parse(JSON.stringify(v2)));
+  assert.equal('schemaVersion' in parsedV2 && parsedV2.schemaVersion, 2);
+});
+

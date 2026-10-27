@@ -52,7 +52,10 @@ function downloadFile(content: BlobPart, name: string, type: string) {
   anchor.href = url;
   anchor.download = name;
   anchor.click();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+    anchor.remove();
+  }, 1000);
 }
 
 function errorText(error: unknown) {
@@ -244,7 +247,7 @@ export default function OccupancyReportsDialog({
     setRestorePreview(null);
     if (!file) return;
     if (file.size > MAX_OCCUPANCY_BACKUP_BYTES) {
-      setRestoreError('O arquivo ultrapassa o limite de 10 MB. Exporte períodos menores.');
+      setRestoreError('O arquivo ultrapassa o limite de 8 MB. Exporte períodos menores.');
       return;
     }
     try {
@@ -403,9 +406,9 @@ export default function OccupancyReportsDialog({
           {legacyCount > 0 && <p className="text-xs text-[#77717f]">{legacyCount} registro(s) legado(s) sem presenças/vagas serão preservados separadamente, sem inventar contagens.</p>}
 
           <div className="flex flex-wrap gap-2">
-            <button type="button" className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-[#d7f500] px-4 text-xs font-extrabold text-[#262b15] hover:bg-[#c9e600] disabled:opacity-50" onClick={() => void exportWorkbook()} disabled={recordsQuery.isLoading || !!queryProblem} data-testid="button-export-occupancy-xlsx"><FileSpreadsheet size={14} /> Excel (.xlsx)</button>
-            <button type="button" className={buttonClass} onClick={exportCsv} disabled={recordsQuery.isLoading || !!queryProblem} data-testid="button-export-occupancy-csv"><FileText size={14} /> CSV</button>
-            <button type="button" className={buttonClass} onClick={() => void exportBackup()} disabled={createBackup.isPending || !!queryProblem} data-testid="button-export-occupancy-backup"><Download size={14} /> {createBackup.isPending ? 'Gerando backup…' : 'Backup JSON'}</button>
+            <button type="button" className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-[#d7f500] px-4 text-xs font-extrabold text-[#262b15] hover:bg-[#c9e600] disabled:opacity-50" onClick={() => void exportWorkbook()} disabled={recordsQuery.isLoading || recordsQuery.isFetching || !!queryProblem} data-testid="button-export-occupancy-xlsx"><FileSpreadsheet size={14} /> Excel (.xlsx)</button>
+            <button type="button" className={buttonClass} onClick={exportCsv} disabled={recordsQuery.isLoading || recordsQuery.isFetching || !!queryProblem} data-testid="button-export-occupancy-csv"><FileText size={14} /> CSV</button>
+            <button type="button" className={buttonClass} onClick={() => void exportBackup()} disabled={recordsQuery.isFetching || createBackup.isPending || !!queryProblem} data-testid="button-export-occupancy-backup"><Download size={14} /> {createBackup.isPending ? 'Gerando backup…' : 'Backup JSON'}</button>
             <button type="button" className={`${buttonClass} ml-auto`} onClick={() => void recordsQuery.refetch()} disabled={recordsQuery.isFetching || !!queryProblem} data-testid="button-refresh-occupancy-report"><RefreshCw size={14} className={recordsQuery.isFetching ? 'animate-spin' : ''} /> Atualizar prévia</button>
           </div>
           {backupError && <p role="alert" className="rounded-xl bg-[#fff3f1] px-3 py-2 text-xs font-semibold text-[#a24f45]" data-testid="occupancy-report-export-error">{backupError}</p>}

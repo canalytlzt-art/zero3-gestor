@@ -591,7 +591,7 @@ export default function OccupancyChartsPage() {
                 {sourceLabel(analytics.donut.source)}
               </p>
               <CoverageNote covered={analytics.donut.coveredPeriods} available={analytics.donut.availablePeriods} />
-            </> : <ChartEmpty title="Sem base para calcular" detail="O anel aparece quando há presenças e vagas, ou percentuais legados, no recorte." />}
+            </> : <ChartEmpty title="Sem base para calcular" detail="A rosca exige contagens agregáveis ou uma única observação percentual numa modalidade e período definidos." />}
           </section>
 
           <section className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" data-testid="card-occupancy-comparison">
@@ -662,7 +662,10 @@ export default function OccupancyChartsPage() {
                 <Bar dataKey="value" name="Ocupação" radius={[5, 5, 0, 0]} maxBarSize={34} fill={palette.purple} />
               </BarChart>
             </ChartContainer>
-            <CoverageNote covered={analytics.donut?.coveredPeriods ?? 0} available={analytics.donut?.availablePeriods ?? 0} />
+            <CoverageNote
+              covered={analytics.evolution.filter((point) => point.percentage !== null).length}
+              available={analytics.evolution.length}
+            />
           </> : <ChartEmpty title="Sem dados de evolução" detail="Não há percentuais registrados para o período e os filtros selecionados." />}
         </section>
 
