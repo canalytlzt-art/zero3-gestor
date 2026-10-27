@@ -9,6 +9,7 @@ import {
 } from "@workspace/api-client-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { parseOccupancySpreadsheet, type ParsedOccupancyImport } from "@/lib/occupancy-import";
+import { getWeekdayName } from "@/lib/occupancy-calendar";
 
 type Props = { open: boolean; onOpenChange: (open: boolean) => void; onImported: () => void };
 type PreviewItem = {
@@ -332,7 +333,7 @@ export default function OccupancyImportDialog({ open, onOpenChange, onImported }
                         <input type="checkbox" aria-label={`Incluir linha ${local.sourceSheet} ${local.sourceCell}`} checked={included} disabled={local.status !== "ready" || !selectedSheets.has(local.sourceSheet) || remote?.status === "already_imported" || remote?.status === "duplicate_in_file"} onChange={(e) => toggleRow(local.index, e.target.checked)} className="accent-[#7656b8]"/>
                         <div className="min-w-0"><p className="truncate text-[11px] font-extrabold">{local.modalityName || "Modalidade não identificada"}</p><p className="mt-1 font-mono text-[9px] text-[#8a8491]">{local.sourceSheet} · {local.sourceCell}</p></div>
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-semibold text-[#5c5367]">
-                          <span>{formatPeriod(local.period)}</span>
+                          <span>{formatPeriod(local.period)}{local.kind === "daily" && local.period && getWeekdayName(local.period) ? ` · ${getWeekdayName(local.period)}` : ""}</span>
                           <span className="rounded bg-[#f3f0f5] px-1.5 py-0.5">{local.kind === "daily" ? "Diário" : local.kind === "monthly" ? "Mensal" : "Tipo —"}</span>
                           {(local.startTime || local.endTime) && <span className="tabular-nums">{local.startTime || "—"}{local.endTime ? `–${local.endTime}` : ""}</span>}
                           {(local.presences !== null || local.capacity !== null) && <span className="tabular-nums">{local.presences ?? "—"}/{local.capacity ?? "—"}</span>}
@@ -341,7 +342,7 @@ export default function OccupancyImportDialog({ open, onOpenChange, onImported }
                         </div>
                         <div className="min-w-0"><span className={`inline-flex rounded-full px-2 py-1 text-[9px] font-extrabold ${badgeClass(shownStatus)}`}>{statusLabel(shownStatus)}</span>
                           <p className="mt-1 text-[10px] leading-4 text-[#817b89]">{rowMessage}</p>
-                          {remote?.status === "conflict" && remote.existingRecord && <p className="mt-1 text-[10px] text-[#746b7c]">Atual: {remote.existingRecord.modalityName} · {formatPeriod(remote.existingRecord.period)} · {remote.existingRecord.startTime || "sem horário"} · {remote.existingRecord.presences ?? "—"}/{remote.existingRecord.capacity ?? "—"} · {pct(remote.existingRecord.percentage)}</p>}
+                          {remote?.status === "conflict" && remote.existingRecord && <p className="mt-1 text-[10px] text-[#746b7c]">Atual: {remote.existingRecord.modalityName} · {formatPeriod(remote.existingRecord.period)}{remote.existingRecord.kind === "daily" && getWeekdayName(remote.existingRecord.period) ? ` · ${getWeekdayName(remote.existingRecord.period)}` : ""} · {remote.existingRecord.startTime || "sem horário"} · {remote.existingRecord.presences ?? "—"}/{remote.existingRecord.capacity ?? "—"} · {pct(remote.existingRecord.percentage)}</p>}
                         </div>
                         <div className="space-y-2">
                           {remote?.status === "conflict" && local.status === "ready" && <label className="inline-flex items-center gap-2 text-[10px] font-bold text-[#8e3d33]"><input type="checkbox" checked={conflictUpdate} onChange={(e) => toggleConflict(local.index, e.target.checked)} className="accent-[#a24f45]"/> Atualizar registro existente</label>}

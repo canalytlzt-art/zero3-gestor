@@ -20,6 +20,7 @@ import { PurpleSelect } from '@/components/ui/purple-select';
 import { SuggestionInput } from '@/components/ui/suggestion-input';
 import { formatMonthKey, getSaoPauloMonthKey } from '@/lib/sales-utils';
 import { buildOccupancyChartAnalytics } from '@/lib/occupancy-chart-data';
+import { getWeekdayName } from '@/lib/occupancy-calendar';
 import {
   changeOccupancyPeriod,
   clearOccupancyFilters,
@@ -377,6 +378,7 @@ export default function OccupancyManagement() {
               {legacyEdit && form.kind === 'monthly'
                 ? <input type="month" value={form.month} onChange={(e) => setField('month', e.target.value)} className={fieldClass} data-testid="input-occupancy-period" aria-invalid={!!showErr(validation.period)} />
                 : <input type="date" value={form.day} onChange={(e) => setField('day', e.target.value)} className={fieldClass} data-testid="input-occupancy-period" aria-invalid={!!showErr(validation.period)} />}
+              {form.kind === 'daily' && form.day && getWeekdayName(form.day) && <span className="mt-1 block text-[10px] font-semibold normal-case tracking-normal text-[#7656b8]" data-testid="text-occupancy-form-weekday">{getWeekdayName(form.day)}</span>}
               {showErr(validation.period) && <span className="mt-1 block text-[10px] normal-case tracking-normal text-[#a24f45]" data-testid="error-occupancy-period">{validation.period}</span>}
             </label>
             {legacyEdit ? <label className={labelClass}>Percentual legado
@@ -609,7 +611,7 @@ export default function OccupancyManagement() {
                 <li key={r.id} className={`grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 px-4 py-3.5 sm:grid-cols-[110px_1fr_auto_auto] sm:px-5 ${editing?.id === r.id ? 'bg-[#f8f5fc]' : ''}`} data-testid={`row-occupancy-${r.id}`}>
                   <div className="flex items-center gap-2 sm:block">
                     <span className={`inline-block rounded-full px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-[.08em] ${r.kind === 'daily' ? 'bg-[#eee8f7] text-[#65479c]' : 'bg-[#e9f4d6] text-[#4f7224]'}`} data-testid={`badge-occupancy-kind-${r.id}`}>{r.kind === 'daily' ? 'Diário' : 'Mensal'}</span>
-                    <span className="text-xs font-bold capitalize tabular-nums text-[#4b4357] sm:mt-1 sm:block" data-testid={`text-occupancy-period-${r.id}`}>{r.kind === 'daily' ? formatDay(r.period) : formatMonthKey(r.period)}</span>
+                    <span className="text-xs font-bold capitalize tabular-nums text-[#4b4357] sm:mt-1 sm:block" data-testid={`text-occupancy-period-${r.id}`}>{r.kind === 'daily' ? <>{formatDay(r.period)}{getWeekdayName(r.period) && <span className="ml-1 font-medium text-[#7656b8]">· {getWeekdayName(r.period)}</span>}</> : formatMonthKey(r.period)}</span>
                   </div>
                   <p className="row-span-2 text-right font-[family-name:var(--app-font-serif)] text-xl font-extrabold tracking-[-.04em] tabular-nums text-[#2f2a3d] sm:order-3 sm:row-span-1" data-testid={`text-occupancy-percentage-${r.id}`}>{formatPct(r.percentage)}</p>
                   <div className="min-w-0 sm:order-2">

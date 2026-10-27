@@ -78,10 +78,12 @@ test('uses weighted occupancy, retains zero and above-capacity values, and separ
   ]);
   const detailRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets.Lançamentos!);
   assert.equal(detailRows.find((item) => item['Data'] === '2026-07-03')?.['Presenças/Vagas'], '0/18');
+  assert.equal(detailRows.find((item) => item['Data'] === '2026-07-03')?.['Dia da semana'], 'sexta-feira');
   assert.equal(detailRows.find((item) => item['Data'] === '2026-07-03')?.['Ocupação (%)'], 0);
   assert.equal(detailRows.find((item) => item['Data'] === '2026-07-04')?.['Presenças/Vagas'], '19/18');
   assert.equal(detailRows.find((item) => item['Data'] === '2026-07-04')?.['Ocupação (%)'], 105.555556);
   assert.equal(detailRows.find((item) => item['Tipo do registro'] === 'Mensal')?.['Presenças/Vagas'], '');
+  assert.equal(detailRows.find((item) => item['Tipo do registro'] === 'Mensal')?.['Dia da semana'], '');
   assert.equal(detailRows.find((item) => item['Tipo do registro'] === 'Mensal')?.['Percentual original (%)'], 76.5);
   const summaryRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['Resumo modalidade-mês']!);
   assert.equal(summaryRows[0]?.['Presenças somadas'], 29);
@@ -106,10 +108,12 @@ test('partial date ranges do not include monthly summaries and exports beyond a 
   assert.equal(details.length, 502);
   assert.equal(details[0]?.[0], 'Modalidade');
   assert.equal(details[0]?.[1], 'Data');
-  assert.equal(details[0]?.[3], 'Presenças/Vagas');
-  assert.equal(details[0]?.[4], 'Ocupação (%)');
+  assert.ok(details[0]?.includes('Dia da semana'));
+  assert.ok(details[0]?.includes('Presenças/Vagas'));
+  assert.ok(details[0]?.includes('Ocupação (%)'));
   assert.ok(details[0]?.includes('Horário final'));
   const csv = createOccupancyCsv([record('with-end', { endTime: '07:00' })]);
+  assert.ok(csv.includes('Dia da semana'));
   assert.ok(csv.includes('Horário final'));
   assert.ok(csv.includes('07:00'));
   assert.ok(csv.startsWith('\uFEFF'));
@@ -134,6 +138,7 @@ test('the detailed workbook keeps the importer-compatible headers and reopens wi
   assert.equal(parsed.entries[0]?.capacity, 18);
   assert.equal(parsed.entries[0]?.startTime, '06:00');
   assert.equal(parsed.entries[0]?.endTime, '07:00');
+  assert.equal(parsed.entries[0]?.period, '2026-07-01');
 });
 
 test('occupancy exports keep formula-like text inert in XLSX and CSV', () => {

@@ -287,3 +287,21 @@ test('all-modality indicators combine presence and capacity totals instead of av
   assert.equal(analytics.comparison.find((item) => item.modalityId === 'crossfit')?.percentage, 50);
   assert.equal(analytics.comparison.find((item) => item.modalityId === 'yoga')?.percentage, 90);
 });
+
+test('weekday groups remain calendar-date based across December and January and report real totals', () => {
+  const analytics = buildOccupancyChartAnalytics([
+    { ...record('dec-31', 'daily', '2026-12-31', 'crossfit', 'CrossFit', 50, 'Noite', '18:00'), presences: 5, capacity: 10 },
+    { ...record('jan-01', 'daily', '2027-01-01', 'crossfit', 'CrossFit', 75, 'Noite', '18:00'), presences: 15, capacity: 20 },
+    record('legacy-dec', 'monthly', '2026-12', 'crossfit', 'CrossFit', 60, 'Noite'),
+  ], {
+    viewMode: 'daily',
+    selectedMonths: ['2026-12', '2027-01'],
+  });
+
+  assert.deepEqual(analytics.byWeekday.map(({ label, recordCount, presences, capacity, percentage }) => ({
+    label, recordCount, presences, capacity, percentage,
+  })), [
+    { label: 'Quinta', recordCount: 1, presences: 5, capacity: 10, percentage: 50 },
+    { label: 'Sexta', recordCount: 1, presences: 15, capacity: 20, percentage: 75 },
+  ]);
+});

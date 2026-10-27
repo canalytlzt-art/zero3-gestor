@@ -1,4 +1,5 @@
 import type { OccupancyRecord } from '@workspace/api-client-react';
+import { getIsoWeekday, getWeekdayName } from './occupancy-calendar';
 
 export type OccupancyChartViewMode = 'daily' | 'monthly' | 'quarterly';
 
@@ -342,10 +343,11 @@ export function buildOccupancyChartAnalytics(
     if (filters.startTimes?.length && (!record.startTime || !filters.startTimes.includes(record.startTime))) return false;
     if (filters.weekdays?.length) {
       if (record.kind !== 'daily') return false;
-      const weekday = new Date(`${record.period}T00:00:00Z`).getUTCDay() || 7;
-      if (!filters.weekdays.includes(weekday)) return false;
+      const weekday = getIsoWeekday(record.period);
+      if (weekday === null || !filters.weekdays.includes(weekday)) return false;
     }
     if (filters.startTimes?.length && record.kind !== 'daily') return false;
+    if (record.kind === 'daily' && getIsoWeekday(record.period) === null) return false;
     if (record.kind === 'monthly' && !monthlyAllowed) return false;
     return true;
   }));
@@ -594,7 +596,8 @@ export function buildOccupancyChartAnalytics(
       group.push(record);
       recordsByHour.set(time, group);
     }
-    const weekday = new Date(`${record.period}T00:00:00Z`).getUTCDay() || 7;
+    const weekday = getIsoWeekday(record.period);
+    if (weekday === null) continue;
     const group = recordsByWeekday.get(weekday) ?? [];
     group.push(record);
     recordsByWeekday.set(weekday, group);
@@ -603,10 +606,9 @@ export function buildOccupancyChartAnalytics(
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([time, groupedRecords]) => summarizeRecords(groupedRecords, time, time))
     .filter((group): group is OccupancyChartGroup => group !== null);
-  const weekdayNames = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
   const byWeekday = [...recordsByWeekday.entries()]
     .sort(([a], [b]) => a - b)
-    .map(([weekday, groupedRecords]) => summarizeRecords(groupedRecords, String(weekday), weekdayNames[weekday - 1]))
+    .map(([weekday, groupedRecords]) => summarizeRecords(groupedRecords, String(weekday), getWeekdayName(groupedRecords[0]?.period ?? '', 'short') ?? String(weekday)))
     .filter((group): group is OccupancyChartGroup => group !== null);
 
   return { supportRows, evolution, comparison, donut, totals, byHour, byWeekday };

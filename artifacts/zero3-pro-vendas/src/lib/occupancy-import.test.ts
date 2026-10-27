@@ -34,6 +34,25 @@ test("reads row-per-date data and retains original source addresses", async () =
   assert.deepEqual(result.entries[0].sourceCells, { period: "A2", modality: "B2", percentage: "C2", class: "D2" });
 });
 
+test("validates ISO and Brazilian calendar dates across year and leap-day boundaries", async () => {
+  const sheet = rows(
+    ["Data", "Modalidade", "Ocupação"],
+    ["31/12/2026", "Pilates", 50],
+    ["2027-01-01", "Yoga", 60],
+    ["29/02/2024", "Spinning", 70],
+    ["29/02/2025", "CrossFit", 80],
+    ["31/04/2026", "Alongamento", 90],
+  );
+  const result = await parseOccupancySpreadsheet(workbookBytes({ Datas: sheet }), "datas.xlsx");
+  assert.deepEqual(result.entries.map(({ period, status }) => ({ period, status })), [
+    { period: "2026-12-31", status: "ready" },
+    { period: "2027-01-01", status: "ready" },
+    { period: "2024-02-29", status: "ready" },
+    { period: null, status: "pending" },
+    { period: null, status: "pending" },
+  ]);
+});
+
 test("reads modality-by-month matrices and carries years from month headings", async () => {
   const sheet = rows(
     ["Modalidade", "Turma", "Jan 2026", "Fev 2026"],

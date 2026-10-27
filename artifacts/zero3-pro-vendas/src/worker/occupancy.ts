@@ -27,6 +27,7 @@ import {
 import { ApiFailure } from "./idempotency";
 import { apiError, json, readJson } from "./http";
 import type { AuthContext, D1Database, WorkerEnv } from "./types";
+import { getIsoWeekday } from "../lib/occupancy-calendar";
 
 type Row = Record<string, unknown>;
 const nowIso = () => new Date().toISOString();
@@ -522,8 +523,8 @@ async function listRecords(request: Request, env: WorkerEnv) {
       if (kind !== "daily" || !date) return false;
       if (startTimes.length && !startTimes.includes(String(row.start_time).slice(0, 5))) return false;
       if (weekdays.length) {
-        const day = new Date(`${date}T00:00:00.000Z`).getUTCDay();
-        const isoDay = day === 0 ? 7 : day;
+        const isoDay = getIsoWeekday(date);
+        if (isoDay === null) return false;
         if (!weekdays.includes(isoDay)) return false;
       }
     }
@@ -1015,8 +1016,8 @@ function backupMatches(row: Row, selection: OccupancyBackupSelection) {
       return false;
     }
     if (selection.weekdays?.length) {
-      const day = new Date(`${date}T00:00:00.000Z`).getUTCDay();
-      const weekday = day === 0 ? 7 : day;
+      const weekday = getIsoWeekday(date);
+      if (weekday === null) return false;
       if (!selection.weekdays.includes(weekday)) return false;
     }
   }

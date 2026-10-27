@@ -17,6 +17,7 @@ import { ChartContainer } from '@/components/ui/chart';
 import { PurpleSelect } from '@/components/ui/purple-select';
 import { buildFinancialChartAnalytics } from '@/lib/financial-chart-data';
 import { buildOccupancyChartAnalytics, type OccupancyChartSupportRow } from '@/lib/occupancy-chart-data';
+import { getWeekdayName } from '@/lib/occupancy-calendar';
 import { formatCents, formatMonthKey, getSaoPauloMonthKey, getSalesGoalComparison, isCompleteCalendarMonthRange, monthKeysBetween, monthsForYearQuarter } from '@/lib/sales-utils';
 import {
   changeOccupancyPeriod,
@@ -649,6 +650,22 @@ export default function OccupancyChartsPage() {
                   <Bar dataKey="percentage" name="Ocupação" radius={[6, 6, 0, 0]} maxBarSize={38} fill={palette.purple} />
                 </BarChart>
               </ChartContainer>
+              <div className="mt-3 overflow-x-auto rounded-xl border border-[#eee9f1]" data-testid="table-occupancy-weekday-details">
+                <table className="w-full min-w-[440px] text-left text-[10px]">
+                  <thead className="bg-[#faf8fb] text-[9px] uppercase tracking-[.08em] text-[#837b8b]">
+                    <tr><th className="px-3 py-2">Dia</th><th className="px-3 py-2 text-right">Aulas</th><th className="px-3 py-2 text-right">Presenças</th><th className="px-3 py-2 text-right">Vagas</th><th className="px-3 py-2 text-right">Ocupação</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#f0edf1]">
+                    {analytics.byWeekday.map((group) => <tr key={group.key} data-testid={`row-occupancy-weekday-${group.key}`}>
+                      <th scope="row" className="px-3 py-2 font-semibold text-[#51465f]">{group.label}</th>
+                      <td className="px-3 py-2 text-right tabular-nums">{formatCount(group.recordCount)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{formatCount(group.presences)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{formatCount(group.capacity)}</td>
+                      <td className="px-3 py-2 text-right font-bold tabular-nums">{formatPercent(group.percentage)}</td>
+                    </tr>)}
+                  </tbody>
+                </table>
+              </div>
               <p className="mt-1 text-[10px] leading-4 text-[#837b8b]">Dias sem registros não são convertidos em ocupação zero.</p>
             </> : <ChartEmpty title="Sem aulas diárias no recorte" detail="A comparação por dia da semana precisa de registros com data diária." />}
           </article>
@@ -691,7 +708,7 @@ export default function OccupancyChartsPage() {
                 <th scope="col" className="px-5 py-3">Período</th><th scope="col" className="px-5 py-3">Modalidade</th><th scope="col" className="px-5 py-3">Turma</th><th scope="col" className="px-5 py-3">Horário</th><th scope="col" className="px-5 py-3 text-right">Presenças</th><th scope="col" className="px-5 py-3 text-right">Vagas</th><th scope="col" className="px-5 py-3 text-right">Aulas</th><th scope="col" className="px-5 py-3 text-right">Taxa usada</th><th scope="col" className="px-5 py-3">Base</th>
               </tr></thead>
               <tbody>{supportRows.map((row) => <tr key={row.key} className="border-t border-[#f0edf1] hover:bg-[#fcfafc]" data-testid={`row-occupancy-chart-${row.key}`}>
-                <td className="whitespace-nowrap px-5 py-3 font-semibold capitalize text-[#4b4357]">{periodLabel(row.period, viewMode)}</td>
+                <td className="whitespace-nowrap px-5 py-3 font-semibold capitalize text-[#4b4357]">{periodLabel(row.period, viewMode)}{viewMode === 'daily' && getWeekdayName(row.period) && <span className="ml-1 font-medium text-[#7656b8]">· {getWeekdayName(row.period)}</span>}</td>
                 <td className="px-5 py-3 font-semibold text-[#4b4357]">{row.modalityName}</td>
                 <td className="px-5 py-3 text-[#716879]">{row.className || '—'}</td>
                 <td className="whitespace-nowrap px-5 py-3 tabular-nums text-[#716879]">{row.startTime ?? '—'}</td>

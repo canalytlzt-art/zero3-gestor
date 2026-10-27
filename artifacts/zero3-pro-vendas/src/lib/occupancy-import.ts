@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { isValidCalendarDate } from "./occupancy-calendar";
 
 export type OccupancyImportOptions = {
   missingYear?: number;
@@ -127,17 +128,15 @@ function readPeriod(value: unknown, date1904: boolean, forceMonthly = false, yea
     const day = iso[3] === undefined ? null : Number(iso[3]);
     if (year < 1 || month < 1 || month > 12) return null;
     if (day === null || forceMonthly) return { kind: "monthly", value: `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}`, missingYear: false, year, month };
-    const check = new Date(Date.UTC(year, month - 1, day));
-    if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) return null;
+    if (!isValidCalendarDate(year, month, day)) return null;
     return { kind: "daily", value: `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`, missingYear: false };
   }
   const brazilian = /^(\d{1,2})[/.](\d{1,2})[/.](\d{4})$/.exec(text);
   if (brazilian) {
     const [day, month, year] = brazilian.slice(1).map(Number);
-    if (month < 1 || month > 12 || day < 1) return null;
+    if (month < 1 || month > 12 || day < 1 || year < 1) return null;
     if (forceMonthly) return { kind: "monthly", value: `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}`, missingYear: false, year, month };
-    const date = new Date(Date.UTC(year, month - 1, day));
-    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+    if (!isValidCalendarDate(year, month, day)) return null;
     return { kind: "daily", value: `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`, missingYear: false };
   }
   const monthYear = /^(\d{1,2})[/-](\d{4})$/.exec(text);

@@ -1,12 +1,12 @@
 import * as XLSX from 'xlsx';
 import type { OccupancyBackupSelection, OccupancyRecord } from '@workspace/api-client-react';
 import { protectWorksheetForCsv } from './spreadsheet-csv-safety';
+import { getWeekdayName, getWeekdayNameForIsoDay } from './occupancy-calendar';
 
 type EffectiveGroup = { daily: OccupancyRecord[]; monthly: OccupancyRecord[] };
 
-const weekdayNames = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
 const occupancyColumns = [
-  'Modalidade', 'Data', 'Horário inicial', 'Presenças/Vagas', 'Ocupação (%)',
+  'Modalidade', 'Data', 'Dia da semana', 'Horário inicial', 'Presenças/Vagas', 'Ocupação (%)',
   'Horário final', 'Turma', 'Observação', 'Tipo do registro', 'Percentual original (%)', 'Critério de cálculo',
 ];
 const summaryColumns = [
@@ -89,6 +89,7 @@ function detailedRows(records: readonly OccupancyRecord[]) {
   return records.map((record) => ({
     'Modalidade': record.modalityName,
     'Data': dateValue(record),
+    'Dia da semana': record.kind === 'daily' ? getWeekdayName(record.period) ?? '' : '',
     'Horário inicial': record.startTime ?? '',
     'Presenças/Vagas': record.presences === null || record.capacity === null ? '' : `${record.presences}/${record.capacity}`,
     'Ocupação (%)': occupancyValue(record),
@@ -209,7 +210,7 @@ export function createOccupancyCsv(records: readonly OccupancyRecord[]) {
 }
 
 export function occupancyWeekdayName(weekday: number) {
-  return weekdayNames[weekday - 1] ?? String(weekday);
+  return getWeekdayNameForIsoDay(weekday);
 }
 
 export function occupancyReportFileName(period: string, extension: 'xlsx' | 'csv' | 'json') {
