@@ -62,3 +62,9 @@ Excluir uma modalidade vinculada exige confirmação explícita: remover suas au
 **Why:** O usuário escolheu esse comportamento após ser informado de que aulas seriam apagadas e as associações dos produtos seriam removidas.
 
 **How to apply:** A confirmação deve explicar que a ação é irreversível; manter a auditoria e atualizar as consultas de ocupação e vendas após concluir.
+
+Derivar o dia da semana dinamicamente da data diária original, inclusive para registros históricos; não regravar datas nem fazer backfill. Registros mensais sem dia permanecem sem dia da semana.
+
+**Why:** O usuário pediu filtros e gráficos retroativos para registros já existentes, com preservação integral das datas e sem inventar dias para resumos mensais.
+
+**How to apply:** Use a data ISO armazenada para calcular filtros e agrupamentos por dia da semana em leituras; mantenha a granularidade mensal separada e evite migrações apenas para preencher o dia.

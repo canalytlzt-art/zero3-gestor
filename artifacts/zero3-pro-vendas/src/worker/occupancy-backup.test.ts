@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { AuthContext } from '@workspace/api-client-react';
 import { parseOccupancyBackupFile } from '../lib/occupancy-backup-file';
+import { buildOccupancyChartAnalytics } from '../lib/occupancy-chart-data';
 import { handleOccupancyRequest } from './occupancy';
 import type {
   D1Database,
@@ -88,6 +89,14 @@ class BackupStatement implements D1PreparedStatement {
 class BackupFixtureD1 implements D1Database {
   readonly queries: string[] = [];
   readonly records = [
+    row('b97f7f4d-b284-4a27-80b9-40a44fa0ad4a', 'daily', '2026-10-27', {
+      percentage: '50',
+      presences: 3,
+      capacity: 6,
+      start_time: '07:00:00',
+      class_name: 'Manhã',
+      scope_key: 'manha',
+    }),
     row('614ad842-46d2-413b-8ff3-8b2b0465ef31', 'daily', '2026-07-05', {
       percentage: '50',
       presences: 2,
@@ -115,6 +124,14 @@ class BackupFixtureD1 implements D1Database {
       start_time: '06:00:00',
       class_name: 'Noite',
       scope_key: 'noite',
+    }),
+    row('8a24b835-4eea-47dc-94db-288f4ccbb925', 'daily', '2021-06-01', {
+      percentage: '50',
+      presences: 2,
+      capacity: 4,
+      start_time: '07:00:00',
+      class_name: 'Manhã',
+      scope_key: 'manha',
     }),
   ];
 
@@ -193,4 +210,48 @@ test('Worker backup omits monthly records from partial months and keeps empty pe
   assert.equal(emptyMonth.counts.records, 0);
   assert.equal(emptyMonth.counts.totalRecords, 0);
   assert.deepEqual(emptyMonth.records, []);
+});
+
+test('Worker and occupancy charts include historical daily rows without changing dates or assigning weekdays to monthly rows', async () => {
+  const database = new BackupFixtureD1();
+  const response = await handleOccupancyRequest(
+    new Request('https://zero3.test/occupancy?kind=all'),
+    { DB: database } as WorkerEnv,
+    actor,
+    '/occupancy',
+  );
+  assert.ok(response);
+  assert.equal(response.status, 200);
+  const allRecords = await response.json() as Array<Record<string, any>>;
+  const oldRecord = allRecords.find((record) => record.id === '8a24b835-4eea-47dc-94db-288f4ccbb925');
+  const currentRecord = allRecords.find((record) => record.id === 'b97f7f4d-b284-4a27-80b9-40a44fa0ad4a');
+  const monthlyRecord = allRecords.find((record) => record.kind === 'monthly');
+
+  assert.equal(oldRecord?.period, '2021-06-01');
+  assert.equal(currentRecord?.period, '2026-10-27');
+  assert.equal(monthlyRecord?.period, '2026-07');
+
+  const analytics = buildOccupancyChartAnalytics(allRecords as any, {
+    viewMode: 'daily',
+    selectedMonths: ['2021-06', '2026-10'],
+    modalityId,
+    weekdays: [2],
+  });
+  assert.deepEqual(analytics.byWeekday.map((item) => item.label), ['Terça']);
+  assert.equal(analytics.totals.classes, 2);
+  assert.equal(analytics.totals.presences, 5);
+  assert.equal(analytics.totals.capacity, 10);
+  assert.equal(analytics.totals.percentage, 50);
+
+  const weekdayResponse = await handleOccupancyRequest(
+    new Request('https://zero3.test/occupancy?kind=all&weekdays=2'),
+    { DB: database } as WorkerEnv,
+    actor,
+    '/occupancy',
+  );
+  assert.ok(weekdayResponse);
+  assert.equal(weekdayResponse.status, 200);
+  const tuesdays = await weekdayResponse.json() as Array<Record<string, any>>;
+  assert.deepEqual(tuesdays.map((record) => record.period), ['2026-10-27', '2021-06-01']);
+  assert.ok(tuesdays.every((record) => record.kind === 'daily'));
 });
