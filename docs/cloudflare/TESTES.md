@@ -23,13 +23,15 @@ O primeiro smoke Worker revelou que o wildcard `/api/*` não abrangia o caminho 
 
 ## Resultados T03 — Clerk e autorização
 
-- `pnpm --filter @workspace/zero3-pro-vendas run test` → 44 testes aprovados; inclui JWT local (assinatura, expiração e emissor), origem/allowlist, configuração faltante, instância incompatível, sanitização de logs e repasse do proxy Clerk com cookies.
+- `pnpm --filter @workspace/zero3-pro-vendas run test` → 46 testes aprovados; inclui JWT local (assinatura, expiração e emissor), origem/allowlist, Origin explícito para escritas com cookie, configuração faltante, instância incompatível, sanitização de logs e repasse do proxy Clerk com cookies.
 - `pnpm run typecheck` → aprovado para bibliotecas, API, app e scripts.
 - Build Vite → aprovado, 2.585 módulos, assets em `dist/public`; dry-run Wrangler 4.152.0 → aprovado, 8 assets, sem publicar.
 - Pacotes Clerk atualizados dentro das faixas existentes e após `minimumReleaseAge`: `@clerk/react` 6.18.1, `@clerk/localizations` 4.24.1, `@clerk/express` 2.1.83, `@clerk/shared` 4.41.1. `@clerk/backend` permaneceu em 3.26.2.
 - Workflows web e API reiniciados; o API-server compilou e iniciou. Capturas locais de `/` e `/sign-in` mostraram a página pública e o formulário Clerk com Google/e-mail.
 - O navegador exibiu o aviso de chave de desenvolvimento esperado. O agente não concluiu login, não acessou o domínio Cloudflare e não verificou credenciais/Secrets de Runtime.
 - A verificação do proxy é simulada: prova encaminhamento de uma requisição FAPI e retorno de `Set-Cookie`, não renovação de sessão real. Login Google/e-mail, origem e correspondência real das chaves seguem pendentes no Cloudflare Runtime.
+
+T03 também confirmou que as duas chaves do Worker têm funções distintas: a chave pública verifica o JWT localmente, e a Secret é necessária para consultar a Backend API do Clerk e validar o e-mail principal. A Secret não é usada no navegador.
 
 ## T04 — Preparação do D1 de teste (bloqueada)
 
@@ -39,6 +41,7 @@ O primeiro smoke Worker revelou que o wildcard `/api/*` não abrangia o caminho 
 - A conexão Cloudflare pelo Replit foi dispensada. O `database_id` em `wrangler.test.jsonc` continua igual ao principal e não pode ser usado para publicar.
 - Alteração local independente: `run_worker_first` agora cobre `/api` e `/api/*`, como na configuração principal.
 - Para retomar o provisionamento, autenticar Wrangler em Replit Shell via `pnpm --filter @workspace/scripts exec wrangler login`; depois confirmar apenas metadados e criar um D1 vazio separado. Não colar credenciais no chat.
+- O documento T04 anexado descreve migração de dados; essa parte requer confirmação de escopo, destino e cópia recuperável antes de qualquer importação. O D1 vazio não será populado por suposição.
 
 ## Testes existentes e comandos atuais
 

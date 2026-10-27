@@ -31,6 +31,12 @@ test("distinguishes unauthorized origins and a mismatched Clerk instance", () =>
   });
   assert.match(origin.message, /CLERK_AUTHORIZED_PARTIES/);
 
+  const missingOrigin = accessValidationError({
+    status: 403,
+    data: { code: "request_origin_required" },
+  });
+  assert.match(missingOrigin.message, /origem explícita/);
+
   const mismatch = accessValidationError({
     status: 401,
     data: { code: "clerk_instance_mismatch" },

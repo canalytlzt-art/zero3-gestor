@@ -318,6 +318,52 @@ test("rejects request origins outside the explicit Clerk allowlist", async () =>
   }
 });
 
+test("Worker requires an explicit Origin for state-changing requests using Clerk cookies", async () => {
+  const response = await worker.fetch(
+    new Request(`${testOrigin}/api/sales`, {
+      method: "POST",
+      headers: { cookie: "__session=opaque-session" },
+    }),
+    makeWorkerEnv(),
+  );
+
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), {
+    error: "Operações com sessão Clerk por cookie exigem uma origem explícita.",
+    code: "request_origin_required",
+  });
+});
+
+test("accepts allowlisted-Origin cookie writes and bearer writes without Origin", async () => {
+  const mock = mockClerkUserLookup("admin@example.test");
+  try {
+    const cookieResult = await getAuthContext(
+      new Request(`${testOrigin}/api/sales`, {
+        method: "POST",
+        headers: {
+          origin: testOrigin,
+          cookie: `__session=${makeSessionToken()}`,
+        },
+      }),
+      makeWorkerEnv(),
+    );
+    assert.equal(cookieResult.ok, true);
+    if (cookieResult.ok) assert.equal(cookieResult.context.authorized, true);
+
+    const bearerResult = await getAuthContext(
+      new Request(`${testOrigin}/api/sales`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${makeSessionToken()}` },
+      }),
+      makeWorkerEnv(),
+    );
+    assert.equal(bearerResult.ok, true);
+    if (bearerResult.ok) assert.equal(bearerResult.context.authorized, true);
+  } finally {
+    mock.restore();
+  }
+});
+
 test("fails closed when the local Clerk public key is not configured", async () => {
   const result = await getAuthContext(
     requestWithSession(makeSessionToken()),

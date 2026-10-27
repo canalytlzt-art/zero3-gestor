@@ -6,7 +6,7 @@ Atualizado em 2026-10-26.
 
 - T01 — auditoria do repositório e plano: **concluída**.
 - T02 — build, paridade estática e runtime Worker local: **concluída no workspace**; não é validação integrada em Cloudflare.
-- T03 — Clerk e autorização: **concluída em código/testes locais**; autenticação real no domínio Cloudflare permanece pendente.
+- T03 — Clerk e autorização: **cobertura local atualizada, validação real pendente**; escritas com cookie exigem agora Origin explícito e permitido.
 - T04 — D1 de teste: **em andamento, bloqueada**; Wrangler não está autenticado e a conexão Cloudflare foi dispensada.
 - Análise/fontes e mensagens por etapa fornecidas pelo proprietário incorporadas como requisitos de execução, não como comprovação de que o código já os cumpre.
 - O proprietário autorizou preparar D1 de teste separado. Nenhum banco foi listado/criado; não houve acesso ao D1 principal.
@@ -26,7 +26,8 @@ Atualizado em 2026-10-26.
 - Requisitos extraídos de `ANALISE_E_FONTES.md` registrados no inventário, plano, conciliação e matriz de testes.
 - Código T02: `artifacts/zero3-pro-vendas/src/worker/index.ts`, `src/worker/auth.test.ts`, `wrangler.jsonc`; `artifacts/api-server/src/app.ts`; `lib/api-client-react/tsconfig.json`.
 - Código T03: `artifacts/zero3-pro-vendas/src/lib/access-validation-error.ts`, `src/lib/access-validation-error.test.ts`, `src/App.tsx`, `src/worker/auth.test.ts`, `package.json`; `artifacts/api-server/package.json` e `pnpm-lock.yaml` atualizados dentro das faixas já declaradas.
-- T04 local: `artifacts/zero3-pro-vendas/wrangler.test.jsonc` agora roteia `/api` e `/api/*` pelo Worker. O `database_id` permanece inalterado até obter um ID remoto de teste real.
+- T04 local: `artifacts/zero3-pro-vendas/wrangler.test.jsonc` roteia `/api` e `/api/*` pelo Worker. O `database_id` permanece inalterado até obter um ID remoto de teste real.
+- O documento T04 anexado inclui migração de dados, enquanto a autorização atual foi para D1 de teste vazio. Não importar ou modificar dados até confirmar explicitamente o destino e a cópia recuperável.
 
 ## Inspeção e comandos
 
@@ -46,7 +47,7 @@ Atualizado em 2026-10-26.
 - Express pelo proxy local: rota `/api` desconhecida respondeu 404 JSON. Os 39 endpoints foram comparados estaticamente, não executados individualmente.
 - Nenhum deploy, migração, consulta ao D1 remoto ou alteração de dados foi realizado.
 - Checklist `CHECKLIST_ACEITE.md` registrado em `docs/cloudflare/ACEITE.md`; o compartilhamento do D1 entre configs de teste e principal continua reprovado.
-- T03: 44 testes aprovados; typecheck, build Vite e Wrangler dry-run aprovados após atualizar versões de patch Clerk. O build teve apenas avisos de sourcemap e tamanho de chunk.
+- T03: 46 testes aprovados após a checagem explícita de Origin para escritas com cookie; typecheck, build Vite e Wrangler dry-run aprovados. Esses testes não substituem login/renovação reais.
 - Os workflows web/API reiniciaram; o API-server compilou e iniciou. A captura local mostrou a landing e a tela Clerk de entrada com Google/e-mail. Nenhum login foi realizado.
 - O teste unitário do proxy confirmou repasse de cookies e resposta `Set-Cookie`; não é prova de renovação real de sessão ou conexão do Worker publicado.
 - T04 local: `pnpm --filter @workspace/scripts d1:test-sqlite` passou (4 testes). `wrangler whoami` informou que o workspace não está autenticado; não executamos `wrangler d1 list`, `d1 create`, migrações remotas ou deploy.

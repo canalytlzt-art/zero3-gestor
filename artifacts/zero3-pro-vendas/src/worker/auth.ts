@@ -157,6 +157,21 @@ function requestOrigin(
   }
 
   const originHeader = request.headers.get("origin");
+  const stateChangingMethod = ["POST", "PUT", "PATCH", "DELETE"].includes(
+    request.method.toUpperCase(),
+  );
+  const hasClerkSessionCookie = Boolean(
+    cookieValue(request, "__session") ??
+      cookieValue(request, "__session_legacy"),
+  );
+  if (stateChangingMethod && hasClerkSessionCookie && !originHeader) {
+    return authFailure(
+      403,
+      "request_origin_required",
+      "Operações com sessão Clerk por cookie exigem uma origem explícita.",
+    );
+  }
+
   let origin: string | null = null;
   if (originHeader) {
     origin = parseHttpsOrigin(originHeader, true);

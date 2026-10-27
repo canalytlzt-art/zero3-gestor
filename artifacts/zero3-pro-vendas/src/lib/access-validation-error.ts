@@ -24,6 +24,7 @@ export function accessValidationError(error: unknown) {
     clerk_issuer_missing_or_invalid: missingWorkerSetting("CLERK_ISSUER", "O emissor HTTPS do Clerk está ausente ou inválido"),
     clerk_authorized_parties_missing: missingWorkerSetting("CLERK_AUTHORIZED_PARTIES", "As origens permitidas do Clerk não estão configuradas"),
     request_origin_not_authorized: "A origem deste endereço não está permitida. Confira CLERK_AUTHORIZED_PARTIES nas Variables and Secrets do Worker.",
+    request_origin_required: "O Worker bloqueou uma operação com sessão por cookie sem a origem explícita da página.",
     clerk_instance_mismatch: "O usuário da sessão não existe na instância Clerk consultada. Confirme que a chave pública do build e CLERK_SECRET_KEY, CLERK_JWT_KEY e CLERK_ISSUER pertencem à mesma instância Development.",
     clerk_unavailable: "O Worker não conseguiu consultar o Clerk. Tente novamente em instantes.",
     clerk_user_lookup_failed: "O Clerk não conseguiu confirmar o usuário autenticado.",

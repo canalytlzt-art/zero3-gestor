@@ -20,12 +20,14 @@ O estado de cada critério de aceite, incluindo ambiente e limites da evidência
 - Verificar a sessão same-origin, proxy Clerk, JWT local, emissor, origem autorizada e `ZERO3_ALLOWED_EMAILS`.
 - Usar a mesma instância Clerk Development no build e Runtime. Não imprimir nem gravar credenciais.
 - Testes locais cobrem acesso autorizado/não autorizado, sessão ausente/expirada/inválida, rejeição de outra instância, origem, configuração ausente, logs e proxy de sessão.
+- Para operações de escrita autenticadas por cookie Clerk, exigir o cabeçalho `Origin` explícito e permitido; não usar a origem da URL como fallback CSRF. Clientes Bearer sem cookie mantêm o fallback compatível.
 - Quando faltar configuração, a UI indica o nome do campo e o painel Cloudflare sem pedir o segredo.
 - Critério local atendido; login Google/e-mail, renovação real e mesma instância no Runtime só podem ser confirmados no Cloudflare após configurar os valores corretos.
 
 ## T04 — D1, migrações e conciliação
 
 - **Estado:** em andamento, bloqueada para criação remota; Wrangler não está autenticado e a conexão Cloudflare foi dispensada.
+- O pedido anterior autorizou criar um D1 de teste vazio. O documento T04 anexado também descreve migração de dados; não importar dados nem alterar o destino existente até o proprietário confirmar esse escopo e a origem/cópia recuperável.
 - **Pré-requisito:** obter/configurar um D1 de homologação independente; substituir o ID compartilhado em `wrangler.test.jsonc` antes de deploy.
 - Revalidar migrações e snapshot local com `--local` e `--persist-to` explícito. Planejar qualquer mudança estrutural com cópia, migração versionada, reexecução idempotente, conciliação e recuperação.
 - Confirmar o banco/manifesto existente e conciliar contagens, IDs, vínculos e totais; repetir a importação em ambiente isolado para provar idempotência.
