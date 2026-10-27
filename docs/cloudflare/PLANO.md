@@ -6,10 +6,11 @@ O estado de cada critério de aceite, incluindo ambiente e limites da evidência
 
 ## T02 — Build reproduzível e API no runtime Workers
 
+- **Estado:** concluída no workspace local; build, typecheck, testes, dry-run, smoke do Worker e mapa estático executados. Não inclui validação Cloudflare remota.
 - Conferir `artifacts/zero3-pro-vendas/vite.config.ts`, scripts de `package.json`, `wrangler.jsonc`, `worker/index.ts` e dependências usadas no Worker.
 - Garantir build com pnpm 10.26.1, `PORT`, `BASE_PATH`, assets em `dist/public`, fallback SPA e rotas `/api/*` no Worker.
 - Comparar endpoints `lib/api-spec/openapi.yaml`, Express `artifacts/api-server/src/routes/` e Worker `src/worker/`.
-- Garantir resposta 404 para uma rota `/api` desconhecida; o Worker atualmente retorna 501 nesse caso.
+- Garantir resposta JSON 404 para `/api` e uma rota API desconhecida.
 - Testar o Worker no runtime local compatível e registrar build, rotas e comportamento observado. Não publicar em produção nesta etapa.
 - Critério: build reprodutível, dry-run Wrangler válido e mapa de paridade das rotas; sem publicar.
 

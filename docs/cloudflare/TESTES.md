@@ -4,9 +4,22 @@ O registro item a item do checklist oficial está em [`ACEITE.md`](./ACEITE.md).
 
 ## Evidência registrada
 
-Na última validação anterior à auditoria T01: 33 testes do app passaram, assim como typecheck, build Vite e `wrangler deploy --dry-run`. Esses resultados cobrem código local e empacotamento; não comprovam login real, D1 remoto ou deploy integrado.
+Na validação anterior à T01: 33 testes do app passaram, assim como typecheck, build Vite e `wrangler deploy --dry-run`. Na T02, após as alterações abaixo, 36 testes do app, typecheck raiz, build e dry-run passaram. Essas evidências são locais; não comprovam login real, D1 remoto ou deploy integrado.
 
-Nesta auditoria não foram executados testes nem comandos de banco.
+Nenhuma validação consultou ou alterou o D1 remoto.
+
+## Resultados T02
+
+- `pnpm --version` → `10.26.1`.
+- `pnpm --filter @workspace/zero3-pro-vendas run test` → 36 testes aprovados, incluindo saúde/404 do Worker e sessões simuladas. Não são testes Clerk reais.
+- `pnpm run typecheck` → aprovado após excluir `src/**/*.test.ts` do build composite de `api-client-react`; o teste Node continua no comando de testes do app. A primeira execução falhou por esses imports Node incluídos na biblioteca de navegador.
+- `PORT=5173 BASE_PATH=/ NODE_ENV=production pnpm --filter @workspace/zero3-pro-vendas run build` → aprovado; Vite transformou 2.584 módulos e escreveu `dist/public`. Permanecem avisos não bloqueantes de sourcemap e chunk acima de 500 KB.
+- `pnpm --filter @workspace/scripts exec wrangler deploy --dry-run --config artifacts/zero3-pro-vendas/wrangler.jsonc --cwd ..` → aprovado com Wrangler 4.152.0, 8 arquivos de assets; dry-run não publicou.
+- `pnpm --filter @workspace/scripts exec wrangler dev --local --persist-to /tmp/zero3-t02-worker --ip 127.0.0.1 --port 8787 --config artifacts/zero3-pro-vendas/wrangler.jsonc --cwd ..` → Wrangler confirmou `DB` e `ASSETS` em modo local. `GET /` e `/scoreboard` responderam 200 HTML; `/api/healthz` respondeu 200 JSON; `/api` e `/api/no-such-api` responderam 404 JSON.
+- `curl http://localhost:80/api/t02-route-not-found` pelo proxy local do workspace → Express respondeu 404 JSON.
+- Comparação estática de OpenAPI, Express e Worker → 39 operações, sem diferença de caminho/método. Ver [mapa de operações](./CONTRATOS_API.md#mapa-de-operações-t02).
+
+O primeiro smoke Worker revelou que o wildcard `/api/*` não abrangia o caminho exato `/api`; a configuração foi corrigida para incluir ambos. O Worker local foi encerrado após os testes.
 
 ## Testes existentes e comandos atuais
 
@@ -25,6 +38,7 @@ Nesta auditoria não foram executados testes nem comandos de banco.
 3. Testar login Clerk Development real, origem autorizada, allowlist, ausência/expiração/rejeição de sessão.
 4. Conferir exportações/restaurações e conciliar Scoreboard, vendas, estornos e ocupação.
 5. Guardar evidência de que produção não foi alterada durante os testes.
+6. Testar as 39 operações com comportamento/persistência real em Workers e D1 isolado; a verificação T02 foi de presença estática, com smoke limitado.
 
 ## Critérios funcionais extraídos da análise fornecida
 

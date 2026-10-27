@@ -6,10 +6,22 @@ import { handleOccupancyRequest } from "./occupancy";
 
 const API_PREFIX = "/api";
 const CLERK_PROXY_PREFIX = `${API_PREFIX}/__clerk`;
+const API_ROOTS = [
+  "/access-status",
+  "/healthz",
+  "/occupancy",
+  "/products",
+  "/sales",
+  "/sales-goals",
+] as const;
 
 async function handleApi(request: Request, env: WorkerEnv): Promise<Response> {
   const { pathname } = new URL(request.url);
   const path = pathname.slice(API_PREFIX.length) || "/";
+
+  if (!API_ROOTS.some((root) => path === root || path.startsWith(`${root}/`))) {
+    return apiError(404, "Rota não encontrada.", "route_not_found");
+  }
 
   if (path === "/healthz" && request.method === "GET") {
     return json({ status: "ok" });
@@ -74,7 +86,7 @@ async function handleApi(request: Request, env: WorkerEnv): Promise<Response> {
   if (salesResponse) return salesResponse;
   const occupancyResponse = await handleOccupancyRequest(request, env, auth, path);
   if (occupancyResponse) return occupancyResponse;
-  return apiError(501, "Esta rota ainda não foi portada para o Worker.");
+  return apiError(404, "Rota não encontrada.", "route_not_found");
 }
 
 export default {

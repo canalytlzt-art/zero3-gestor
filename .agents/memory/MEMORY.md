@@ -7,3 +7,4 @@
 - [Ciclo de vida dos produtos](product-lifecycle.md) — produtos podem ser inativados, nunca apagados permanentemente; vendas, estornos e metas devem permanecer.
 - [Relatórios de ocupação importáveis](occupancy-report-import-compatibility.md) — mantenha a aba detalhada compatível com a importação e exclua abas auxiliares da leitura de registros.
 - [Seleção do banco por ambiente](database-environment-snapshots.md) — para cópias e migrações, selecione explicitamente o banco de desenvolvimento; não confie no ambiente padrão do processo.
+- [Roteamento do prefixo API no Worker](workers-api-root-routing.md) — `run_worker_first` precisa cobrir `/api` e `/api/*`; a curinga sozinha deixa o caminho exato cair no fallback SPA.

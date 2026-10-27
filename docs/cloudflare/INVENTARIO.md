@@ -49,7 +49,7 @@ Auditoria T01 do repositório em 2026-10-26. O inventário identifica código e 
 3. Validar rotas de vendas e ocupação executando o Worker com D1 de homologação, não apenas o Express/PostgreSQL.
 4. Ampliar os comandos de teste para incluir testes já existentes e contratos executados no Worker.
 5. Revalidar a cópia D1 local com persistência explícita; não inferir estado do D1 remoto.
-6. Corrigir/verificar resposta de rota `/api` desconhecida: `worker/index.ts` atualmente devolve 501, enquanto o critério de aceite pede 404 adequado.
+6. T02 corrigiu o 501 para JSON 404. O smoke Worker também identificou e corrigiu o roteamento de `/api` exato, adicionando a rota junto de `/api/*` em `run_worker_first`.
 
 ## Fontes oficiais fornecidas
 

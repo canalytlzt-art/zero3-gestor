@@ -347,6 +347,51 @@ test("GET /api/access-status grants access to a signed-in allowlisted administra
   }
 });
 
+test("GET /api/healthz is an unauthenticated JSON health check", async () => {
+  const response = await worker.fetch(
+    new Request(`${testOrigin}/api/healthz`),
+    makeWorkerEnv(),
+  );
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /application\/json/);
+  assert.deepEqual(await response.json(), { status: "ok" });
+});
+
+test("unknown API roots return a JSON 404 without requiring a Clerk session", async () => {
+  for (const path of ["/api", "/api/no-such-api"]) {
+    const response = await worker.fetch(
+      new Request(`${testOrigin}${path}`),
+      makeWorkerEnv(),
+    );
+
+    assert.equal(response.status, 404);
+    assert.match(response.headers.get("content-type") ?? "", /application\/json/);
+    assert.deepEqual(await response.json(), {
+      error: "Rota não encontrada.",
+      code: "route_not_found",
+    });
+  }
+});
+
+test("unknown routes under a protected API root return a JSON 404 after authorization", async () => {
+  const mock = mockClerkUserLookup("admin@example.test");
+  try {
+    const response = await worker.fetch(
+      workerRequest("/api/sales/no-such-route", makeSessionToken()),
+      makeWorkerEnv(),
+    );
+
+    assert.equal(response.status, 404);
+    assert.deepEqual(await response.json(), {
+      error: "Rota não encontrada.",
+      code: "route_not_found",
+    });
+  } finally {
+    mock.restore();
+  }
+});
+
 test("GET /api/access-status returns 401 when the session token is absent", async () => {
   const response = await worker.fetch(
     workerRequest("/api/access-status"),
