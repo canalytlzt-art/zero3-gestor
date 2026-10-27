@@ -1,6 +1,8 @@
 import { SELF } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
+import { buildFinancialChartAnalytics } from "../lib/financial-chart-data";
+import { buildOccupancyChartAnalytics } from "../lib/occupancy-chart-data";
 import { handleOccupancyRequest } from "./occupancy";
 import { handleSalesRequest } from "./sales";
 import type { AuthContext, WorkerEnv } from "./types";
@@ -346,6 +348,19 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
         endTime: "07:30",
         notes: "Observação persistida no D1 local",
       });
+    const occupancyCharts = buildOccupancyChartAnalytics(reloadedOccupancy.payload, {
+      viewMode: "daily",
+      fromDate: "2026-12-03",
+      toDate: "2026-12-03",
+      modalityId: modality.payload.id,
+    });
+    expect(occupancyCharts.totals).toMatchObject({
+      classes: 1,
+      measuredClassCount: 1,
+      presences: 4,
+      capacity: 5,
+      percentage: 80,
+    });
 
     const scoreboard = await callSales("/sales/scoreboard?months=2026-12");
     expect(scoreboard.response.status).toBe(200);
@@ -355,5 +370,71 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
       refundCents: 500,
       netCents: 4_000,
     });
+    const financialCharts = buildFinancialChartAnalytics(scoreboard.payload);
+    expect(financialCharts.reconcilesByProduct).toBe(true);
+    expect(financialCharts.reconcilesByMonth).toBe(true);
+  });
+
+  it("imports into isolated D1 idempotently and reconciles the dashboard", async () => {
+    const importBody = {
+      fileHash: "b".repeat(64),
+      filename: "vendas-d1-sinteticas.xlsx",
+      rows: [
+        {
+          customerName: "Cliente sintético D1",
+          saleDate: "2026-09-12",
+          totalCents: 1_250,
+          productName: "Plano sintético importado",
+          sourceSheet: "Setembro",
+          sourceRow: 2,
+        },
+        {
+          customerName: "Cliente sintético D1",
+          saleDate: "2026-09-12",
+          totalCents: 1_250,
+          productName: "Plano sintético importado",
+          sourceSheet: "Setembro",
+          sourceRow: 3,
+        },
+      ],
+    };
+
+    const firstImport = await callSales("/sales/import", "POST", importBody);
+    expect(firstImport.response.status).toBe(201);
+    expect(firstImport.payload).toMatchObject({
+      importedCount: 2,
+      skippedCount: 0,
+      replayed: false,
+    });
+    expect(new Set(firstImport.payload.sales.map((sale: { id: string }) => sale.id)).size).toBe(2);
+
+    const replay = await callSales("/sales/import", "POST", importBody);
+    expect(replay.response.status).toBe(200);
+    expect(replay.payload).toMatchObject({
+      importedCount: 0,
+      skippedCount: 2,
+      replayed: true,
+    });
+    expect(replay.payload.sales.map((sale: { id: string }) => sale.id)).toEqual(
+      firstImport.payload.sales.map((sale: { id: string }) => sale.id),
+    );
+
+    const refreshedSales = await callSales("/sales");
+    expect(refreshedSales.response.status).toBe(200);
+    for (const sale of firstImport.payload.sales as Array<{ id: string }>) {
+      expect(refreshedSales.payload.some((row: { id: string }) => row.id === sale.id)).toBe(true);
+    }
+
+    const scoreboard = await callSales("/sales/scoreboard?months=2026-09");
+    expect(scoreboard.response.status).toBe(200);
+    expect(scoreboard.payload.totals).toMatchObject({
+      quantity: 2,
+      salesCents: 2_500,
+      refundCents: 0,
+      netCents: 2_500,
+    });
+    const charts = buildFinancialChartAnalytics(scoreboard.payload);
+    expect(charts.reconcilesByProduct).toBe(true);
+    expect(charts.reconcilesByMonth).toBe(true);
   });
 });

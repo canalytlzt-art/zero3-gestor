@@ -26,3 +26,9 @@ Na versão instalada `@cloudflare/vitest-plugin` 1.4.7, `readD1Migrations` é ex
 **Why:** O subcaminho documentado não está exportado por essa versão e falha na resolução do módulo.
 
 **How to apply:** Para outras versões, confira novamente o campo `exports` do pacote instalado; não assuma que o caminho permanece igual.
+
+Preserve o snapshot local reconciliado de 1.360 linhas de dados; use somente consultas read-only nele e faça testes de gravação em D1 efêmero ou SQLite temporário.
+
+**Why:** O usuário pediu explicitamente que esses registros conciliados permaneçam intactos.
+
+**How to apply:** Antes de importar, migrar ou testar gravações, confirme que o alvo é Miniflare isolado ou um arquivo temporário, nunca o snapshot local existente.
