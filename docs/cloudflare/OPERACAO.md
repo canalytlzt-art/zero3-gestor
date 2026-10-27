@@ -8,6 +8,7 @@
 - Testes locais do app: `pnpm --filter @workspace/zero3-pro-vendas run test`.
 - Validação Wrangler sem publicação: `pnpm --filter @workspace/scripts exec wrangler deploy --dry-run --config artifacts/zero3-pro-vendas/wrangler.jsonc --cwd ..`.
 - Migração/importação D1 local: seguir `scripts/d1/README.md`; usar somente `--local` e o `--persist-to` explícito.
+- Provisionamento D1 remoto de teste: autenticar Wrangler pelo fluxo OAuth com `pnpm --filter @workspace/scripts exec wrangler login` no Replit Shell. Não colar tokens no chat. Não usar o deploy de teste enquanto `wrangler.test.jsonc` ainda apontar para o D1 principal.
 
 ## Publicação
 

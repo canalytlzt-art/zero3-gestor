@@ -25,10 +25,11 @@ O estado de cada critério de aceite, incluindo ambiente e limites da evidência
 
 ## T04 — D1, migrações e conciliação
 
+- **Estado:** em andamento, bloqueada para criação remota; Wrangler não está autenticado e a conexão Cloudflare foi dispensada.
 - **Pré-requisito:** obter/configurar um D1 de homologação independente; substituir o ID compartilhado em `wrangler.test.jsonc` antes de deploy.
 - Revalidar migrações e snapshot local com `--local` e `--persist-to` explícito. Planejar qualquer mudança estrutural com cópia, migração versionada, reexecução idempotente, conciliação e recuperação.
 - Confirmar o banco/manifesto existente e conciliar contagens, IDs, vínculos e totais; repetir a importação em ambiente isolado para provar idempotência.
-- Não consultar, migrar, recriar ou alterar o D1 principal nesta etapa sem autorização.
+- Não consultar, migrar, recriar ou alterar o D1 principal nesta etapa sem autorização. Não substituir o ID compartilhado por um UUID inventado.
 
 ## T05 — Vendas, importação e Scoreboard
 

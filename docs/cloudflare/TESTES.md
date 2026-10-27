@@ -31,6 +31,15 @@ O primeiro smoke Worker revelou que o wildcard `/api/*` não abrangia o caminho 
 - O navegador exibiu o aviso de chave de desenvolvimento esperado. O agente não concluiu login, não acessou o domínio Cloudflare e não verificou credenciais/Secrets de Runtime.
 - A verificação do proxy é simulada: prova encaminhamento de uma requisição FAPI e retorno de `Set-Cookie`, não renovação de sessão real. Login Google/e-mail, origem e correspondência real das chaves seguem pendentes no Cloudflare Runtime.
 
+## T04 — Preparação do D1 de teste (bloqueada)
+
+- `pnpm --filter @workspace/scripts d1:test-sqlite` → 4 testes locais aprovados; não usa conexão Cloudflare.
+- `pnpm --filter @workspace/scripts exec wrangler whoami` → Wrangler não autenticado.
+- Não foram executados `wrangler d1 list`, `wrangler d1 create`, SQL remoto, migrações ou deploy. Nenhum banco remoto foi acessado ou alterado.
+- A conexão Cloudflare pelo Replit foi dispensada. O `database_id` em `wrangler.test.jsonc` continua igual ao principal e não pode ser usado para publicar.
+- Alteração local independente: `run_worker_first` agora cobre `/api` e `/api/*`, como na configuração principal.
+- Para retomar o provisionamento, autenticar Wrangler em Replit Shell via `pnpm --filter @workspace/scripts exec wrangler login`; depois confirmar apenas metadados e criar um D1 vazio separado. Não colar credenciais no chat.
+
 ## Testes existentes e comandos atuais
 
 - `pnpm --filter @workspace/zero3-pro-vendas run test` chama um subconjunto explícito: vendas utilitárias/workbook/export, auth/session e custom fetch.
