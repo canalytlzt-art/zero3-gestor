@@ -23,9 +23,13 @@ Bindings tipados em `artifacts/zero3-pro-vendas/src/worker/types.ts`; configura�
 - `ASSETS`: Static Assets de `./dist/public`.
 - `CLERK_SECRET_KEY`: Secret do Worker; usado para consultar o usuário/e-mail verificado no Clerk.
 - `CLERK_JWT_KEY`: PEM público da mesma instância Clerk; configure no Runtime, não no repositório.
-- `CLERK_ISSUER`: emissor HTTPS exato dessa instância.
+- `CLERK_ISSUER`: variável Runtime contendo a origem do emissor HTTPS da instância Clerk.
 - `CLERK_AUTHORIZED_PARTIES`: origens HTTPS autorizadas, separadas por vírgula.
 - `ZERO3_ALLOWED_EMAILS`: e-mails administrativos permitidos, separados por vírgula; preserve a allowlist vigente.
+
+O Worker lê `env.CLERK_ISSUER` em `src/worker/auth.ts` e valida o valor como uma **origem HTTPS**, que deve corresponder ao emissor (`iss`) da mesma instância Clerk usada pelo frontend e pelas demais configurações Clerk. O formato é `https://<host-do-emissor>`, incluindo uma porta somente se ela fizer parte do emissor real; uma barra final opcional é normalizada. O caminho deve estar vazio ou ser apenas `/`. Não inclua caminhos de API, query, fragmento, usuário ou senha. Exemplos de formatos inválidos: `http://...`, `https://.../v1`, `https://.../oauth/...` ou URLs com `?`/`#`.
+
+Se a variável estiver ausente ou não passar essa validação, o Worker responde HTTP 503 com `clerk_issuer_missing_or_invalid` antes de verificar a sessão. Esse valor é configuração Runtime não secreta; cadastre-o no Worker Cloudflare e não no código. A documentação usa somente placeholders e não contém chaves ou valores de instância.
 
 Não registrar valores, tokens, cookies, chaves ou conteúdo de `.env` em documentação, logs ou Git.
 No Worker atual, `CLERK_JWT_KEY` verifica localmente a assinatura do JWT; `CLERK_SECRET_KEY` é usada separadamente na Backend API do Clerk para consultar o usuário e confirmar seu e-mail principal verificado antes de aplicar a allowlist. Uma chave pública não substitui essa chamada privilegiada.
