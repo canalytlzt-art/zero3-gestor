@@ -1,6 +1,6 @@
 # Checklist de aceite da migração Cloudflare
 
-Atualizado em 2026-10-26, cruzando `CHECKLIST_ACEITE.md` com evidências presentes no workspace. Nenhum critério foi presumido como aprovado. Estados se aplicam somente ao escopo e ambiente descritos na evidência; “Aprovado local” não significa homologação Cloudflare.
+Atualizado em 2026-10-27, cruzando `CHECKLIST_ACEITE.md` com evidências presentes no workspace. Nenhum critério foi presumido como aprovado. Estados se aplicam somente ao escopo e ambiente descritos na evidência; “Aprovado local” não significa homologação Cloudflare.
 
 ## Evidências registradas
 
@@ -24,6 +24,7 @@ Atualizado em 2026-10-26, cruzando `CHECKLIST_ACEITE.md` com evidências present
 | E16 | `pnpm run typecheck`, `PORT=5173 BASE_PATH=/ NODE_ENV=production pnpm run build` e dry-run principal | Typecheck do workspace e build recursivo do monorepo aprovados; Vite compilou 2.586 módulos. O build do gestor também passou com ambiente de processo limpo (`env -i`, `PATH`, `HOME`, `PORT`, `BASE_PATH`, `NODE_ENV`). Wrangler 4.152.0 leu 8 assets; o dry-run mostrou `DB` ligado a `zero3-pro-gestao-db` e encerrou sem publicar. | Só confirma empacotamento local; não confirma conteúdo de eventual `.env`, valores Runtime, D1 remoto, login ou publicação. Avisos de sourcemap/chunk permanecem. |
 | E17 | `pnpm --filter @workspace/scripts exec wrangler whoami` | Wrangler informou que não está autenticado. | Impede comparar painel, versão publicada, Secrets e recursos Cloudflare. Nenhuma operação D1 remota foi tentada. |
 | E18 | Reinício do workflow web e screenshot local da rota `/` | A landing pública carregou. Console mostrou o aviso esperado de chave Clerk de desenvolvimento e uma falha não bloqueante de criação do provedor WebGPU. | Não houve login nem verificação de UI autenticada; preview Replit não é o Worker em `workers.dev`. |
+| E19 | Instalação congelada, typecheck/build do workspace e dry-run via Wrangler local do app | `wrangler` foi adicionado a `@workspace/zero3-pro-vendas`; instalação frozen, typecheck e build passaram. Wrangler 4.152.0 resolveu pelo pacote do app; dry-run leu 8 assets, preservou Worker `zero3-gestor` e binding `DB`/`zero3-pro-gestao-db`. | Dry-run local apenas. Configuração do painel Cloudflare, autenticação de deploy e publicação não foram verificadas/executadas. |
 
 ## Resultado por critério
 

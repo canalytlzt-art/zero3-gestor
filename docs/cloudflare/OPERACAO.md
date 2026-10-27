@@ -12,7 +12,7 @@ pnpm --filter @workspace/zero3-pro-vendas run test:workers
 pnpm --filter @workspace/api-server run test:integration
 pnpm --filter @workspace/api-server exec tsx --test src/routes/occupancy.integration.test.ts src/routes/occupancy-backup.integration.test.ts
 PORT=5173 BASE_PATH=/ NODE_ENV=production pnpm --filter @workspace/zero3-pro-vendas run build
-pnpm --filter @workspace/scripts exec wrangler deploy --dry-run --config artifacts/zero3-pro-vendas/wrangler.jsonc --cwd ..
+pnpm --filter @workspace/zero3-pro-vendas exec wrangler deploy --dry-run --config artifacts/zero3-pro-vendas/wrangler.jsonc --cwd ../..
 ```
 
 - Desenvolvimento da interface Replit: `pnpm --filter @workspace/zero3-pro-vendas run dev`.
@@ -40,7 +40,11 @@ O comando solicita o valor no terminal. Não o inclua em argumentos, chat, docum
 - Homologação: Worker `zero3-gestor-teste`; **bloqueada** porque `wrangler.test.jsonc` ainda contém o mesmo `database_id` da configuração principal. Não executar `deploy:cloudflare:test` nem seu dry-run enquanto esse ID não for substituído por um D1 de teste confirmado.
 - `wrangler whoami` não autenticou nesta etapa; painel, Secrets, ID real do D1, versão implantada e histórico de deployments não foram reconciliados.
 - Dry-run principal já aprovado localmente, mas apenas empacota assets e bindings. Não testa Clerk, rede, escrita/leitura do D1 nem configuração do painel.
-- Depois de reconciliação, revisão do commit e aprovação explícita de publicação, o comando do Worker principal é `pnpm --filter @workspace/zero3-pro-vendas run deploy:cloudflare`. **Não foi executado.**
+- Configure o diretório raiz do projeto Cloudflare como a raiz do monorepo, para o pnpm resolver o workspace e seus `catalog:`.
+- Comando de build Cloudflare: `PORT=5173 BASE_PATH=/ NODE_ENV=production pnpm --filter @workspace/zero3-pro-vendas run build`.
+- Comando de deploy Cloudflare: `pnpm --filter @workspace/zero3-pro-vendas exec wrangler deploy --config artifacts/zero3-pro-vendas/wrangler.jsonc --cwd ../..`. Ele chama o Wrangler instalado no próprio pacote do app, sem depender de instalação global ou de `npm exec`.
+- Alternativamente, depois de reconciliação, revisão do commit e aprovação explícita de publicação, `pnpm --filter @workspace/zero3-pro-vendas run deploy:cloudflare` executa build seguido do deploy local do Worker. **Não foi executado.**
+- `pnpm install --frozen-lockfile` instala a versão travada de forma não interativa. Um deploy real ainda exige autenticação Cloudflare configurada como secret do ambiente de build; essa autenticação não foi verificada nesta etapa.
 - Para observar logs após autenticação e seleção correta da conta: `pnpm --filter @workspace/scripts exec wrangler tail --config artifacts/zero3-pro-vendas/wrangler.jsonc --cwd ..`. Não filtre nem compartilhe cookies, tokens, e-mails ou chaves.
 
 ## Recuperação e critérios de interrupção
