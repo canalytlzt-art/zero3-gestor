@@ -29,6 +29,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { beginDashboardPdf, DownloadPdfButton, PdfPrintHeader } from '@/components/dashboard-pdf-tools';
 import { buildFinancialChartAnalytics } from '@/lib/financial-chart-data';
 import { buildOccupancyChartAnalytics } from '@/lib/occupancy-chart-data';
+import { buildActiveContractPeriodRows } from '@/lib/active-contracts';
 import { formatCents, formatMonthKey, getSaoPauloMonthKey, monthsForYearQuarter } from '@/lib/sales-utils';
 
 type PeriodMode = 'month' | 'year' | 'quarter' | 'range';
@@ -189,7 +190,7 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
 
   const salesQuery = useGetSalesScoreboard(salesParams, { query: { queryKey: getGetSalesScoreboardQueryKey(salesParams), enabled: !invalid, staleTime: 300_000 } });
   const goalsQuery = useGetSalesGoals({ query: { queryKey: getGetSalesGoalsQueryKey(), staleTime: 300_000 } });
-  const contractsQuery = useGetActiveContracts({ query: { queryKey: getGetActiveContractsQueryKey(), staleTime: 300_000 } });
+  const contractsQuery = useGetActiveContracts({ query: { queryKey: getGetActiveContractsQueryKey(), staleTime: 300_000, refetchOnMount: 'always', refetchOnWindowFocus: true } });
   const occupancyGoalsQuery = useGetOccupancyMonthlyGoals(undefined, { query: { queryKey: getGetOccupancyMonthlyGoalsQueryKey(), staleTime: 300_000 } });
   const occupancyQuery = useGetOccupancyRecords(occupancyParams, { query: { queryKey: getGetOccupancyRecordsQueryKey(occupancyParams), enabled: !invalid, staleTime: 300_000 } });
   const modalityQuery = useGetOccupancyModalities({ query: { queryKey: getGetOccupancyModalitiesQueryKey(), staleTime: 300_000 } });
@@ -197,7 +198,8 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
 
   const finance = useMemo(() => salesQuery.data ? buildFinancialChartAnalytics(salesQuery.data) : null, [salesQuery.data]);
   const periodEndMonth = selectedMonths.at(-1) ?? '';
-  const contracts = useMemo(() => (contractsQuery.data ?? []).filter((row) => selectedMonths.includes(row.month)).sort((a, b) => a.month.localeCompare(b.month)), [contractsQuery.data, selectedMonths]);
+  const contractRows = useMemo(() => buildActiveContractPeriodRows(selectedMonths, contractsQuery.data ?? []), [contractsQuery.data, selectedMonths]);
+  const contracts = contractRows.flatMap((row) => row.record ? [row.record] : []);
   const contractMonthsNotInformed = selectedMonths.filter((selectedMonth) => !contracts.some((record) => record.month === selectedMonth));
   const goals = useMemo(() => (goalsQuery.data ?? []).filter((goal) => goal.productName === null && selectedMonths.includes(goal.month)), [goalsQuery.data, selectedMonths]);
   const contractChart = contracts.map((record) => ({ month: record.month, activeCount: record.activeCount, targetCount: record.targetCount }));
@@ -271,13 +273,15 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
   const selectedModalityName = modalities.find((item) => item.id === modalityId)?.name ?? (modalityId ? 'Modalidade selecionada' : 'Todas as modalidades');
   const weekdayName = weekday ? ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo'][Number(weekday) - 1] ?? 'Todos os dias' : 'Todos os dias';
   const printFilters = `Filtros de check-in e agregadores: modalidade ${selectedModalityName}; dia ${weekdayName}; horário inicial ${startTime ? startTime.slice(0, 5) : 'todos'}. Vendas e contratos usam somente o período global.`;
-  const contractReportRows = selectedMonths.map((selectedMonth) => {
-    const record = contracts.find((item) => item.month === selectedMonth);
-    if (!record) return [monthLabel(selectedMonth), 'Não informado', 'Não definida', '—'];
-    const attainment = record.targetCount && record.targetCount > 0
-      ? `${(record.activeCount / record.targetCount * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`
-      : '—';
-    return [monthLabel(selectedMonth), count(record.activeCount), record.targetCount == null ? 'Não definida' : count(record.targetCount), attainment];
+  const contractReportRows = contractRows.map(({ month, record, difference, attainment }) => {
+    if (!record) return [monthLabel(month), 'Sem dados cadastrados', '—', '—', '—'];
+    return [
+      monthLabel(month),
+      count(record.activeCount),
+      record.targetCount == null ? 'Não definida' : count(record.targetCount),
+      difference == null ? '—' : `${difference > 0 ? '+' : ''}${count(difference)}`,
+      attainment == null ? '—' : `${attainment.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`,
+    ];
   });
   const aggregatorReportRows = selectedMonths.map((selectedMonth) => {
     const row = aggregatorChartRows.find((item) => item.month === selectedMonth);
@@ -483,8 +487,8 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
           <section className={`${panel} ${dark ? 'bg-[#332c3d] border-[#493f55]' : ''}`} data-testid="chart-complete-contracts" data-pdf-panel="complete-contracts">
             <PdfPrintHeader title="Contratos ativos" period={periodLabel} filters={printFilters} />
             <div className="mb-3 flex items-start justify-between gap-2"><div><p className="text-[9px] font-bold uppercase tracking-[.14em] text-[#8c73b4]">base ativa</p><h2 className="mt-1 font-[family-name:var(--app-font-serif)] text-xl font-extrabold tracking-[-.045em]">Contratos ativos</h2><p className="mt-1 text-[10px] text-[#837b8b]">Comparação mensal entre o saldo informado e a meta cadastrada.</p></div><DownloadPdfButton scope="complete-contracts" title="Contratos ativos" period={periodLabel} compact disabled={initialLoading || contractsQuery.isError} /></div>
-            {contractsQuery.isLoading ? <div className="h-[280px] animate-pulse rounded-2xl bg-[#f1edf4]" /> : contractsQuery.isError ? <ChartEmpty text={`Não foi possível carregar contratos. ${errorMessage(contractsQuery.error)}`} /> : contractChart.length ? <ChartContainer role="img" aria-label="Barras horizontais agrupadas de contratos ativos e meta mensal" config={{ activeCount: { label: 'Contratos ativos', color: palette.purple }, targetCount: { label: 'Meta mensal', color: palette.lime } }} className="dashboard-pdf-chart h-[310px] w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={contractChart} layout="vertical" margin={{ left: 4, right: 12, top: 6, bottom: 6 }}><CartesianGrid horizontal={false} stroke={grid} /><XAxis type="number" allowDecimals={false} tick={{ fill: axis, fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis type="category" dataKey="month" width={90} tickFormatter={monthLabel} tick={{ fill: axis, fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip labelFormatter={(value) => monthLabel(String(value))} formatter={(value, name) => [count(Number(value)), String(name)]} /><Legend wrapperStyle={{ fontSize: 10 }} /><Bar dataKey="activeCount" name="Contratos ativos" fill={palette.purple} radius={[0, 5, 5, 0]} maxBarSize={10} /><Bar dataKey="targetCount" name="Meta mensal" fill={palette.lime} radius={[0, 5, 5, 0]} maxBarSize={10} /></BarChart></ResponsiveContainer></ChartContainer> : <ChartEmpty text="Sem dados no período. Cadastre o saldo mensal de contratos ativos." />}
-             {!contractsQuery.isLoading && !contractsQuery.isError && contractMonthsNotInformed.length > 0 && <div className="dashboard-pdf-full-hide mt-3 max-h-24 overflow-y-auto rounded-xl border border-dashed border-[#ded7e4] bg-[#fbf9fc] px-3 py-2.5" data-testid="status-contracts-uninformed"><p className="text-[10px] font-bold text-[#716879]">Não informado em {contractMonthsNotInformed.length} mês(es):</p><p className="mt-1 text-[10px] leading-4 text-[#837b8b]">{contractMonthsNotInformed.map(monthLabel).join(' · ')}</p></div>}
+             {contractsQuery.isLoading ? <div className="h-[280px] animate-pulse rounded-2xl bg-[#f1edf4]" /> : contractsQuery.isError ? <ChartEmpty text={`Não foi possível carregar contratos. ${errorMessage(contractsQuery.error)}`} /> : contractChart.length ? <ChartContainer role="img" aria-label="Barras horizontais agrupadas de contratos ativos e meta mensal" config={{ activeCount: { label: 'Contratos ativos', color: palette.purple }, targetCount: { label: 'Meta mensal', color: palette.lime } }} className="dashboard-pdf-chart h-[310px] w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={contractChart} layout="vertical" margin={{ left: 4, right: 12, top: 6, bottom: 6 }}><CartesianGrid horizontal={false} stroke={grid} /><XAxis type="number" allowDecimals={false} tick={{ fill: axis, fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis type="category" dataKey="month" width={90} tickFormatter={monthLabel} tick={{ fill: axis, fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip labelFormatter={(value) => monthLabel(String(value))} formatter={(value, name) => [count(Number(value)), String(name)]} /><Legend wrapperStyle={{ fontSize: 10 }} /><Bar dataKey="activeCount" name="Contratos ativos" fill={palette.purple} radius={[0, 5, 5, 0]} maxBarSize={10} /><Bar dataKey="targetCount" name="Meta mensal" fill={palette.lime} radius={[0, 5, 5, 0]} maxBarSize={10} /></BarChart></ResponsiveContainer></ChartContainer> : <ChartEmpty text="Sem dados cadastrados para os meses selecionados." />}
+              {!contractsQuery.isLoading && !contractsQuery.isError && contractMonthsNotInformed.length > 0 && <div className="dashboard-pdf-full-hide mt-3 max-h-24 overflow-y-auto rounded-xl border border-dashed border-[#ded7e4] bg-[#fbf9fc] px-3 py-2.5" data-testid="status-contracts-uninformed"><p className="text-[10px] font-bold text-[#716879]">Sem dados cadastrados em {contractMonthsNotInformed.length} mês(es):</p><p className="mt-1 text-[10px] leading-4 text-[#837b8b]">{contractMonthsNotInformed.map(monthLabel).join(' · ')}</p></div>}
              <div className="dashboard-pdf-full-hide mt-2 rounded-xl bg-[#f8f5fb] px-3 py-2">
               <p className="text-[10px] text-[#716879]">Atingimento mensal das metas salvas</p>
               {contracts.some((record) => record.targetCount != null) ? <div className="mt-2 flex flex-wrap gap-2">{contracts.filter((record) => record.targetCount != null).map((record) => {
@@ -493,9 +497,9 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
               })}</div> : <p className="mt-1 text-[10px] font-bold text-[#65479c]">Meta não definida</p>}
             </div>
             <ReportTable
-              headers={['Mês', 'Contratos ativos', 'Meta', 'Atingimento']}
+              headers={['Mês', 'Contratos ativos', 'Meta', 'Diferença', 'Atingimento']}
               rows={contractsQuery.isError ? [] : contractReportRows}
-              emptyMessage={contractsQuery.isError ? 'Dados de contratos indisponíveis nesta exportação.' : 'Sem dados no período'}
+              emptyMessage={contractsQuery.isError ? 'Dados de contratos indisponíveis nesta exportação.' : 'Sem dados cadastrados no período'}
             />
           </section>
 
@@ -589,9 +593,9 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
           <section className="dashboard-pdf-appendix-card">
             <h2>Contratos ativos</h2>
             <ReportTable
-              headers={['Mês', 'Contratos ativos', 'Meta', 'Atingimento']}
+              headers={['Mês', 'Contratos ativos', 'Meta', 'Diferença', 'Atingimento']}
               rows={contractsQuery.isError ? [] : contractReportRows}
-              emptyMessage={contractsQuery.isError ? 'Dados de contratos indisponíveis nesta exportação.' : 'Sem dados no período'}
+              emptyMessage={contractsQuery.isError ? 'Dados de contratos indisponíveis nesta exportação.' : 'Sem dados cadastrados no período'}
             />
           </section>
           <section className="dashboard-pdf-appendix-card">

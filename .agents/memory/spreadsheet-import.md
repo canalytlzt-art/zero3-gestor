@@ -43,6 +43,14 @@ Concluir uma seleção não encerra o arquivo inteiro: o mesmo arquivo pode ter 
 
 **How to apply:** Mantenha a identidade persistente da origem física e consulte-a antes de selecionar linhas; a verificação precisa ser repetida sob proteção de concorrência no servidor.
 
+## Aviso de possível duplicidade
+
+Compare cliente, data, produto e valor em centavos; sinalize a partir de três correspondências, mas mostre somente “⚠ Possível venda duplicada” e mantenha as opções de importar ou ignorar. Não crie aprovação administrativa extra.
+
+**Why:** O usuário pediu um alerta simples que ajude a conferência sem bloquear vendas legítimas nem criar etapas adicionais.
+
+**How to apply:** Preserve a proteção de idempotência por origem do arquivo; a comparação por campos é apenas um aviso e não deve revelar uma lista de critérios coincidentes ou bloquear a confirmação.
+
 ## Datas e identidade de rascunhos no Worker
 
 As validações OpenAPI geradas usam `z.coerce.date()` para campos com `format: date`, então handlers recebem `Date`, mesmo quando o JSON continha uma data ISO curta. Para manter a data de calendário, converta a instância `Date` para `toISOString().slice(0, 10)` antes de validar/gravar.

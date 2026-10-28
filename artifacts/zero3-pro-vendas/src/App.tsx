@@ -11,10 +11,12 @@ import { PurpleSelect } from '@/components/ui/purple-select';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { accessValidationError } from '@/lib/access-validation-error';
 import {
+  getGetActiveContractsQueryKey,
   getGetAccessStatusQueryKey,
   getGetProductsQueryKey,
   getGetSalesGoalsQueryKey,
   getGetSalesScoreboardQueryKey,
+  useGetActiveContracts,
   useGetAccessStatus,
   useGetProducts,
   useGetSalesGoals,
@@ -28,6 +30,7 @@ import ScoreboardGoals from '@/components/scoreboard-goals';
 import OccupancyManagement from '@/components/occupancy-management';
 import { buildScoreboardQueryParams, formatCents, formatMonthKey, getSaoPauloMonthKey, isCompleteCalendarMonthRange, monthKeysBetween, monthsForYearQuarter, productNameKey, type ScoreboardPeriodMode } from '@/lib/sales-utils';
 import { getWeekdayNameForIsoDay } from '@/lib/occupancy-calendar';
+import { buildActiveContractPeriodRows } from '@/lib/active-contracts';
 
 const queryClient = new QueryClient();
 const OccupancyChartsPage = lazy(() => import('@/components/occupancy-charts-page'));
@@ -202,6 +205,20 @@ function MetricCard({
 }
 
 function ScoreboardContent() {
+  const {
+    data: activeContracts,
+    isLoading: isContractsLoading,
+    isFetching: isContractsFetching,
+    isError: isContractsError,
+    error: contractsError,
+    refetch: refetchContracts,
+  } = useGetActiveContracts({
+    query: {
+      queryKey: getGetActiveContractsQueryKey(),
+      refetchOnMount: 'always',
+      refetchOnWindowFocus: true,
+    },
+  });
   const { data: productRecords, isLoading: isProductsLoading, isFetching: isProductsFetching, isError: isProductsError, refetch: refetchProducts } = useGetProducts({
     query: { queryKey: getGetProductsQueryKey(), refetchOnMount: 'always', refetchOnWindowFocus: true },
   });
@@ -268,7 +285,10 @@ function ScoreboardContent() {
     }))
     .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' })),
   [productRecords]);
-  const allMonthKeys = (scoreboardData?.months ?? []).map((month) => month.month);
+  const allMonthKeys = [...new Set([
+    ...(scoreboardData?.months ?? []).map((month) => month.month),
+    ...(activeContracts ?? []).map((record) => record.month),
+  ])].sort();
   const periodMonthKeys = useMemo(() => {
     switch (periodMode) {
       case 'current':
@@ -306,14 +326,15 @@ function ScoreboardContent() {
     weeks: [],
   };
   const report = invalidRange || invalidMonthSelection || invalidYearSelection ? emptyScoreboard : scoreboardData ?? emptyScoreboard;
+  const activeContractRows = buildActiveContractPeriodRows(periodMonthKeys, activeContracts ?? []);
   const selectedProductName = filterProduct
     ? products.find((product) => product.id === filterProduct)?.name ?? null
     : null;
   const isLoading = isScoreboardLoading || isProductsLoading;
   const isError = isScoreboardError || isProductsError;
-  const isRefreshing = isScoreboardFetching || isProductsFetching || isGoalsFetching;
+  const isRefreshing = isScoreboardFetching || isProductsFetching || isGoalsFetching || isContractsFetching;
   const refreshScoreboard = () => {
-    void Promise.all([refetchScoreboard(), refetchProducts(), refetchSalesGoals()]);
+    void Promise.all([refetchScoreboard(), refetchProducts(), refetchSalesGoals(), refetchContracts()]);
   };
   const changePeriodMode = (mode: ScoreboardPeriodMode) => {
     setPeriodMode(mode);
@@ -560,6 +581,55 @@ function ScoreboardContent() {
         isError={isGoalsError}
         onRetry={() => { void refetchSalesGoals(); }}
       />
+
+      <section className="overflow-hidden rounded-[22px] border border-[#e7e1e9] bg-[#fffefc]" aria-labelledby="scoreboard-active-contracts-heading" data-testid="scoreboard-active-contracts">
+        <div className="flex flex-wrap items-end justify-between gap-2 border-b border-[#ece7ee] px-4 py-4 sm:px-5">
+          <div>
+            <p className="eyebrow text-[9px] font-bold text-[#8a8491]">saldo administrativo mensal</p>
+            <h2 id="scoreboard-active-contracts-heading" className="mt-1 text-base font-extrabold tracking-[-.035em] text-[#332d40]">Contratos ativos</h2>
+            <p className="mt-1 text-[10px] text-[#837b8b]">Independentes das vendas; não são filtrados por produto ou dia da semana.</p>
+          </div>
+          {isContractsFetching && <span className="text-[10px] text-[#837b8b]" role="status">Atualizando…</span>}
+        </div>
+        {isContractsLoading ? (
+          <div className="p-5" aria-label="Carregando contratos ativos"><div className="h-16 animate-pulse rounded-xl bg-[#f5f2f6]" /></div>
+        ) : isContractsError ? (
+          <div className="p-4 sm:p-5" role="alert" data-testid="status-scoreboard-contracts-error">
+            <p className="text-xs font-semibold text-[#85554e]">
+              Não foi possível carregar contratos ativos. {contractsError && typeof contractsError === 'object' && 'message' in contractsError ? String(contractsError.message) : 'Tente atualizar os dados.'}
+            </p>
+            <button type="button" onClick={() => void refetchContracts()} className="mt-2 text-xs font-bold text-[#65479c] underline">Tentar novamente</button>
+          </div>
+        ) : activeContractRows.length === 0 ? (
+          <p className="p-5 text-xs text-[#837b8b]" data-testid="status-scoreboard-contracts-empty">Sem dados cadastrados para o período selecionado.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[780px] border-collapse text-left text-xs">
+              <thead><tr className="bg-[#f8f6f9] text-[9px] font-bold uppercase tracking-[.08em] text-[#817b89]">
+                <th className="px-4 py-3 sm:px-5">Mês / ano</th><th className="px-4 py-3 text-right">Contratos ativos</th><th className="px-4 py-3 text-right">Meta</th><th className="px-4 py-3 text-right">Diferença</th><th className="px-4 py-3 text-right">Atingimento</th><th className="px-4 py-3 text-right sm:px-5">Variação vs. mês anterior registrado</th>
+              </tr></thead>
+              <tbody>
+                {activeContractRows.map(({ month, record, difference, attainment, changeFromPrevious }) => (
+                  <tr key={month} className="border-t border-[#f0edf1]" data-testid={`row-scoreboard-active-contracts-${month}`}>
+                    <th scope="row" className="whitespace-nowrap px-4 py-3.5 font-semibold capitalize text-[#494253] sm:px-5">{formatMonthKey(month)}</th>
+                    {!record ? (
+                      <td colSpan={5} className="px-4 py-3.5 text-right italic text-[#837b8b]" data-testid={`status-scoreboard-contracts-missing-${month}`}>Sem dados cadastrados</td>
+                    ) : (
+                      <>
+                        <td className="px-4 py-3.5 text-right font-bold tabular-nums text-[#463954]">{record.activeCount.toLocaleString('pt-BR')}</td>
+                        <td className="px-4 py-3.5 text-right tabular-nums text-[#5f5967]">{record.targetCount == null ? 'Não definida' : record.targetCount.toLocaleString('pt-BR')}</td>
+                        <td className="px-4 py-3.5 text-right tabular-nums text-[#5f5967]">{difference == null ? '—' : `${difference > 0 ? '+' : ''}${difference.toLocaleString('pt-BR')}`}</td>
+                        <td className="px-4 py-3.5 text-right font-semibold tabular-nums text-[#65479c]">{attainment == null ? '—' : `${attainment.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`}</td>
+                        <td className="px-4 py-3.5 text-right tabular-nums text-[#5f5967] sm:px-5">{changeFromPrevious == null ? '—' : `${changeFromPrevious > 0 ? '+' : ''}${changeFromPrevious.toLocaleString('pt-BR')}`}</td>
+                      </>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <div className="flex flex-col gap-1 border-t border-[#e8e3ea] pt-3 text-[10px] text-[#8b8591] sm:flex-row sm:items-center sm:justify-between" data-testid="status-scoreboard-audit">
         <span>Totais conciliados pelo mesmo conjunto filtrado: vendas, estornos, saldo e quantidade.</span>

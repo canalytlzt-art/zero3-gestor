@@ -1150,7 +1150,7 @@ export default function SalesManagement() {
           <button type="button" onClick={openProductManager} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-[#ded7e7] bg-white px-4 text-sm font-bold text-[#5d4a78] transition hover:bg-[#f7f4fa]" data-testid="button-manage-products"><Search size={15} /> Produtos</button>
           <button type="button" onClick={() => { resetForm(); document.getElementById('sale-entry-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); document.querySelector<HTMLInputElement>('[data-testid="input-sale-date"]')?.focus(); }} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#d7f500] px-4 text-sm font-extrabold text-[#262b15] transition hover:bg-[#c9e600] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6d28d9] focus-visible:ring-offset-2" data-testid="button-new-sale"><Plus size={16} /> Nova venda</button>
           <button type="button" onClick={() => void openRefundDialog()} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-[#e9d9d5] bg-[#fffaf8] px-4 text-sm font-bold text-[#8e554e] transition hover:bg-[#fff0ed]" data-testid="button-new-cancellation"><RotateCcw size={15} /> Novo estorno</button>
-          <button type="button" onClick={() => importFileRef.current?.click()} disabled={isHistoryLoading || isHistoryError} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-[#ded7e7] bg-white px-4 text-sm font-bold text-[#5d4a78] transition hover:bg-[#f7f4fa] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-import-sales"><Upload size={15} /> Importar planilha</button>
+          <button type="button" onClick={() => importFileRef.current?.click()} disabled={importSales.isPending} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-[#ded7e7] bg-white px-4 text-sm font-bold text-[#5d4a78] transition hover:bg-[#f7f4fa] disabled:cursor-not-allowed disabled:opacity-50" data-testid="button-import-sales"><Upload size={15} /> Importar planilha</button>
         </div>
       </div>
       {importFeedback && <div role="status" className="mb-3 rounded-xl bg-[#eff6e5] px-3.5 py-2.5 text-xs font-semibold text-[#55772c]" data-testid="status-import-success">{importFeedback}</div>}
@@ -1815,12 +1815,6 @@ export default function SalesManagement() {
                             </span>}
                         {duplicateNotices.length > 0 && <div role="status" aria-live="polite" className="mt-1.5 rounded-lg border border-[#f1dfb8] bg-[#fff9eb] px-2 py-1.5 text-[9px] leading-3.5 text-[#775624]" data-testid={`status-import-possible-duplicate-${idSuffix}`}>
                           <strong className="block">⚠ Possível venda duplicada</strong>
-                          <ul className="mt-0.5 space-y-0.5">
-                            {duplicateNotices.slice(0, 2).map((notice, index) => (
-                              <li key={`${notice.label}-${index}`}>Coincidem: {notice.fields.map((field) => saleDuplicateFieldLabels[field]).join(', ')} · {notice.label}</li>
-                            ))}
-                          </ul>
-                          {duplicateNotices.length > 2 && <span className="mt-0.5 block">+ {duplicateNotices.length - 2} correspondência(s)</span>}
                           <div className="mt-1.5 flex flex-wrap gap-1.5">
                             <button type="button" aria-pressed={!excluded} disabled={busy} onClick={() => setImportRowIncluded(line.key, true)} className={`rounded-md px-2 py-1 font-bold ${excluded ? 'bg-white text-[#775624]' : 'bg-[#7656b8] text-white'}`} data-testid={`button-import-duplicate-keep-${idSuffix}`}>Importar mesmo assim</button>
                             <button type="button" aria-pressed={excluded} disabled={busy} onClick={() => setImportRowIncluded(line.key, false)} className={`rounded-md px-2 py-1 font-bold ${excluded ? 'bg-[#775624] text-white' : 'bg-white text-[#775624]'}`} data-testid={`button-import-duplicate-ignore-${idSuffix}`}>Ignorar esta linha</button>

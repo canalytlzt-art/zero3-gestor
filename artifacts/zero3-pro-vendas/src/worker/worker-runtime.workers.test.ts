@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
 import type { Product, Sale, SalesRefundRecord } from "@workspace/api-client-react";
 import { buildFinancialChartAnalytics } from "../lib/financial-chart-data";
+import { findSalesImportDuplicateNotices } from "../lib/sales-duplicates";
+import { mapSalesImportRow, parseSalesSpreadsheet } from "../lib/sales-import";
 import { buildOccupancyChartAnalytics } from "../lib/occupancy-chart-data";
 import { createSalesWorkbook } from "../lib/sales-workbook";
 import { handleOccupancyRequest } from "./occupancy";
@@ -914,6 +916,308 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
       refundCents: 500,
       netCents: 4_000,
     });
+  });
+
+  it("imports synthetic CSV and multi-sheet XLSX through the parser into isolated D1", async () => {
+    const unique = crypto.randomUUID();
+    const existingProductName = `Plano existente ${unique}`;
+    const newCsvProductName = `Plano novo CSV ${unique}`;
+    const pendingDateProductName = `Plano pendente data ${unique}`;
+    const pendingAmountProductName = `Plano pendente valor ${unique}`;
+    const xlsxProductA = `Plano XLSX A ${unique}`;
+    const xlsxProductB = `Plano XLSX B ${unique}`;
+    const duplicateCustomer = `Cliente possível duplicidade ${unique}`;
+    const pendingCustomer = `Cliente pendente ${unique}`;
+    const baselineId = crypto.randomUUID();
+    const saleDate = "2099-10-21";
+
+    const existingProduct = await callSales("/products", "POST", {
+      name: existingProductName,
+      suggestedPriceCents: 0,
+      modalityId: null,
+      isActive: true,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(existingProduct.response.status).toBe(201);
+    await insertSale({
+      id: baselineId,
+      saleDate,
+      productName: existingProductName,
+      quantity: 1,
+      unitAmountCents: 9_000,
+      customerName: duplicateCustomer,
+    });
+
+    const csv = [
+      "Nome do cliente;Data de início;Plano/Produto;Valor da venda",
+      `${duplicateCustomer};21/10/2099;${existingProductName};R$ 120,00`,
+      `;2099-10-22;${newCsvProductName};R$ 1.234,56`,
+      `${pendingCustomer};;${pendingDateProductName};R$ 50,00`,
+      `${pendingCustomer};23/10/2099;${pendingAmountProductName};`,
+    ].join("\n");
+    const encodedCsv = new TextEncoder().encode(csv);
+    const csvBytes = encodedCsv.buffer.slice(
+      encodedCsv.byteOffset,
+      encodedCsv.byteOffset + encodedCsv.byteLength,
+    ) as ArrayBuffer;
+    const csvFilename = `importacao-sintetica-${unique}.csv`;
+    const parsedCsv = await parseSalesSpreadsheet(csvBytes, csvFilename);
+    const readyCsv = [];
+    const pendingCsv = [];
+    for (const sheet of parsedCsv.sheets) {
+      for (const source of sheet.rows) {
+        const mapped = mapSalesImportRow(sheet, source);
+        if (mapped.value) readyCsv.push(mapped.value);
+        if (mapped.draftValue) pendingCsv.push(mapped.draftValue);
+      }
+    }
+    expect(readyCsv).toHaveLength(2);
+    expect(pendingCsv).toHaveLength(2);
+    const unnamedCustomer = readyCsv.find((row) => row.customerName === null);
+    expect(unnamedCustomer).toMatchObject({
+      saleDate: "2099-10-22",
+      totalCents: 123_456,
+      productName: newCsvProductName,
+    });
+    expect(parsedCsv.sheets[0]!.rows
+      .map((source) => mapSalesImportRow(parsedCsv.sheets[0]!, source))
+      .find((result) => result.value?.customerName === null)?.needsVerification).toBe(true);
+
+    const duplicateLine = readyCsv.find((row) => row.customerName === duplicateCustomer)!;
+    const duplicateNotices = findSalesImportDuplicateNotices(
+      readyCsv.map((row) => ({
+        key: row.key,
+        label: `Planilha: ${row.sourceSheet}, linha ${row.sourceRow}`,
+        included: true,
+        customerName: row.customerName,
+        saleDate: row.saleDate,
+        productName: row.productName,
+        totalCents: row.totalCents,
+      })),
+      [{
+        id: baselineId,
+        customerName: duplicateCustomer,
+        saleDate,
+        productName: existingProductName,
+        totalCents: 9_000,
+      }],
+    );
+    expect(duplicateNotices.get(duplicateLine.key)?.[0]?.fields)
+      .toEqual(["customerName", "saleDate", "productName"]);
+
+    const hashFile = async (bytes: ArrayBuffer) => {
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    };
+    const csvHash = await hashFile(csvBytes);
+    expect((await callSales(`/sales/import/origins?fileHash=${csvHash}`)).payload.origins).toEqual([]);
+    const beforeCsvConfirmation = (await callSales("/products")).payload as Array<{ name: string }>;
+    expect(beforeCsvConfirmation.some((product) => product.name === newCsvProductName)).toBe(false);
+    expect(beforeCsvConfirmation.some((product) => product.name === pendingDateProductName)).toBe(false);
+
+    const csvImportBody = {
+      fileHash: csvHash,
+      filename: csvFilename,
+      rows: readyCsv.map((row) => ({
+        customerName: row.customerName,
+        saleDate: row.saleDate,
+        totalCents: row.totalCents,
+        productName: row.productName,
+        sourceSheet: row.sourceSheet,
+        sourceRow: row.sourceRow,
+      })),
+      pendingRows: pendingCsv.map((row) => ({
+        customerName: row.customerName,
+        saleDate: row.saleDate,
+        saleDateText: row.saleDateText,
+        totalCents: row.totalCents,
+        amountText: row.amountText,
+        productName: row.productName,
+        notes: row.notes,
+        sourceSheet: row.sourceSheet,
+        sourceRow: row.sourceRow,
+      })),
+    };
+    const csvImport = await callSales("/sales/import", "POST", csvImportBody);
+    expect(csvImport.response.status, JSON.stringify(csvImport.payload)).toBe(201);
+    expect(csvImport.payload).toMatchObject({
+      importedCount: 2,
+      pendingCount: 2,
+      skippedCount: 0,
+      skippedPendingCount: 0,
+      replayed: false,
+    });
+    expect(csvImport.payload.sales.find((sale: Sale) => sale.customerName === null))
+      .toMatchObject({ saleDate: "2099-10-22", totalCents: 123_456 });
+    const productsAfterCsv = (await callSales("/products")).payload as Array<Product>;
+    expect(productsAfterCsv.find((product) => product.name === newCsvProductName))
+      .toMatchObject({ suggestedPriceCents: 0 });
+    expect(productsAfterCsv.find((product) => product.name === existingProductName)?.id)
+      .toBe(existingProduct.payload.id);
+    expect(productsAfterCsv.some((product) =>
+      product.name === pendingDateProductName || product.name === pendingAmountProductName,
+    )).toBe(false);
+    const csvReplay = await callSales("/sales/import", "POST", csvImportBody);
+    expect(csvReplay.response.status).toBe(200);
+    expect(csvReplay.payload).toMatchObject({
+      importedCount: 0,
+      pendingCount: 0,
+      skippedCount: 2,
+      skippedPendingCount: 2,
+      replayed: true,
+    });
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+      ["Nome do cliente", "Data da venda", "Produto", "Valor da venda"],
+      [`Cliente XLSX A ${unique}`, "24/10/2099", xlsxProductA, "R$ 42,50"],
+    ]), "Aba Outubro");
+    const excelSerial = (Date.UTC(2099, 9, 25) - Date.UTC(1899, 11, 30)) / 86_400_000;
+    const secondSheet = XLSX.utils.aoa_to_sheet([
+      ["Nome do cliente", "Data de início", "Plano", "Valor da venda"],
+      [`Cliente XLSX B ${unique}`, excelSerial, xlsxProductB, 75.25],
+    ]);
+    secondSheet.B2!.z = "dd/mm/yyyy";
+    XLSX.utils.book_append_sheet(workbook, secondSheet, "Aba Novembro");
+    const xlsxBytes = XLSX.write(workbook, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+    const xlsxFilename = `importacao-sintetica-${unique}.xlsx`;
+    const parsedXlsx = await parseSalesSpreadsheet(xlsxBytes, xlsxFilename);
+    expect(parsedXlsx.sheets.map((sheet) => sheet.name)).toEqual(["Aba Outubro", "Aba Novembro"]);
+    const readyXlsx = parsedXlsx.sheets.flatMap((sheet) => sheet.rows.flatMap((source) => {
+      const mapped = mapSalesImportRow(sheet, source);
+      return mapped.value ? [mapped.value] : [];
+    }));
+    expect(readyXlsx.map(({ saleDate, totalCents }) => ({ saleDate, totalCents }))).toEqual([
+      { saleDate: "2099-10-24", totalCents: 4_250 },
+      { saleDate: "2099-10-25", totalCents: 7_525 },
+    ]);
+    const xlsxHash = await hashFile(xlsxBytes);
+    const productsBeforeXlsx = (await callSales("/products")).payload as Array<Product>;
+    expect(productsBeforeXlsx.some((product) => product.name === xlsxProductA || product.name === xlsxProductB))
+      .toBe(false);
+    const xlsxImportBody = {
+      fileHash: xlsxHash,
+      filename: xlsxFilename,
+      rows: readyXlsx.map((row) => ({
+        customerName: row.customerName,
+        saleDate: row.saleDate,
+        totalCents: row.totalCents,
+        productName: row.productName,
+        sourceSheet: row.sourceSheet,
+        sourceRow: row.sourceRow,
+      })),
+      pendingRows: [],
+    };
+    const xlsxImport = await callSales("/sales/import", "POST", xlsxImportBody);
+    expect(xlsxImport.response.status, JSON.stringify(xlsxImport.payload)).toBe(201);
+    expect(xlsxImport.payload).toMatchObject({ importedCount: 2, pendingCount: 0, replayed: false });
+    const xlsxReplay = await callSales("/sales/import", "POST", xlsxImportBody);
+    expect(xlsxReplay.response.status).toBe(200);
+    expect(xlsxReplay.payload).toMatchObject({ importedCount: 0, skippedCount: 2, replayed: true });
+
+    const scoreboard = await callSales(
+      "/sales/scoreboard?fromDate=2099-10-21&toDate=2099-10-25",
+    );
+    expect(scoreboard.payload.totals).toMatchObject({
+      quantity: 5,
+      salesCents: 156_231,
+      refundCents: 0,
+      netCents: 156_231,
+    });
+    const charts = buildFinancialChartAnalytics(scoreboard.payload);
+    expect(charts.reconcilesByProduct).toBe(true);
+    expect(charts.reconcilesByMonth).toBe(true);
+    expect(charts.byProduct.reduce((total, row) => total + row.quantity, 0)).toBe(5);
+    expect(charts.byProduct.reduce((total, row) => total + row.netCents, 0)).toBe(156_231);
+
+    const refreshedHistory = (await callSales("/sales/history")).payload as Sale[];
+    const expectedCustomers = [
+      duplicateCustomer,
+      `Cliente XLSX A ${unique}`,
+      `Cliente XLSX B ${unique}`,
+    ];
+    for (const customer of expectedCustomers) {
+      expect(refreshedHistory.some((sale) => sale.customerName === customer)).toBe(true);
+    }
+    const refreshedProducts = (await callSales("/products")).payload as Array<Product>;
+    expect(refreshedProducts.some((product) => product.name === newCsvProductName)).toBe(true);
+    expect(refreshedProducts.some((product) => product.name === xlsxProductA)).toBe(true);
+    expect(refreshedProducts.some((product) => product.name === xlsxProductB)).toBe(true);
+    const pendingAfterRefresh = (await callSales("/sales/pending")).payload as Array<{
+      sourceFileName: string;
+      status: string;
+    }>;
+    expect(pendingAfterRefresh.filter((draft) => draft.sourceFileName === csvFilename)).toHaveLength(2);
+
+    const refunds = (await callSales("/sales/refunds")).payload as SalesRefundRecord[];
+    const workbookExport = createSalesWorkbook(refreshedHistory, refunds, refreshedProducts, {
+      selection: { mode: "months", months: ["2099-10"] },
+      productName: "",
+      generatedAt: "28/10/2026, 09:00:00",
+    });
+    expect(workbookExport.Sheets["Lançamentos"]).toBeTruthy();
+    expect(workbookExport.Sheets["Resumo por plano"]).toBeTruthy();
+    const exportedRows = XLSX.utils.sheet_to_json(workbookExport.Sheets["Lançamentos"]!, {
+      header: 1,
+      raw: true,
+    }) as unknown[][];
+    expect(JSON.stringify(exportedRows)).toContain(duplicateCustomer);
+    expect(JSON.stringify(exportedRows)).toContain(`Cliente XLSX A ${unique}`);
+  });
+
+  it("rolls back product, sale, and history together when an import history write fails", async () => {
+    const unique = crypto.randomUUID();
+    const fileHash = unique.replace(/-/g, "").repeat(2);
+    const productName = `Atomicidade importação ${unique}`;
+    const customerName = `Cliente ${unique}`;
+    const triggerName = `fail_sale_import_history_${unique.replace(/-/g, "")}`;
+    await workerEnv.DB.prepare(
+      `CREATE TRIGGER ${triggerName}
+       BEFORE INSERT ON sales_history
+       WHEN NEW.entity_type='sale'
+         AND NEW.operation='import'
+         AND NEW.actor_id='${authorizedFixture.userId}'
+       BEGIN
+         SELECT RAISE(ABORT, 'synthetic import history failure');
+       END`,
+    ).run();
+
+    try {
+      await expect(callSales("/sales/import", "POST", {
+        fileHash,
+        filename: "atomicidade.csv",
+        rows: [{
+          customerName,
+          saleDate: "2026-12-11",
+          totalCents: 1_750,
+          productName,
+          sourceSheet: "Vendas",
+          sourceRow: 2,
+        }],
+      })).rejects.toThrow(/synthetic import history failure/i);
+    } finally {
+      await workerEnv.DB.prepare(`DROP TRIGGER IF EXISTS ${triggerName}`).run();
+    }
+
+    const product = await workerEnv.DB.prepare(
+      "SELECT id FROM products WHERE normalized_name=?",
+    ).bind(normalizedProductName(productName)).first();
+    const sale = await workerEnv.DB.prepare(
+      "SELECT id FROM sales WHERE customer_name=? AND sale_date='2026-12-11'",
+    ).bind(customerName).first();
+    const history = await workerEnv.DB.prepare(
+      `SELECT id FROM sales_history
+       WHERE entity_type='sale' AND operation='import'
+         AND json_extract(after_data, '$.sourceFileHash')=?`,
+    ).bind(fileHash).first();
+    const batch = await workerEnv.DB.prepare(
+      "SELECT status FROM sales_import_batches WHERE file_hash=?",
+    ).bind(fileHash).first<{ status: string }>();
+
+    expect(product).toBeNull();
+    expect(sale).toBeNull();
+    expect(history).toBeNull();
+    expect(batch?.status).toBe("previewed");
   });
 
   it("stores incomplete import rows as non-financial drafts and confirms them only after completion", async () => {

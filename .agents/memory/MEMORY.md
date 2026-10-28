@@ -1,7 +1,7 @@
 - [Vite React dependency cache](vite-react-cache.md) — after React version changes, inspect and refresh Vite's optimized dependencies if the runtime still reports mismatched versions.
 - [Backup JSON dates](backup-json-dates.md) — generated API validators coerce dates; validate the serialized backup contract before that coercion.
 - [API date and database boundaries](refund-api-boundaries.md) — validate calendar dates from raw JSON and keep routed DB reads and writes on the injected connection.
-- [Importação de planilhas](spreadsheet-import.md) — mantenha pendências fora das métricas e preserve identidade e datas entre Worker D1 e preview Express.
+- [Importação de planilhas](spreadsheet-import.md) — mantenha pendências fora das métricas, preserve a identidade da origem e use aviso não bloqueante para possíveis duplicidades.
 - [Calendário de ocupação e vendas](occupancy-domain.md) — derive dia da semana e semana ISO das datas civis em leitura, sem regravar os dados históricos.
 - [Scripts TSX inline](tsx-inline-async.md) — `tsx -e` compila como CJS neste workspace; envolva verificações assíncronas em uma IIFE.
 - [Ciclo de vida dos produtos](product-lifecycle.md) — inativar sem apagar histórico; novos cadastros automáticos normalizam nomes e começam sem preço sugerido.

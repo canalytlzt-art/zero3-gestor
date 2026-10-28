@@ -1329,6 +1329,10 @@ async function importSales(
     try {
       await env.DB.batch(statements);
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (!/unique constraint failed/i.test(errorMessage)) {
+        throw error;
+      }
       const refreshed = await salesImportOrigins(env, input.fileHash);
       const known = new Set(
         refreshed.map((origin) => `${origin.source_sheet}:${origin.source_row}`),
