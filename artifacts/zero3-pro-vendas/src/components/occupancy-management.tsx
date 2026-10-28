@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { CalendarDays, CircleHelp, Gauge, Layers, Pencil, Plus, RefreshCw, Trash2, Upload, X } from 'lucide-react';
+import { CalendarDays, ChevronDown, CircleHelp, Gauge, Layers, Pencil, Plus, RefreshCw, Trash2, Upload, X } from 'lucide-react';
 import {
   getGetOccupancyModalitiesQueryKey,
   getGetOccupancyRecordsQueryKey,
@@ -20,7 +20,7 @@ import { PurpleSelect } from '@/components/ui/purple-select';
 import { SuggestionInput } from '@/components/ui/suggestion-input';
 import { formatMonthKey, getSaoPauloMonthKey } from '@/lib/sales-utils';
 import { buildOccupancyChartAnalytics } from '@/lib/occupancy-chart-data';
-import { getWeekdayName } from '@/lib/occupancy-calendar';
+import { formatOccupancyPercentage, getSaoPauloDateKey, getWeekdayName } from '@/lib/occupancy-calendar';
 import {
   changeOccupancyPeriod,
   clearOccupancyFilters,
@@ -67,14 +67,6 @@ function parseCount(raw: string, label: string, minimum: number): { value: numbe
   return { value, error: null };
 }
 
-function formatPct(value: number) {
-  return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 15 })}%`;
-}
-
-function formatCalculatedPct(value: number) {
-  return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`;
-}
-
 function formatDay(iso: string) {
   const [y, m, d] = iso.split('-');
   return d && m && y ? `${d}/${m}/${y}` : iso;
@@ -101,7 +93,7 @@ function apiErrorMessage(error: unknown, context: 'record' | 'modality' | 'delet
 
 const emptyForm = (kind: Kind = 'daily') => ({
   kind,
-  day: '',
+  day: getSaoPauloDateKey(),
   month: getSaoPauloMonthKey(),
   modalityName: 'CrossFit',
   percentage: '',
@@ -119,7 +111,7 @@ export default function OccupancyManagement() {
   const currentMonth = getSaoPauloMonthKey();
 
   // ---- form state (independent from filters)
-  const [form, setForm] = useState(emptyForm());
+  const [form, setForm] = useState(() => emptyForm());
   const [editing, setEditing] = useState<{ id: string; version: number; label: string; modalityId: string; modalityName: string; legacy: boolean; reportedPercentage: number | null } | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [formConflict, setFormConflict] = useState(false);
@@ -131,6 +123,7 @@ export default function OccupancyManagement() {
   const [monthToAdd, setMonthToAdd] = useState(currentMonth);
   const filterState = useOccupancyFilterState();
   const [filterKind, setFilterKind] = useState<'all' | Kind>('all');
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   // ---- delete + modality dialogs
   const [toDelete, setToDelete] = useState<OccupancyRecord | null>(null);
@@ -372,9 +365,9 @@ export default function OccupancyManagement() {
         </div>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(340px,.8fr)_1.2fr] xl:items-start">
+      <div className="space-y-4">
         {/* FORM */}
-        <form id="occupancy-entry-form" onSubmit={(e) => void submit(e)} noValidate className="rounded-[24px] border border-[#e7e1e9] bg-[#fffefc] p-4 shadow-[0_8px_28px_rgba(47,39,62,.035)] sm:p-6 xl:sticky xl:top-[96px]" data-testid="form-occupancy" aria-labelledby="occupancy-form-heading">
+        <form id="occupancy-entry-form" onSubmit={(e) => void submit(e)} noValidate className="mx-auto w-full max-w-5xl scroll-mt-24 rounded-[24px] border border-[#ded5e9] bg-[#fffefc] p-4 shadow-[0_12px_36px_rgba(89,65,125,.09)] sm:p-6 lg:p-8" data-testid="form-occupancy" aria-labelledby="occupancy-form-heading">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="eyebrow text-[9px] font-bold text-[#8a8491]">{editing ? 'editando check-in' : 'novo check-in'}</p>
@@ -428,12 +421,12 @@ export default function OccupancyManagement() {
                 <p className="mt-1 text-xs font-semibold text-[#5d4a78]">
                   {aggregatorCount.value === null || presenceCount.value === null
                     ? 'Não informado'
-                    : `Demais alunos: ${presenceCount.value - aggregatorCount.value} · Agregadores: ${formatCalculatedPct(aggregatorShare ?? 0)}`}
+                    : `Demais alunos: ${presenceCount.value - aggregatorCount.value} · Agregadores: ${formatOccupancyPercentage(aggregatorShare ?? 0)}`}
                 </p>
               </div>
               <div className="rounded-xl bg-[#f3eff8] px-3.5 py-3 sm:col-span-2" aria-live="polite" data-testid="text-occupancy-calculated">
                 <span className="text-[10px] font-bold uppercase tracking-[.08em] text-[#817b89]">Taxa de ocupação</span>
-                <span className="ml-2 text-sm font-extrabold tabular-nums text-[#5d4a78]">{calculatedPercentage === null ? 'Informe presenças e vagas' : formatCalculatedPct(calculatedPercentage)}</span>
+                <span className="ml-2 text-sm font-extrabold tabular-nums text-[#5d4a78]">{calculatedPercentage === null ? 'Informe presenças e vagas' : formatOccupancyPercentage(calculatedPercentage)}</span>
               </div>
             </div>}
           </div>
@@ -482,13 +475,20 @@ export default function OccupancyManagement() {
           </div>
         </form>
 
-        {/* HISTORY */}
-        <section className="overflow-hidden rounded-[24px] border border-[#e7e1e9] bg-[#fffefc]" aria-labelledby="occupancy-history-heading" data-testid="section-occupancy-history">
+        <button
+          type="button"
+          onClick={() => setDetailsOpen((open) => !open)}
+          aria-expanded={detailsOpen}
+          aria-controls="occupancy-history-details"
+          className="mx-auto flex min-h-11 w-full max-w-5xl items-center justify-center gap-2 rounded-xl border border-[#ded7e7] bg-[#f4eff9] px-4 py-3 text-sm font-bold text-[#5d4a78] transition hover:border-[#c9b9dc] hover:bg-[#eee8f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7656b8] focus-visible:ring-offset-2"
+          data-testid="button-toggle-occupancy-details"
+        >
+          <ChevronDown size={16} className={`transition-transform duration-200 ${detailsOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+          {detailsOpen ? 'Ocultar detalhes' : 'Exibir detalhes'}
+        </button>
+
+        <section id="occupancy-history-details" hidden={!detailsOpen} className="w-full min-w-0 overflow-hidden rounded-[24px] border border-[#e7e1e9] bg-[#fffefc]" aria-labelledby="occupancy-history-heading" data-testid="section-occupancy-history">
           <div className="border-b border-[#ece7ee] px-4 py-4 sm:px-5">
-            <div className="flex items-end justify-between gap-3">
-              <div><p className="eyebrow text-[9px] font-bold text-[#8a8491]">histórico</p><h2 id="occupancy-history-heading" className="mt-1 text-base font-extrabold tracking-[-.035em] text-[#332d40]">Histórico de check-ins</h2></div>
-              <span className="text-[10px] font-semibold text-[#8a8491]" data-testid="text-occupancy-count">{records.length} {records.length === 1 ? 'check-in' : 'check-ins'}</span>
-            </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-6" data-testid="filters-occupancy">
               <label className={labelClass}>Período
                 <select value={filterState.periodMode} onChange={(e) => changeFilterMode(e.target.value as OccupancyPeriodMode)} className={fieldClass} data-testid="filter-occupancy-mode">
@@ -605,12 +605,16 @@ export default function OccupancyManagement() {
               {filterProblem ? <p className="text-xs font-semibold text-[#a24f45]" role="alert" data-testid="status-occupancy-filter">{filterProblem}</p> : <span />}
               <button type="button" onClick={clearFilters} className="h-8 rounded-lg px-3 text-xs font-semibold text-[#766d83] hover:bg-[#f6f3f8]" data-testid="button-clear-occupancy-filters">Limpar filtros</button>
             </div>
+            <div className="mt-5 flex items-end justify-between gap-3 border-t border-[#ece7ee] pt-4">
+              <div><p className="eyebrow text-[9px] font-bold text-[#8a8491]">histórico</p><h2 id="occupancy-history-heading" className="mt-1 text-base font-extrabold tracking-[-.035em] text-[#332d40]">Histórico de check-ins</h2></div>
+              <span className="text-[10px] font-semibold text-[#8a8491]" data-testid="text-occupancy-count">{records.length} {records.length === 1 ? 'check-in' : 'check-ins'}</span>
+            </div>
           </div>
 
           {records.length > 0 && <div className="grid gap-2 border-b border-[#f0edf1] bg-[#fbfafb] p-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="summary-occupancy-selection">
             <div className="rounded-xl bg-white px-3 py-2.5"><p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Aulas com presenças e vagas</p><p className="mt-1 text-sm font-extrabold tabular-nums text-[#443d50]" data-testid="text-occupancy-measured-count">{measuredRecords.toLocaleString('pt-BR')}</p></div>
             <div className="rounded-xl bg-white px-3 py-2.5"><p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Presenças / vagas</p><p className="mt-1 text-sm font-extrabold tabular-nums text-[#443d50]" data-testid="text-occupancy-presence-capacity">{totalPresences?.toLocaleString('pt-BR') ?? '—'} / {totalCapacity?.toLocaleString('pt-BR') ?? '—'}</p></div>
-            <div className="rounded-xl bg-white px-3 py-2.5"><p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Taxa de ocupação ponderada</p><p className="mt-1 text-sm font-extrabold tabular-nums text-[#5d4a78]" data-testid="text-occupancy-weighted-rate">{weightedOccupancy === null ? 'Sem capacidade registrada' : formatCalculatedPct(weightedOccupancy)}</p></div>
+            <div className="rounded-xl bg-white px-3 py-2.5"><p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Taxa de ocupação ponderada</p><p className="mt-1 text-sm font-extrabold tabular-nums text-[#5d4a78]" data-testid="text-occupancy-weighted-rate">{weightedOccupancy === null ? 'Sem capacidade registrada' : formatOccupancyPercentage(weightedOccupancy)}</p></div>
             <div className="rounded-xl bg-white px-3 py-2.5"><p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Presenças agregadoras</p><p className="mt-1 text-sm font-extrabold tabular-nums text-[#5d4a78]" data-testid="text-occupancy-aggregator-total">{summaryAnalytics.totals.aggregatorPresences?.toLocaleString('pt-BR') ?? 'Não informado'}</p><p className="mt-0.5 text-[9px] text-[#817b89]">Informado em {summaryAnalytics.totals.aggregatorInformedClassCount} de {summaryAnalytics.totals.measuredClassCount} aulas</p></div>
             {legacyRecords > 0 && <p className="text-[10px] font-medium text-[#817b89] sm:col-span-3" data-testid="text-occupancy-legacy-count">{legacyRecords} registro(s) legado(s) sem presenças/vagas ficam fora do cálculo ponderado.</p>}
             {filterKind === 'all' && filterState.viewMode !== 'daily' && <p className="text-[10px] font-medium text-[#817b89] sm:col-span-3" data-testid="text-occupancy-summary-precedence">No modo mensal ou trimestral, o resumo mensal substitui os detalhes diários da mesma turma e mês para evitar duplicidade.</p>}
@@ -634,14 +638,14 @@ export default function OccupancyManagement() {
               </div>
             </div>
           ) : (
-            <ul className="divide-y divide-[#f0edf1]" data-testid="list-occupancy-records">
+            <ul className="w-full min-w-0 divide-y divide-[#f0edf1]" data-testid="list-occupancy-records">
               {records.map((r) => (
-                <li key={r.id} className={`grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 px-4 py-3.5 sm:grid-cols-[110px_1fr_auto_auto] sm:px-5 ${editing?.id === r.id ? 'bg-[#f8f5fc]' : ''}`} data-testid={`row-occupancy-${r.id}`}>
+                <li key={r.id} className={`grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-3.5 sm:grid-cols-[130px_minmax(0,1fr)_auto_auto] sm:px-5 ${editing?.id === r.id ? 'bg-[#f8f5fc]' : ''}`} data-testid={`row-occupancy-${r.id}`}>
                   <div className="flex items-center gap-2 sm:block">
                     <span className={`inline-block rounded-full px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-[.08em] ${r.kind === 'daily' ? 'bg-[#eee8f7] text-[#65479c]' : 'bg-[#e9f4d6] text-[#4f7224]'}`} data-testid={`badge-occupancy-kind-${r.id}`}>{r.kind === 'daily' ? 'Diário' : 'Mensal'}</span>
                     <span className="text-xs font-bold capitalize tabular-nums text-[#4b4357] sm:mt-1 sm:block" data-testid={`text-occupancy-period-${r.id}`}>{r.kind === 'daily' ? <>{formatDay(r.period)}{getWeekdayName(r.period) && <span className="ml-1 font-medium text-[#7656b8]">· {getWeekdayName(r.period)}</span>}</> : formatMonthKey(r.period)}</span>
                   </div>
-                  <p className="row-span-2 text-right font-[family-name:var(--app-font-serif)] text-xl font-extrabold tracking-[-.04em] tabular-nums text-[#2f2a3d] sm:order-3 sm:row-span-1" data-testid={`text-occupancy-percentage-${r.id}`}>{formatPct(r.percentage)}</p>
+                  <p className="row-span-2 text-right font-[family-name:var(--app-font-serif)] text-xl font-extrabold tracking-[-.04em] tabular-nums text-[#2f2a3d] sm:order-3 sm:row-span-1" data-testid={`text-occupancy-percentage-${r.id}`}>{formatOccupancyPercentage(r.percentage)}</p>
                   <div className="min-w-0 sm:order-2">
                     <p className="truncate text-sm font-semibold text-[#3f384b]" data-testid={`text-occupancy-modality-${r.id}`}>{r.modalityName}{r.className && <span className="font-medium text-[#857e8e]"> · {r.className}</span>}</p>
                     {r.presences !== null && r.capacity !== null && <p className="mt-0.5 text-[10px] font-medium tabular-nums text-[#817b89]" data-testid={`text-occupancy-measurements-${r.id}`}>
@@ -650,7 +654,7 @@ export default function OccupancyManagement() {
                     <p className="mt-0.5 text-[10px] font-medium text-[#817b89]" data-testid={`text-occupancy-aggregators-${r.id}`}>
                       Agregadores: {r.aggregatorPresences == null ? 'Não informado' : r.aggregatorPresences.toLocaleString('pt-BR')}
                       {r.aggregatorPresences != null && r.presences !== null && r.presences > 0
-                        ? ` (${formatCalculatedPct(r.aggregatorPresences / r.presences * 100)}); demais alunos: ${(r.presences - r.aggregatorPresences).toLocaleString('pt-BR')}`
+                        ? ` (${formatOccupancyPercentage(r.aggregatorPresences / r.presences * 100)}); demais alunos: ${(r.presences - r.aggregatorPresences).toLocaleString('pt-BR')}`
                         : ''}
                     </p>
                     {r.notes && <p className="truncate text-[11px] text-[#8a8491]" title={r.notes}>{r.notes}</p>}
@@ -671,7 +675,7 @@ export default function OccupancyManagement() {
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir check-in?</AlertDialogTitle>
             <AlertDialogDescription data-testid="text-delete-occupancy-target">
-              {toDelete && <>Você vai excluir o registro {toDelete.kind === 'daily' ? 'diário' : 'mensal'} de <strong>{recordLabel(toDelete)}</strong> com {formatPct(toDelete.percentage)}. Esta ação não pode ser desfeita.</>}
+              {toDelete && <>Você vai excluir o registro {toDelete.kind === 'daily' ? 'diário' : 'mensal'} de <strong>{recordLabel(toDelete)}</strong> com {formatOccupancyPercentage(toDelete.percentage)}. Esta ação não pode ser desfeita.</>}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteError && <div role="alert" className="rounded-xl border border-[#f1d0ca] bg-[#fff3f1] px-3.5 py-2.5 text-xs font-semibold text-[#8e3d33]" data-testid="status-delete-occupancy-error">{deleteError} <button type="button" onClick={() => { setToDelete(null); refreshBase(); }} className="underline" data-testid="button-delete-occupancy-refresh">Atualizar base</button></div>}

@@ -13,6 +13,26 @@ const WEEKDAYS = [
   { long: 'domingo', short: 'Domingo' },
 ] as const;
 
+export function getSaoPauloDateKey(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const day = parts.find((part) => part.type === 'day')?.value;
+  if (!year || !month || !day) {
+    throw new Error('Unable to determine the current date in America/Sao_Paulo');
+  }
+  return `${year}-${month}-${day}`;
+}
+
+export function formatOccupancyPercentage(value: number): string {
+  return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`;
+}
+
 export function isValidCalendarDate(year: number, month: number, day: number): boolean {
   if (!Number.isInteger(year) || year < 1 || year > 9999
     || !Number.isInteger(month) || month < 1 || month > 12

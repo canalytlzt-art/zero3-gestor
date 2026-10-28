@@ -318,9 +318,21 @@
     @apply border-border;
   }
 
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
   body {
     @apply font-sans antialiased bg-background text-foreground;
     font-family: var(--app-font-sans);
+    min-height: 100dvh;
+    overflow-y: auto;
+  }
+
+  #root {
+    min-height: 100dvh;
   }
 }
 
@@ -340,6 +352,7 @@
 @layer components {
   .app-shell {
     overflow-x: clip;
+    overflow-y: visible;
   }
 
   .app-shell main,

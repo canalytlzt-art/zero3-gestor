@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getIsoWeekday, getIsoWeekStart, getWeekdayName, isValidCalendarDate } from './occupancy-calendar';
+import { formatOccupancyPercentage, getIsoWeekday, getIsoWeekStart, getSaoPauloDateKey, getWeekdayName, isValidCalendarDate } from './occupancy-calendar';
+
+test('builds the new-entry date from the Sao Paulo calendar day, not UTC', () => {
+  assert.equal(getSaoPauloDateKey(new Date('2026-10-28T02:30:00.000Z')), '2026-10-27');
+  assert.equal(getSaoPauloDateKey(new Date('2026-10-28T03:30:00.000Z')), '2026-10-28');
+});
+
+test('formats occupancy percentages with at most two decimal places', () => {
+  assert.equal(formatOccupancyPercentage(37.4567), '37,46%');
+  assert.equal(formatOccupancyPercentage(50), '50%');
+});
 
 test('uses ISO weekdays from calendar dates without timezone conversion', () => {
   assert.equal(getIsoWeekday('2026-10-27'), 2);
