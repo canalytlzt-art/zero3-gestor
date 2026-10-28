@@ -14,3 +14,59 @@ mtime_ms = 1793138177544
 storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:c91b3b47-0600-408b-85d9-1acffd854e30/63542ae1-39cd-4468-814b-aaed081cfbfe/1b0387a5-92b6-40ed-8c65-0db908bbd7fb"
 storage_version_token = "1793138237509641"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "3t5pm8XLZMRaM4wx2L7gt"
+uri = "file://.local/sale-history-mobile-375-full.jpg"
+type = "image"
+title = "Histórico de vendas — celular (375 px)"
+description = "Prévia visual do componente atualizado com nomes sintéticos longos; não acessa nem altera o banco."
+logical_id = "2fb2d232-7c8e-4f6f-94c8-fb72618f53b6"
+content_hash = "sha256:03f7b4e182c1c4e77285930b2e495c8a1d63e9b22d0372b2c4d4f34a3dfa154e"
+size = 38808
+mtime_ms = 1793150643751
+storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:c91b3b47-0600-408b-85d9-1acffd854e30/2fb2d232-7c8e-4f6f-94c8-fb72618f53b6/3a3689bd-0703-49fd-88c5-47c7b9030c88"
+storage_version_token = "1793150710455010"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "7fwtp-2y43KlipLfq3LZ6"
+uri = "file://.local/sale-history-tablet-768.jpg"
+type = "image"
+title = "Histórico de vendas — tablet (768 px)"
+description = "Prévia visual responsiva do cartão com dados sintéticos."
+logical_id = "5ebd8f38-9d9b-4286-965e-feffb6f4106a"
+content_hash = "sha256:e24512602877e42f7db177a0b0c8da0bde68fca06a0d162f46dc6dd01e73da75"
+size = 43661
+mtime_ms = 1793150604411
+storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:c91b3b47-0600-408b-85d9-1acffd854e30/5ebd8f38-9d9b-4286-965e-feffb6f4106a/a0858059-2424-4cde-b71d-e375c873bb0b"
+storage_version_token = "1793150710975823"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "qAE5JuF7QSBcE216sQS6U"
+uri = "file://.local/sale-history-desktop-1366.jpg"
+type = "image"
+title = "Histórico de vendas — desktop (1366 px)"
+description = "Prévia visual no layout desktop, confirmando ações dentro do cartão; dados sintéticos."
+logical_id = "3e0dd4a7-853d-4d06-b82e-2c75cebfafb5"
+content_hash = "sha256:017e505cd53de7af4e33e3d5bfe14a19cd25d72dae808b37dea432b5694969e3"
+size = 57082
+mtime_ms = 1793150606211
+storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:c91b3b47-0600-408b-85d9-1acffd854e30/3e0dd4a7-853d-4d06-b82e-2c75cebfafb5/5d7e19aa-5c82-4d90-83f1-939d5a58f44f"
+storage_version_token = "1793150711459127"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "zFSWRHXeDOhd-sW0nRK3Y"
+uri = "file://.local/sale-history-wide-1920.jpg"
+type = "image"
+title = "Histórico de vendas — tela larga (1920 px)"
+description = "Prévia visual em tela larga com nomes longos e ações dentro do cartão; dados sintéticos."
+logical_id = "c3cf2ad3-6b5e-49af-be12-6f74738e7e2e"
+content_hash = "sha256:233db49a38d90da38c738d5742bc516e121a6e28178b3b554f512365097f112e"
+size = 61821
+mtime_ms = 1793150608067
+storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:c91b3b47-0600-408b-85d9-1acffd854e30/c3cf2ad3-6b5e-49af-be12-6f74738e7e2e/40f850c2-4c8e-4359-bca3-67f4ce59ffca"
+storage_version_token = "1793150711958241"
+content_type = "image/jpeg"

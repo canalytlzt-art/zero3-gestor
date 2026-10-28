@@ -563,8 +563,8 @@ function Workspace() {
   const initial = name.slice(0, 1).toLocaleUpperCase('pt-BR');
   const tabs = [
     { id: 'sales', label: 'Lançamentos', path: '/', testId: 'tab-lancamentos', eyebrow: 'rotina comercial' },
-    { id: 'scoreboard', label: 'Scoreboard', path: '/scoreboard', testId: 'tab-scoreboard', eyebrow: 'visão do time' },
     { id: 'occupancy', label: 'Ocupação', path: '/ocupacao', testId: 'tab-ocupacao', eyebrow: 'aulas e modalidades' },
+    { id: 'scoreboard', label: 'Scoreboard', path: '/scoreboard', testId: 'tab-scoreboard', eyebrow: 'visão do time' },
     { id: 'charts', label: 'Gráficos', path: '/graficos', testId: 'tab-graficos', eyebrow: 'análise de ocupação' },
   ] as const;
   const activeTab = tabs.find((item) => item.id === tab) ?? tabs[0];
@@ -575,17 +575,17 @@ function Workspace() {
         <div className="mx-auto flex h-[72px] max-w-[1440px] items-center justify-between px-4 sm:px-7 lg:px-10">
           <div className="flex items-center gap-8">
             <Brand />
-            <nav className="hidden items-center gap-1 sm:flex" aria-label="Navegação principal">
+            <nav className="hidden items-center gap-1 lg:flex" aria-label="Navegação principal">
               {tabs.map((item) => <button key={item.id} onClick={() => setLocation(item.path)} className={`rounded-full px-4 py-2 text-[13px] font-semibold transition ${tab === item.id ? 'bg-[#ece6f4] text-[#65479c]' : 'text-[#77717f] hover:bg-white'}`} aria-current={tab === item.id ? 'page' : undefined} data-testid={item.testId}>{item.label}</button>)}
             </nav>
           </div>
           <div className="flex items-center gap-3">
-            <div className="hidden text-right sm:block"><p className="text-xs font-bold text-[#464151]" data-testid="text-user-name">{name}</p><p className="mt-0.5 text-[10px] text-[#918b98]">Acesso da equipe</p></div>
+            <div className="hidden text-right lg:block"><p className="text-xs font-bold text-[#464151]" data-testid="text-user-name">{name}</p><p className="mt-0.5 text-[10px] text-[#918b98]">Acesso da equipe</p></div>
             <div className="grid h-9 w-9 place-items-center rounded-full bg-[#d7eaa9] text-xs font-extrabold text-[#45552d]" aria-label={`Perfil de ${name}`}>{initial}</div>
             <button onClick={() => void signOut({ redirectUrl: basePath || '/' })} aria-label="Sair da conta" title="Sair da conta" className="grid h-9 w-9 place-items-center rounded-full text-[#807a88] transition hover:bg-white hover:text-[#5e4a7c]" data-testid="button-sign-out"><LogOut size={16} /></button>
           </div>
         </div>
-        <nav className="flex gap-1 border-t border-[#ece8ed] px-3 py-2 sm:hidden" aria-label="Navegação principal">
+        <nav className="flex gap-1 border-t border-[#ece8ed] px-3 py-2 lg:hidden" aria-label="Navegação principal">
           {tabs.map((item) => <button key={item.id} onClick={() => setLocation(item.path)} className={`flex-1 rounded-xl py-2.5 text-xs font-bold ${tab === item.id ? 'bg-[#ece6f4] text-[#65479c]' : 'text-[#77717f]'}`} aria-current={tab === item.id ? 'page' : undefined} data-testid={`${item.testId}-mobile`}>{item.label}</button>)}
         </nav>
       </header>

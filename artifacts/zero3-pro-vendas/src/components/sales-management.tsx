@@ -1115,9 +1115,6 @@ export default function SalesManagement() {
               </label>
             </div>
           </div>
-          <div className="mb-2 hidden grid-cols-[94px_88px_minmax(130px,1fr)_58px_116px_100px_188px] items-center gap-2 px-3 text-[9px] font-bold uppercase tracking-[.08em] text-[#8a8491] lg:grid" data-testid="header-sales-history">
-            <span>Data</span><span>Tipo</span><span>Produto</span><span>Qtd.</span><span className="text-right">Valor</span><span>Situação</span><span className="text-right">Ações</span>
-          </div>
           {isHistoryLoading ? <div className="space-y-3" aria-label="Carregando histórico" data-testid="status-sales-loading"><div className="skeleton h-16 rounded-2xl" /><div className="skeleton h-16 rounded-2xl" /><div className="skeleton h-16 rounded-2xl" /></div>
             : isHistoryError ? <div className="grid min-h-[220px] place-items-center rounded-2xl border border-dashed border-[#e6e1ea] bg-[#fbfafc] p-6 text-center" data-testid="status-sales-error"><div><CircleHelp className="mx-auto text-[#a6584b]" size={23} /><p className="mt-3 font-bold">Não foi possível carregar</p><p className="mt-1 text-sm text-[#827b8b]">Confira sua conexão e tente novamente.</p><button onClick={() => void refetchHistory()} className="mt-4 inline-flex items-center gap-2 rounded-full border border-[#ded8e5] bg-white px-4 py-2 text-xs font-bold text-[#5c506f] hover:bg-[#f8f6fa]" data-testid="button-retry-sales"><RefreshCw size={13} /> Tentar novamente</button></div></div>
             : filteredSales.length ? <div className="space-y-2" data-testid="list-sales">
@@ -1633,23 +1630,47 @@ export default function SalesManagement() {
 
 function SaleRow({ sale, onEdit, onHistory, onCancel, busy }: { sale: Sale; onEdit: () => void; onHistory: () => void; onCancel: () => void; busy: boolean }) {
   const cancelled = sale.status === 'cancelled';
-  return <article className={`grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 rounded-2xl border px-3 py-3 transition lg:grid-cols-[94px_88px_minmax(130px,1fr)_58px_116px_100px_188px] lg:items-center lg:gap-2 ${cancelled ? 'border-[#ede8e9] bg-[#fcfafa]' : 'border-[#f0edf2] hover:border-[#e5dfeb] hover:bg-[#fdfcfe]'}`} data-testid={`row-sale-${sale.id}`}>
-    <span className="col-start-1 row-start-1 text-[11px] font-medium text-[#6f6879] lg:order-1" data-testid={`text-sale-date-${sale.id}`}>{formatDate(sale.saleDate, { day: '2-digit', month: 'short', year: 'numeric' })}</span>
-    <span className="col-start-2 row-start-1 justify-self-end text-[10px] font-bold text-[#81798b] lg:order-2">{cancelled ? 'Cancelamento' : 'Venda'}</span>
-    <div className="col-span-2 row-start-2 min-w-0 lg:col-span-1 lg:row-auto lg:order-3">
-      <p className={`truncate text-sm font-bold ${cancelled ? 'text-[#77717f]' : 'text-[#353044]'}`} data-testid={`text-sale-product-${sale.id}`}>{sale.productName}</p>
-      {sale.customerName && <p className="mt-1 truncate text-[10px] font-medium text-[#5d4a78]" title={sale.customerName} data-testid={`text-sale-customer-name-${sale.id}`}>Nome: {sale.customerName}</p>}
-      {sale.notes && <p className="mt-1 truncate text-[10px] text-[#81798b]" title={sale.notes}>{sale.notes}</p>}
-      {cancelled && sale.cancellationReason && <p className="mt-1 truncate text-[10px] text-[#9a625b]" title={sale.cancellationReason} data-testid={`text-sale-cancellation-reason-${sale.id}`}>Motivo: {sale.cancellationReason}</p>}
+  const labelClass = 'mb-1 block text-[9px] font-bold uppercase tracking-[.09em] text-[#91899a]';
+  return <article className={`min-w-0 rounded-2xl border px-3 py-3 transition sm:px-4 ${cancelled ? 'border-[#ede8e9] bg-[#fcfafa]' : 'border-[#f0edf2] hover:border-[#e5dfeb] hover:bg-[#fdfcfe]'}`} data-testid={`row-sale-${sale.id}`}>
+    <div className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+      <div className="min-w-0">
+        <span className={labelClass}>Data</span>
+        <span className="block text-[11px] font-medium text-[#6f6879]" data-testid={`text-sale-date-${sale.id}`}>{formatDate(sale.saleDate, { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+      </div>
+      <div className="min-w-0">
+        <span className={labelClass}>Tipo</span>
+        <span className="block text-[11px] font-bold text-[#81798b]">{cancelled ? 'Cancelamento' : 'Venda'}</span>
+      </div>
+      <div className="col-span-2 min-w-0">
+        <span className={labelClass}>Produto</span>
+        <p className={`break-words [overflow-wrap:anywhere] text-sm font-bold ${cancelled ? 'text-[#77717f]' : 'text-[#353044]'}`} data-testid={`text-sale-product-${sale.id}`}>{sale.productName}</p>
+      </div>
+      <div className="col-span-2 min-w-0">
+        <span className={labelClass}>Cliente</span>
+        <p className="break-words [overflow-wrap:anywhere] text-[11px] font-medium text-[#5d4a78]" data-testid={`text-sale-customer-name-${sale.id}`}>{sale.customerName || 'Não informado'}</p>
+      </div>
+      <div className="min-w-0">
+        <span className={labelClass}>Quantidade</span>
+        <span className="block break-words text-[11px] text-[#746d7b]">{sale.quantity} un.</span>
+      </div>
+      <div className="min-w-0">
+        <span className={labelClass}>Valor</span>
+        <span className={`block break-words text-sm font-bold tabular-nums ${cancelled ? 'text-[#817b86] line-through decoration-[#b38b86]' : 'text-[#403650]'}`} data-testid={`text-sale-total-${sale.id}`}>{formatCents(sale.totalCents)}</span>
+      </div>
+      <div className="min-w-0">
+        <span className={labelClass}>Situação</span>
+        <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold ${cancelled ? 'bg-[#f2ecec] text-[#796565]' : 'bg-[#eff6e5] text-[#55772c]'}`} data-testid={`status-sale-${sale.id}`}>{cancelled ? 'Cancelada' : 'Ativa'}</span>
+      </div>
     </div>
-    <span className="col-start-1 row-start-3 text-[11px] text-[#746d7b] lg:col-auto lg:row-auto lg:order-4">{sale.quantity} un.</span>
-    <span className={`col-start-2 row-start-3 justify-self-end whitespace-nowrap text-right text-sm font-bold tabular-nums lg:col-auto lg:row-auto lg:order-5 ${cancelled ? 'text-[#817b86] line-through decoration-[#b38b86]' : 'text-[#403650]'}`} data-testid={`text-sale-total-${sale.id}`}>{formatCents(sale.totalCents)}</span>
-    <span className={`col-start-1 row-start-4 justify-self-start rounded-full px-2.5 py-1 text-[10px] font-bold lg:col-auto lg:row-auto lg:order-6 ${cancelled ? 'bg-[#f2ecec] text-[#796565]' : 'bg-[#eff6e5] text-[#55772c]'}`} data-testid={`status-sale-${sale.id}`}>{cancelled ? 'Cancelada' : 'Ativa'}</span>
-    <div className="col-start-2 row-start-4 flex justify-end gap-1 lg:col-auto lg:row-auto lg:order-7">
+    {(sale.notes || (cancelled && sale.cancellationReason)) && <div className="mt-3 space-y-1 border-t border-[#efebf0] pt-2.5">
+      {sale.notes && <p className="break-words [overflow-wrap:anywhere] text-[10px] leading-4 text-[#81798b]"><span className="font-bold">Observação:</span> {sale.notes}</p>}
+      {cancelled && sale.cancellationReason && <p className="break-words [overflow-wrap:anywhere] text-[10px] leading-4 text-[#9a625b]" data-testid={`text-sale-cancellation-reason-${sale.id}`}><span className="font-bold">Motivo:</span> {sale.cancellationReason}</p>}
+    </div>}
+    <div className="mt-3 flex min-w-0 flex-wrap items-center justify-end gap-1 border-t border-[#efebf0] pt-2">
       <button type="button" onClick={onHistory} aria-label={`Ver histórico da venda ${sale.productName}`} className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-[#776b88] transition hover:bg-[#f1edf7] hover:text-[#6848a9]" data-testid={`button-sale-history-${sale.id}`}><History size={15} /></button>
       {!cancelled && <>
-        <button type="button" onClick={onEdit} disabled={busy} aria-label={`Editar venda ${sale.productName}`} className="inline-flex h-10 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-bold text-[#716a79] transition hover:bg-[#f0ebf7] hover:text-[#6848a9] disabled:opacity-40" data-testid={`button-edit-sale-${sale.id}`}><Edit3 size={14} /> Editar</button>
-        <button type="button" onClick={onCancel} disabled={busy} aria-label={`Cancelar venda ${sale.productName}`} className="inline-flex h-10 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-bold text-[#98706b] transition hover:bg-[#fff0ed] hover:text-[#a84940] disabled:opacity-40" data-testid={`button-cancel-sale-${sale.id}`}><X size={14} /> Cancelar</button>
+        <button type="button" onClick={onEdit} disabled={busy} aria-label={`Editar venda ${sale.productName}`} className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2 text-[11px] font-bold text-[#716a79] transition hover:bg-[#f0ebf7] hover:text-[#6848a9] disabled:opacity-40" data-testid={`button-edit-sale-${sale.id}`}><Edit3 size={14} className="shrink-0" /> Editar</button>
+        <button type="button" onClick={onCancel} disabled={busy} aria-label={`Cancelar venda ${sale.productName}`} className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2 text-[11px] font-bold text-[#98706b] transition hover:bg-[#fff0ed] hover:text-[#a84940] disabled:opacity-40" data-testid={`button-cancel-sale-${sale.id}`}><X size={14} className="shrink-0" /> Cancelar</button>
       </>}
       {cancelled && <span className="px-2.5 py-2 text-[10px] font-medium text-[#8a8491]">Registro preservado</span>}
     </div>

@@ -336,6 +336,133 @@
 @keyframes shimmer { 100% { transform: translateX(100%); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; } }
 
+/* Responsive workspace: keep wide data usable without sacrificing page scroll. */
+@layer components {
+  .app-shell {
+    overflow-x: clip;
+  }
+
+  .app-shell main,
+  .app-shell main > .page-enter,
+  .app-shell main section,
+  .app-shell main article,
+  .app-shell main form {
+    min-width: 0;
+  }
+
+  .app-shell [data-testid^="table-scoreboard"] > div:last-child,
+  .app-shell [data-testid="table-import-preview"],
+  .app-shell [data-testid="list-occupancy-records"] {
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x pan-y pinch-zoom;
+  }
+
+  .app-shell [data-testid^="table-scoreboard"] > div:last-child {
+    overflow-x: auto;
+  }
+
+  .app-shell input,
+  .app-shell select,
+  .app-shell textarea {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .app-shell canvas,
+  .app-shell svg {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 767px) {
+  .app-shell header > div:first-child {
+    height: 62px;
+  }
+
+  .app-shell header .wordmark img {
+    width: 116px;
+    height: auto;
+  }
+
+  .app-shell > main {
+    padding-top: 1.25rem;
+    padding-bottom: max(2rem, env(safe-area-inset-bottom));
+  }
+
+  .app-shell [data-testid="sales-actions"] > div:last-child,
+  .app-shell [data-testid="sales-actions"] > div:last-child > button,
+  .app-shell [data-testid="occupancy-page"] > div:first-child > div:last-child > button {
+    min-width: 0;
+  }
+
+  .app-shell [data-testid="sales-actions"] > div:last-child > button {
+    flex: 1 1 calc(50% - .5rem);
+    white-space: normal;
+  }
+
+  .app-shell [data-testid="occupancy-page"] > div:first-child > div:last-child > button {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+
+  .app-shell [data-testid="filters-occupancy"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-shell [data-testid="list-occupancy-records"] {
+    overflow-x: auto;
+  }
+
+  .app-shell [data-testid="row-occupancy-loading"],
+  .app-shell [data-testid^="row-occupancy-"] {
+    min-width: 0;
+  }
+
+  .app-shell [data-testid="section-occupancy-history"] {
+    min-width: 0;
+  }
+
+  [role="dialog"],
+  [role="alertdialog"] {
+    width: min(calc(100vw - 1.25rem), 44rem);
+    max-height: calc(100dvh - 1.25rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
+@media (max-width: 380px) {
+  .app-shell header > nav[aria-label="Navegação principal"] {
+    justify-content: flex-start;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x pan-y pinch-zoom;
+  }
+
+  .app-shell header > nav[aria-label="Navegação principal"] > button {
+    flex: 0 0 auto;
+    min-width: max-content;
+    padding-inline: .75rem;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1100px) {
+  .app-shell main {
+    padding-top: 1.75rem;
+  }
+
+  .app-shell [data-testid="filters-occupancy"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app-shell [data-testid="section-occupancy-history"] {
+    min-width: 0;
+  }
+}
+
 /**
  * Using the elevate system.
  * Automatic contrast adjustment.
