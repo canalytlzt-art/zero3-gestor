@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  findSalesImportDuplicateNotices,
   findPossibleSaleDuplicates,
   matchingSaleDuplicateFields,
   saleDuplicateFieldLabels,
@@ -41,6 +42,29 @@ test("flags a possible duplicate at three matching fields, without requiring all
 
   assert.equal(matches.length, 1);
   assert.deepEqual(matches[0].fields, ["customerName", "saleDate", "productName"]);
+});
+
+test("shows matching import rows and existing sales without using ignored lines as import matches", () => {
+  const notices = findSalesImportDuplicateNotices([
+    { key: "Vendas:2", label: "Planilha: Vendas, linha 2", included: true, ...sale },
+    { key: "Vendas:3", label: "Planilha: Vendas, linha 3", included: true, ...sale },
+    { key: "Vendas:4", label: "Planilha: Vendas, linha 4", included: false, ...sale },
+  ], [{
+    id: "existing-sale",
+    ...sale,
+    totalCents: 50000,
+  }]);
+
+  assert.equal(notices.get("Vendas:2")?.length, 2, "matches the existing record and the other included spreadsheet row");
+  assert.deepEqual(notices.get("Vendas:2")?.map((notice) => notice.label), [
+    "Venda já registrada",
+    "Planilha: Vendas, linha 3",
+  ]);
+  assert.deepEqual(notices.get("Vendas:2")?.[0]?.fields, ["customerName", "saleDate", "productName"]);
+  assert.ok(!notices.get("Vendas:2")?.some((notice) => notice.label.endsWith("linha 4")),
+    "an explicitly ignored row is not treated as another sale being imported");
+  assert.ok(notices.get("Vendas:4")?.some((notice) => notice.label.endsWith("linha 2")),
+    "the ignored row keeps its warning so it can be restored with the explicit import action");
 });
 
 test("does not flag fewer than three matches or treat missing fields as matching", () => {

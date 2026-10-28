@@ -205,6 +205,8 @@ const backupSaleSchema = z
   .object({
     id: z.string().uuid(),
     productId: z.string().uuid().nullable(),
+    modalityId: z.string().uuid().nullable().optional(),
+    modalityOverride: z.boolean().optional(),
     saleDate: z
       .string()
       .refine((value) => parseSaleDate(value) !== null, "Invalid sale date"),
@@ -1948,6 +1950,10 @@ export function createSalesRouter(
       return;
     }
 
+    const effectiveSaleModalityId = sql<string | null>`
+      case when ${salesTable.modalityOverride}
+        then ${salesTable.modalityId} else ${productsTable.modalityId} end
+    `;
     const saleFilters: SQL[] = [eq(salesTable.status, "active")];
     const refundFilters: SQL[] = [eq(salesRefundsTable.status, "active")];
     if (fromDate && toDate) {
@@ -1978,8 +1984,8 @@ export function createSalesRouter(
       refundFilters.push(eq(salesTable.productId, parsed.data.productId));
     }
     if (parsed.data.modalityId) {
-      saleFilters.push(eq(productsTable.modalityId, parsed.data.modalityId));
-      refundFilters.push(eq(productsTable.modalityId, parsed.data.modalityId));
+      saleFilters.push(eq(effectiveSaleModalityId, parsed.data.modalityId));
+      refundFilters.push(eq(effectiveSaleModalityId, parsed.data.modalityId));
     }
     if (selectedWeekdays.length) {
       saleFilters.push(
@@ -1995,7 +2001,7 @@ export function createSalesRouter(
       .select({
         productId: salesTable.productId,
         productName: sql<string>`coalesce(${productsTable.name}, ${salesTable.productName}, 'Não categorizado')`,
-        modalityId: productsTable.modalityId,
+        modalityId: effectiveSaleModalityId,
         modalityName: occupancyModalitiesTable.name,
         month: saleMonth,
         quantity: sql<string>`coalesce(sum(${salesTable.quantity}), 0)::text`,
@@ -2003,12 +2009,12 @@ export function createSalesRouter(
       })
       .from(salesTable)
       .leftJoin(productsTable, eq(productsTable.id, salesTable.productId))
-      .leftJoin(occupancyModalitiesTable, eq(occupancyModalitiesTable.id, productsTable.modalityId))
+      .leftJoin(occupancyModalitiesTable, eq(occupancyModalitiesTable.id, effectiveSaleModalityId))
       .where(and(...saleFilters))
       .groupBy(
         salesTable.productId,
         productsTable.name,
-        productsTable.modalityId,
+        effectiveSaleModalityId,
         occupancyModalitiesTable.name,
         salesTable.productName,
         saleMonth,
@@ -2019,7 +2025,7 @@ export function createSalesRouter(
       .select({
         productId: salesTable.productId,
         productName: sql<string>`coalesce(${productsTable.name}, ${salesTable.productName}, 'Não categorizado')`,
-        modalityId: productsTable.modalityId,
+        modalityId: effectiveSaleModalityId,
         modalityName: occupancyModalitiesTable.name,
         month: refundMonth,
         refundCents: sql<string>`coalesce(sum(${salesRefundsTable.amountCents}), 0)::text`,
@@ -2027,12 +2033,12 @@ export function createSalesRouter(
       .from(salesRefundsTable)
       .innerJoin(salesTable, eq(salesTable.id, salesRefundsTable.saleId))
       .leftJoin(productsTable, eq(productsTable.id, salesTable.productId))
-      .leftJoin(occupancyModalitiesTable, eq(occupancyModalitiesTable.id, productsTable.modalityId))
+      .leftJoin(occupancyModalitiesTable, eq(occupancyModalitiesTable.id, effectiveSaleModalityId))
       .where(and(...refundFilters))
       .groupBy(
         salesTable.productId,
         productsTable.name,
-        productsTable.modalityId,
+        effectiveSaleModalityId,
         occupancyModalitiesTable.name,
         salesTable.productName,
         refundMonth,
@@ -2128,7 +2134,7 @@ export function createSalesRouter(
       modalityId: string | null = null,
       modalityName: string | null = null,
     ): ProductAggregate => {
-      const key = productId ?? "__uncategorized__";
+      const key = `${productId ?? "__uncategorized__"}|${modalityId ?? "unlinked"}`;
       const current = productTotals.get(key);
       if (current) return current;
       const created = {
@@ -2184,7 +2190,7 @@ export function createSalesRouter(
           : currentMonth;
       monthKeys = monthKeysBetween(firstMonth, lastMonth);
     }
-    if (parsed.data.productId && !productTotals.has(parsed.data.productId)) {
+    if (parsed.data.productId && ![...productTotals.values()].some((item) => item.productId === parsed.data.productId)) {
       const [product] = await database
         .select({
           id: productsTable.id,
@@ -2631,6 +2637,7 @@ export function createSalesRouter(
       unitAmountCents: number;
       customerName: string | null;
       notes: string | null;
+      modalityId: string | null | undefined;
       sourceSheet: string;
       sourceRow: number;
       totalCents: number;
@@ -2645,6 +2652,7 @@ export function createSalesRouter(
         ? normalizeProductName(rawProductName)
         : null;
       const customerName = row.customerName?.trim().replace(/\s+/g, " ") || null;
+      const modalityId = row.modalityId;
       const totalCents = row.totalCents;
       const sourceSheet = row.sourceSheet;
       if (
@@ -2669,6 +2677,7 @@ export function createSalesRouter(
         totalCents,
         customerName,
         notes: row.notes?.trim() || null,
+        modalityId,
         sourceSheet,
         sourceRow: row.sourceRow,
       });
@@ -2676,6 +2685,19 @@ export function createSalesRouter(
     if (new Set(normalizedRows.map((row) => `${row.sourceSheet}:${row.sourceRow}`)).size !== normalizedRows.length) {
       res.status(400).json({ error: "O envio contém a mesma aba/linha mais de uma vez." });
       return;
+    }
+    const requestedModalityIds = [...new Set(normalizedRows.flatMap((row) => row.modalityId ? [row.modalityId] : []))];
+    if (requestedModalityIds.length) {
+      const existingModalities = await database
+        .select({ id: occupancyModalitiesTable.id })
+        .from(occupancyModalitiesTable)
+        .where(inArray(occupancyModalitiesTable.id, requestedModalityIds));
+      const existingIds = new Set(existingModalities.map(({ id }) => id));
+      const invalidRow = normalizedRows.find((row) => row.modalityId && !existingIds.has(row.modalityId));
+      if (invalidRow) {
+        res.status(400).json({ error: `Modalidade inválida na aba ${invalidRow.sourceSheet}, linha ${invalidRow.sourceRow}.` });
+        return;
+      }
     }
     let normalizedDraftRows: Array<{
       id: string;
@@ -2791,6 +2813,8 @@ export function createSalesRouter(
                   quantity: row.quantity,
                   unitAmountCents: row.unitAmountCents,
                   totalCents: row.totalCents,
+                  modalityId: row.modalityId ?? null,
+                  modalityOverride: row.modalityId !== undefined,
                   customerName: row.customerName,
                   notes: row.notes,
                   createdBy: actorId,
@@ -3630,6 +3654,19 @@ export function createSalesRouter(
       res.status(400).json({ error: "The calculated sale total is too large" });
       return;
     }
+    const hasModalityOverride = Object.hasOwn(parsed.data, "modalityId");
+    const modalityId = parsed.data.modalityId ?? null;
+    if (modalityId) {
+      const [modality] = await database
+        .select({ id: occupancyModalitiesTable.id })
+        .from(occupancyModalitiesTable)
+        .where(eq(occupancyModalitiesTable.id, modalityId))
+        .limit(1);
+      if (!modality) {
+        res.status(400).json({ error: "Selected modality does not exist" });
+        return;
+      }
+    }
 
     const actorId = getUserId(req)!;
     try {
@@ -3658,6 +3695,8 @@ export function createSalesRouter(
                 quantity: parsed.data.quantity,
                 unitAmountCents: parsed.data.unitAmountCents,
                 totalCents,
+                modalityId: hasModalityOverride ? modalityId : null,
+                modalityOverride: hasModalityOverride,
                 customerName:
                   parsed.data.customerName?.trim().replace(/\s+/g, " ") || null,
                 notes: parsed.data.notes?.trim() || null,
@@ -3726,6 +3765,19 @@ export function createSalesRouter(
     if (totalCents === null) {
       res.status(400).json({ error: "The calculated sale total is too large" });
       return;
+    }
+    const hasModalityOverride = Object.hasOwn(parsed.data, "modalityId");
+    const modalityId = parsed.data.modalityId ?? null;
+    if (modalityId) {
+      const [modality] = await database
+        .select({ id: occupancyModalitiesTable.id })
+        .from(occupancyModalitiesTable)
+        .where(eq(occupancyModalitiesTable.id, modalityId))
+        .limit(1);
+      if (!modality) {
+        res.status(400).json({ error: "Selected modality does not exist" });
+        return;
+      }
     }
 
     const actorId = getUserId(req)!;
@@ -3808,6 +3860,8 @@ export function createSalesRouter(
                 productId: product?.id ?? null,
                 saleDate,
                 productName: product?.name ?? UNCATEGORIZED_SALE_LABEL,
+                modalityId: hasModalityOverride ? modalityId : current.modalityId,
+                modalityOverride: hasModalityOverride ? true : current.modalityOverride,
                 quantity: parsed.data.quantity,
                 unitAmountCents: parsed.data.unitAmountCents,
                 totalCents,

@@ -26,4 +26,40 @@ export type SalesRefundRecord = SalesRefund & ({
      */
   totalCents: number;
   saleStatus: SalesRefundRecordSaleStatus;
-});
+}) & Required<Pick<SalesRefund & ({
+  saleDate: Date;
+  /** @nullable */
+  productId: string | null;
+  productName: string;
+  /** @minimum 1 */
+  quantity: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  unitAmountCents: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  totalCents: number;
+  saleStatus: SalesRefundRecordSaleStatus;
+}), Extract<keyof (SalesRefund & ({
+  saleDate: Date;
+  /** @nullable */
+  productId: string | null;
+  productName: string;
+  /** @minimum 1 */
+  quantity: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  unitAmountCents: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  totalCents: number;
+  saleStatus: SalesRefundRecordSaleStatus;
+})), 'modalityId' | 'modalityOverride'>>>;

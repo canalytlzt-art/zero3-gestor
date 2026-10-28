@@ -23,6 +23,8 @@ export interface SaleInput {
      * @maximum 9007199254740991
      */
   unitAmountCents: number;
+  /** @nullable */
+  modalityId?: string | null;
   /**
      * @maxLength 120
      * @nullable

@@ -49,8 +49,8 @@ import { countSalesPendingDrafts, countSalesWithVerificationIssues, downloadSale
 import { formatCents, formatMonthKey, getSaoPauloMonthKey, monthsForYearQuarter, normalizeProductName, productNameKey, type ScoreboardPeriodMode } from '@/lib/sales-utils';
 import { getIsoWeekday, getWeekdayName, getWeekdayNameForIsoDay } from '@/lib/occupancy-calendar';
 import { mapSalesImportRow, parseImportDate, parseSalesSpreadsheet, type SalesImportField, type SalesImportSheet } from '@/lib/sales-import';
-import { findPossibleSaleDuplicates, saleDuplicateFieldLabels } from '@/lib/sales-duplicates';
-import type { SaleDuplicateField, SaleDuplicateRecord } from '@/lib/sales-duplicates';
+import { findPossibleSaleDuplicates, findSalesImportDuplicateNotices, saleDuplicateFieldLabels } from '@/lib/sales-duplicates';
+import type { SaleDuplicateField } from '@/lib/sales-duplicates';
 import { ImportSourceDetails } from './import-source-details';
 import ActiveContractsDialog from './active-contracts-dialog';
 
@@ -60,6 +60,7 @@ const MAX_IMPORT_ROWS = 500;
 const saleFormSchema = z.object({
   saleDate: z.string().refine(isValidCalendarDate, 'Informe uma data válida.'),
   productName: z.string().max(120, 'Use até 120 caracteres.').refine((value) => normalizeProductName(value).length > 0, 'Informe o produto.'),
+  modalityId: z.string(),
   quantity: z.string().regex(/^[1-9]\d*$/, 'Use uma quantidade inteira maior que zero.').refine((value) => Number(value) <= 2147483647, 'Quantidade muito alta.'),
   unitAmount: z.string().min(1, 'Informe o valor unitário.').refine((value) => parseBrlCents(value) !== null, 'Informe um valor em reais válido.').refine((value) => (parseBrlCents(value) ?? -1) >= 0, 'O valor não pode ser negativo.').refine((value) => (parseBrlCents(value) ?? Number.MAX_SAFE_INTEGER + 1) <= Number.MAX_SAFE_INTEGER, 'Valor muito alto.'),
   customerName: z.string().max(120, 'Use até 120 caracteres.'),
@@ -509,53 +510,37 @@ export default function SalesManagement() {
     })),
   ), [importWorkspace]);
   const importDuplicateNotices = useMemo(() => {
-    const candidates = importedLines.filter((line) => line.kind !== 'auxiliary' && !line.alreadyImported);
-    const noticesByKey = new Map<string, Array<{ label: string; fields: SaleDuplicateField[] }>>();
-    const candidateForLine = (line: typeof candidates[number]) => ({
+    const candidates = importedLines.filter((line) =>
+      line.kind !== 'auxiliary' && !line.alreadyImported && line.sheetSelected);
+    return findSalesImportDuplicateNotices(candidates.map((line) => ({
+      key: line.key,
+      label: `Planilha: ${line.sourceSheet}, linha ${line.sourceRow}`,
+      included: !skippedImportRows.has(line.key),
       customerName: line.preview.customerName || null,
       saleDate: isValidCalendarDate(line.preview.saleDate) ? line.preview.saleDate : null,
       productName: line.preview.productName,
       totalCents: line.preview.totalCents,
-    });
-
-    for (const line of candidates) {
-      const candidate = candidateForLine(line);
-      const existingMatches = findPossibleSaleDuplicates(candidate, historySales ?? []).map(({ record, fields }) => ({
-        label: record.duplicateLabel ?? 'Venda já registrada',
-        fields,
-      }));
-      const spreadsheetMatches = findPossibleSaleDuplicates(
-        candidate,
-        candidates.filter((other) => other.key !== line.key).map((other): SaleDuplicateRecord => ({
-          ...candidateForLine(other),
-          duplicateLabel: `Planilha: ${other.sourceSheet}, linha ${other.sourceRow}`,
-        })),
-      ).map(({ record, fields }) => ({ label: record.duplicateLabel ?? 'Outra linha da planilha', fields }));
-      if (existingMatches.length || spreadsheetMatches.length) {
-        noticesByKey.set(line.key, [...existingMatches, ...spreadsheetMatches]);
-      }
-    }
-    return noticesByKey;
-  }, [importedLines, historySales]);
+    })), historySales ?? []);
+  }, [importedLines, historySales, skippedImportRows]);
   const selectedImportLines = useMemo(() => {
     const selectedSheets = new Set((importWorkspace?.sheets ?? []).filter((sheet) => sheet.selected).map((sheet) => sheet.name));
     return importedLines.filter((line) => line.kind !== 'auxiliary' && !line.alreadyImported
       && selectedSheets.has(line.sourceSheet) && !skippedImportRows.has(line.key));
   }, [importWorkspace, importedLines, skippedImportRows]);
   const validImportRows = useMemo(() => selectedImportLines.flatMap((line) => {
-    if (!line.value) return [];
-    const normalizedName = line.value.productName ? normalizeProductName(line.value.productName) : null;
+    const value = line.value;
+    if (!value) return [];
+    const normalizedName = value.productName ? normalizeProductName(value.productName) : null;
     const canonical = normalizedName
       ? products.find((product) => productNameKey(product.name) === productNameKey(normalizedName))
       : null;
     return [{
-      customerName: line.value.customerName,
-      saleDate: line.value.saleDate,
-      totalCents: line.value.totalCents,
+      customerName: value.customerName,
+      saleDate: value.saleDate,
+      totalCents: value.totalCents,
       productName: canonical?.name ?? normalizedName ?? null,
-      notes: line.value.notes,
-      sourceSheet: line.value.sourceSheet,
-      sourceRow: line.value.sourceRow,
+      sourceSheet: value.sourceSheet,
+      sourceRow: value.sourceRow,
     }];
   }), [selectedImportLines, products]);
   const pendingImportRows = useMemo(() => selectedImportLines.flatMap((line) => {
@@ -567,7 +552,7 @@ export default function SalesManagement() {
       productName: line.draftValue.productName,
       totalCents: line.draftValue.totalCents,
       amountText: line.draftValue.amountText,
-      notes: line.draftValue.notes,
+      notes: null,
       sourceSheet: line.draftValue.sourceSheet,
       sourceRow: line.draftValue.sourceRow,
     }];
@@ -823,6 +808,15 @@ export default function SalesManagement() {
     }
   }
 
+  function setImportRowIncluded(key: string, included: boolean) {
+    setSkippedImportRows((current) => {
+      const next = new Set(current);
+      if (included) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
   async function commitImport() {
     if (!importWorkspace || importMappingIncomplete
       || (!validImportRows.length && !pendingImportRows.length) || importTotalTooLarge
@@ -1016,7 +1010,7 @@ export default function SalesManagement() {
 
   const form = useForm<SaleFormValues>({
     resolver: zodResolver(saleFormSchema),
-    defaultValues: { saleDate: todayLocal(), productName: '', quantity: '1', unitAmount: '', customerName: '', notes: '' },
+    defaultValues: { saleDate: todayLocal(), productName: '', modalityId: '', quantity: '1', unitAmount: '', customerName: '', notes: '' },
   });
   const quantityInput = form.watch('quantity') || '';
   const customerInput = form.watch('customerName') || '';
@@ -1042,7 +1036,7 @@ export default function SalesManagement() {
   function resetForm() {
     pendingSaleKey.current = null;
     setEditing(null);
-    form.reset({ saleDate: todayLocal(), productName: '', quantity: '1', unitAmount: '', customerName: '', notes: '' });
+    form.reset({ saleDate: todayLocal(), productName: '', modalityId: '', quantity: '1', unitAmount: '', customerName: '', notes: '' });
   }
 
   function startEditing(sale: Sale) {
@@ -1052,6 +1046,12 @@ export default function SalesManagement() {
     form.reset({
       saleDate: sale.saleDate,
       productName: sale.productName,
+      modalityId: sale.modalityOverride
+        ? sale.modalityId ?? ''
+        : products?.find((product) =>
+            product.id === sale.productId ||
+            productNameKey(product.name) === productNameKey(sale.productName),
+          )?.modalityId ?? '',
       quantity: String(sale.quantity),
       unitAmount: `${Math.floor(sale.unitAmountCents / 100)},${String(sale.unitAmountCents % 100).padStart(2, '0')}`,
       customerName: sale.customerName ?? '',
@@ -1069,6 +1069,7 @@ export default function SalesManagement() {
     const input: SaleInput = {
       saleDate: values.saleDate,
       productName: canonical?.name ?? cleanedName,
+      modalityId: values.modalityId || null,
       quantity: Number(values.quantity),
       unitAmountCents: parseBrlCents(values.unitAmount) ?? 0,
       customerName: values.customerName.trim().replace(/\s+/g, ' ') || null,
@@ -1202,11 +1203,28 @@ export default function SalesManagement() {
                 <Field name="saleDate" label="Data da venda" type="date" testId="input-sale-date" />
                 <div className="col-span-2">
                   <Field name="productName" label="Plano ou produto" placeholder="Ex.: Plano Essencial" testId="input-sale-product" autoComplete="off" suggestions={activeProducts.map((product) => product.name)} suggestionTitle="Produtos cadastrados" onValueChange={(value) => {
-                    if (form.getValues('unitAmount')) return;
                     const matched = activeProducts.find((product) => productNameKey(product.name) === productNameKey(value));
-                    if (matched) form.setValue('unitAmount', formatCentsInput(matched.suggestedPriceCents), { shouldValidate: true });
+                    form.setValue('modalityId', matched?.modalityId ?? '', { shouldValidate: true });
+                    if (matched && !form.getValues('unitAmount')) {
+                      form.setValue('unitAmount', formatCentsInput(matched.suggestedPriceCents), { shouldValidate: true });
+                    }
                   }} />
                   <p className="mt-1 px-1 text-[10px] leading-4 text-[#817b89]">Um nome novo será cadastrado em Produtos ao confirmar a venda.</p>
+                </div>
+                <div className="col-span-2">
+                  <FormField name="modalityId" render={({ field }) => (
+                    <FormItem className="space-y-1.5">
+                      <FormLabel className="text-[11px] font-bold text-[#665f70]">Modalidade do Check-in <span className="font-medium text-[#9e98a5]">· opcional</span></FormLabel>
+                      <FormControl>
+                        <select {...field} value={field.value ?? ''} data-testid="select-sale-modality" className="h-11 w-full rounded-xl border border-[#e7e2ea] bg-white px-3.5 text-sm text-[#342d43] outline-none focus:border-[#9477bf]">
+                          <option value="">Sem modalidade</option>
+                          {(occupancyModalities ?? []).map((modality) => <option key={modality.id} value={modality.id}>{modality.name}</option>)}
+                        </select>
+                      </FormControl>
+                      <p className="text-[10px] leading-4 text-[#8a8491]">Ao escolher um produto vinculado, a modalidade é sugerida. Você pode alterar ou remover o vínculo.</p>
+                      {areModalitiesError && <p role="status" className="text-[10px] text-[#9c483f]">As modalidades não carregaram; a venda ainda pode ser salva sem vínculo. <button type="button" onClick={() => void refetchModalities()} className="font-bold underline" data-testid="button-retry-sale-modalities">Tentar novamente</button></p>}
+                    </FormItem>
+                  )} />
                 </div>
                 <Field name="quantity" label="Quantidade" type="number" min="1" step="1" inputMode="numeric" placeholder="1" testId="input-sale-quantity" />
                 <Field name="unitAmount" label="Valor unitário" type="text" inputMode="decimal" placeholder="0,00" testId="input-sale-unit-amount" />
@@ -1664,7 +1682,7 @@ export default function SalesManagement() {
         <DialogContent className="max-w-4xl border-[#e7e1e9] bg-[#fffefc] p-5 sm:rounded-[24px] md:p-6">
           <DialogHeader className="text-left">
             <DialogTitle className="text-lg font-extrabold tracking-[-.035em] text-[#332d40]">Importar vendas</DialogTitle>
-            <DialogDescription className="text-xs leading-5 text-[#827b8b]">Mapeie as colunas, revise cada linha e confirme antes de registrar os dados.</DialogDescription>
+            <DialogDescription className="text-xs leading-5 text-[#827b8b]">Identificamos cliente, data, plano/produto e valor. Colunas extras são ignoradas; produtos novos só entram no cadastro depois da confirmação.</DialogDescription>
           </DialogHeader>
           {importError && <p className="rounded-xl bg-[#fff0ed] px-3.5 py-2.5 text-xs font-semibold text-[#9c483f]" role="alert" data-testid="status-import-error">{importError}</p>}
           {importFeedback && <p role="status" className="rounded-xl bg-[#eff6e5] px-3.5 py-2.5 text-xs text-[#55772c]">{importFeedback}</p>}
@@ -1716,7 +1734,6 @@ export default function SalesManagement() {
                     { field: 'saleDate', label: 'Data da venda · essencial' },
                     { field: 'totalAmount', label: 'Valor da venda · essencial' },
                     { field: 'productName', label: 'Plano/produto · opcional' },
-                    { field: 'notes', label: 'Observações · opcional' },
                   ] as Array<{ field: SalesImportField; label: string }>).map(({ field, label }) => {
                     const selectedColumn = (blockIndex === 0 ? sheet.mapping : block.mapping)[field];
                     const rawSample = selectedColumn === null ? '' : sheet.rows.find((row) =>
@@ -1780,12 +1797,7 @@ export default function SalesManagement() {
                     const duplicateNotices = importDuplicateNotices.get(line.key) ?? [];
                     return <tr key={line.key} className={line.value ? 'bg-white' : 'bg-[#fffaf9]'} data-testid={`row-import-${idSuffix}`}>
                       <td className="px-3 py-2.5">
-                        <input type="checkbox" disabled={line.kind === 'auxiliary' || line.alreadyImported || busy} checked={line.kind !== 'auxiliary' && !line.alreadyImported && line.sheetSelected && !excluded} onChange={(event) => setSkippedImportRows((current) => {
-                          const next = new Set(current);
-                          if (event.target.checked) next.delete(line.key);
-                          else next.add(line.key);
-                          return next;
-                        })} aria-label={`Incluir linha ${line.sourceRow} da aba ${line.sourceSheet}`} data-testid={`checkbox-import-include-${idSuffix}`} className="h-4 w-4 accent-[#7656b8]" />
+                        <input type="checkbox" disabled={line.kind === 'auxiliary' || line.alreadyImported || busy} checked={line.kind !== 'auxiliary' && !line.alreadyImported && line.sheetSelected && !excluded} onChange={(event) => setImportRowIncluded(line.key, event.target.checked)} aria-label={`${duplicateNotices.length ? 'Importar mesmo assim' : 'Incluir'} linha ${line.sourceRow} da aba ${line.sourceSheet}`} data-testid={`checkbox-import-include-${idSuffix}`} className="h-4 w-4 accent-[#7656b8]" />
                       </td>
                       <td className="px-3 py-2.5 text-[#4b4356]">{line.sourceSheet} · {line.sourceRow}{line.source.hidden && <span className="block text-[9px]">Linha oculta/filtro — conteúdo incluído</span>}</td>
                       <td className="px-3 py-2.5 text-[#4b4356]">{line.preview.customerName || '—'}</td>
@@ -1809,6 +1821,10 @@ export default function SalesManagement() {
                             ))}
                           </ul>
                           {duplicateNotices.length > 2 && <span className="mt-0.5 block">+ {duplicateNotices.length - 2} correspondência(s)</span>}
+                          <div className="mt-1.5 flex flex-wrap gap-1.5">
+                            <button type="button" aria-pressed={!excluded} disabled={busy} onClick={() => setImportRowIncluded(line.key, true)} className={`rounded-md px-2 py-1 font-bold ${excluded ? 'bg-white text-[#775624]' : 'bg-[#7656b8] text-white'}`} data-testid={`button-import-duplicate-keep-${idSuffix}`}>Importar mesmo assim</button>
+                            <button type="button" aria-pressed={excluded} disabled={busy} onClick={() => setImportRowIncluded(line.key, false)} className={`rounded-md px-2 py-1 font-bold ${excluded ? 'bg-[#775624] text-white' : 'bg-white text-[#775624]'}`} data-testid={`button-import-duplicate-ignore-${idSuffix}`}>Ignorar esta linha</button>
+                          </div>
                         </div>}
                         <ImportSourceDetails source={line.source} />
                       </td>

@@ -11,6 +11,9 @@ export interface Sale {
   id: string;
   /** @nullable */
   productId: string | null;
+  /** @nullable */
+  modalityId: string | null;
+  modalityOverride: boolean;
   saleDate: string;
   productName: string;
   quantity: number;

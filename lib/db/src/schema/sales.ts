@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   check,
   date,
   index,
@@ -14,6 +15,7 @@ import {
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { productsTable } from "./products";
+import { occupancyModalitiesTable } from "./occupancy-modalities";
 
 export const salesTable = pgTable(
   "sales",
@@ -24,6 +26,10 @@ export const salesTable = pgTable(
     productId: uuid("product_id").references(() => productsTable.id, {
       onDelete: "restrict",
     }),
+    modalityId: uuid("modality_id").references(() => occupancyModalitiesTable.id, {
+      onDelete: "set null",
+    }),
+    modalityOverride: boolean("modality_override").notNull().default(false),
     saleDate: date("sale_date", { mode: "string" }).notNull(),
     productName: text("product_name").notNull(),
     quantity: integer("quantity").notNull(),
@@ -54,6 +60,10 @@ export const salesTable = pgTable(
     ),
     productStatusIndex: index("sales_product_status_idx").on(
       table.productId,
+      table.status,
+    ),
+    modalityStatusIndex: index("sales_modality_status_idx").on(
+      table.modalityId,
       table.status,
     ),
     quantityPositive: check(

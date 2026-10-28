@@ -8,6 +8,9 @@
 
 export interface SalesBackupV1Record {
   id: string;
+  /** @nullable */
+  modalityId?: string | null;
+  modalityOverride?: boolean;
   saleDate: Date;
   /**
      * @minLength 1

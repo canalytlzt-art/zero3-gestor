@@ -45,7 +45,7 @@ test("detects headers after preface rows, preserves start dates, and reads multi
   assert.equal(sheet.ignoredSummaryRows, 1);
   assert.equal(sheet.selected, true);
   assert.equal(parsed.sheets[1].hidden, true);
-  assert.equal(parsed.sheets[1].selected, false);
+  assert.equal(parsed.sheets[1].selected, true, "valid hidden sheets are also selected by default");
 
   const first = mapSalesImportRow(sheet, sheet.rows[0]);
   assert.deepEqual(first.errors, []);
@@ -57,6 +57,7 @@ test("detects headers after preface rows, preserves start dates, and reads multi
     saleDate: "2026-10-03",
     totalCents: 123456,
     productName: null,
+    modalityName: null,
     notes: null,
   });
   const second = mapSalesImportRow(sheet, sheet.rows[1]);
@@ -80,6 +81,68 @@ test("detects headers after preface rows, preserves start dates, and reads multi
   assert.equal(noHeader.sheets[0].rows.length, 2, "manual mapping does not discard the first data row");
 });
 
+test("ignores modality and notes columns instead of adding extra import requirements", async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ["Cliente", "Data da venda", "Plano", "Valor", "Modalidade do Check-in"],
+    ["Ana", "2026-10-28", "Plano A", "R$ 100,00", "  Funcional   RX "],
+  ]), "Vendas");
+  const parsed = await parseSalesSpreadsheet(
+    XLSX.write(workbook, { type: "array", bookType: "xlsx" }) as ArrayBuffer,
+    "modalidades.xlsx",
+  );
+  const sheet = parsed.sheets[0];
+  assert.equal(sheet.mapping.modalityName, null);
+  assert.equal(sheet.mapping.notes, null);
+  const result = mapSalesImportRow(sheet, sheet.rows[0]);
+  assert.equal(result.kind, "ready");
+  assert.equal(result.value?.productName, "Plano A");
+  assert.equal(result.value?.modalityName, null);
+  assert.equal(result.value?.notes, null);
+});
+
+test("auto-maps common sales aliases and ignores unrelated columns", async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ["Nome do aluno", "Data de início do contrato", "Nome do plano", "Valor pago", "Modalidade", "Observações", "Data de nascimento"],
+    ["Ana", "07/10/2026", "Plano X", "R$ 1.234,56", "Funcional", "Não importar", "07/10/1980"],
+  ]), "Vendas");
+  const parsed = await parseSalesSpreadsheet(
+    XLSX.write(workbook, { type: "array", bookType: "xlsx" }),
+    "aliases.xlsx",
+  );
+  const sheet = parsed.sheets[0];
+  assert.equal(sheet.mapping.customerName, 0);
+  assert.equal(sheet.mapping.saleDate, 1);
+  assert.equal(sheet.mapping.productName, 2);
+  assert.equal(sheet.mapping.totalAmount, 3);
+  assert.equal(sheet.mapping.modalityName, null);
+  assert.equal(sheet.mapping.notes, null);
+  assert.deepEqual(mapSalesImportRow(sheet, sheet.rows[0]).value, {
+    key: "Vendas:2",
+    sourceSheet: "Vendas",
+    sourceRow: 2,
+    customerName: "Ana",
+    saleDate: "2026-10-07",
+    totalCents: 123456,
+    productName: "Plano X",
+    modalityName: null,
+    notes: null,
+  });
+
+  const birthdayOnly = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(birthdayOnly, XLSX.utils.aoa_to_sheet([
+    ["Nome do cliente", "Plano", "Valor da venda", "Data de nascimento"],
+    ["Ana", "Plano X", 120, "15/06/1993"],
+  ]), "Sem data de venda");
+  const parsedBirthday = await parseSalesSpreadsheet(
+    XLSX.write(birthdayOnly, { type: "array", bookType: "xlsx" }),
+    "data-extra.xlsx",
+  );
+  assert.equal(parsedBirthday.sheets[0].mapping.saleDate, null);
+  assert.equal(mapSalesImportRow(parsedBirthday.sheets[0], parsedBirthday.sheets[0].rows[0]).kind, "pending");
+});
+
 test("keeps customer optional while missing date or amount creates an editable non-financial draft", async () => {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
@@ -99,7 +162,7 @@ test("keeps customer optional while missing date or amount creates an editable n
   assert.equal(missingCustomer.kind, "ready");
   assert.equal(missingCustomer.needsVerification, true);
   assert.equal(missingCustomer.value?.customerName, null);
-  assert.equal(missingCustomer.value?.notes, "Venda sem nome");
+  assert.equal(missingCustomer.value?.notes, null, "unmapped notes columns are ignored");
   assert.equal(missingCustomer.draftValue, null);
 
   assert.equal(missingDate.kind, "pending");

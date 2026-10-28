@@ -285,6 +285,107 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
     });
   });
 
+  it("uses a sale's modality override in D1 reports while preserving product defaults", async () => {
+    const suffix = crypto.randomUUID();
+    const modalityA = crypto.randomUUID();
+    const modalityB = crypto.randomUUID();
+    const now = new Date().toISOString();
+    await workerEnv.DB.batch(([
+      ["Boxe", modalityA],
+      ["Pilates", modalityB],
+    ] as const).map(([name, id]) => workerEnv.DB.prepare(
+      `INSERT INTO occupancy_modalities
+        (id, name, normalized_name, version, created_at, updated_at)
+       VALUES (?, ?, ?, 1, ?, ?)`,
+    ).bind(id, name, `${String(name).toLocaleLowerCase("pt-BR")}-${id}`, now, now)));
+
+    const productName = `Produto modalidade ${suffix}`;
+    const product = await callSales("/products", "POST", {
+      name: productName,
+      suggestedPriceCents: 0,
+      isActive: true,
+      modalityId: modalityA,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(product.response.status).toBe(201);
+
+    const year = String(2000 + Math.floor(Math.random() * 7000));
+    const saleDate = `${year}-05-15`;
+    const createSale = (modality: string | null | undefined, amount: number) =>
+      callSales("/sales", "POST", {
+        saleDate,
+        productName,
+        quantity: 1,
+        unitAmountCents: amount,
+        notes: null,
+        ...(modality === undefined ? {} : { modalityId: modality }),
+        idempotencyKey: crypto.randomUUID(),
+      });
+    const inherited = await createSale(undefined, 10_000);
+    const overridden = await createSale(modalityB, 3_000);
+    const explicitlyUnlinked = await createSale(null, 2_000);
+    expect(inherited.payload).toMatchObject({ modalityId: null, modalityOverride: false });
+    expect(overridden.payload).toMatchObject({ modalityId: modalityB, modalityOverride: true });
+    expect(explicitlyUnlinked.payload).toMatchObject({ modalityId: null, modalityOverride: true });
+
+    const scoreboardFor = async (modalityId: string) => {
+      const response = await callSales(
+        `/sales/scoreboard?fromDate=${saleDate}&toDate=${saleDate}&modalityId=${modalityId}`,
+      );
+      expect(response.response.status).toBe(200);
+      return response.payload.totals;
+    };
+    expect(await scoreboardFor(modalityA)).toMatchObject({ quantity: 1, salesCents: 10_000 });
+    expect(await scoreboardFor(modalityB)).toMatchObject({ quantity: 1, salesCents: 3_000 });
+
+    const edited = await callSales(`/sales/${overridden.payload.id}`, "PATCH", {
+      saleDate,
+      productName,
+      quantity: 1,
+      unitAmountCents: 3_000,
+      customerName: null,
+      notes: null,
+      modalityId: modalityA,
+      expectedVersion: 1,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(edited.response.status).toBe(200);
+    expect(edited.payload).toMatchObject({ modalityId: modalityA, modalityOverride: true });
+    expect(await scoreboardFor(modalityB)).toMatchObject({ quantity: 0, salesCents: 0 });
+    expect(await scoreboardFor(modalityA)).toMatchObject({ quantity: 2, salesCents: 13_000 });
+
+    const importBody = {
+      fileHash: suffix.replace(/-/g, "").padEnd(64, "a").slice(0, 64),
+      filename: "vendas-modalidade.xlsx",
+      rows: [{
+        saleDate,
+        productName,
+        modalityId: modalityB,
+        customerName: "Cliente importado",
+        totalCents: 1_700,
+        notes: null,
+        sourceSheet: "Maio",
+        sourceRow: 2,
+      }],
+    };
+    const imported = await callSales("/sales/import", "POST", importBody);
+    expect(imported.response.status).toBe(201);
+    expect(imported.payload.sales[0]).toMatchObject({
+      modalityId: modalityB,
+      modalityOverride: true,
+      totalCents: 1_700,
+    });
+    const replayedImport = await callSales("/sales/import", "POST", importBody);
+    expect(replayedImport.response.status).toBe(200);
+    expect(replayedImport.payload.skippedCount).toBe(1);
+    expect(await scoreboardFor(modalityB)).toMatchObject({ quantity: 1, salesCents: 1_700 });
+
+    const all = await callSales(`/sales/scoreboard?fromDate=${saleDate}&toDate=${saleDate}`);
+    expect(all.payload.totals).toMatchObject({ quantity: 4, salesCents: 16_700 });
+    expect(all.payload.products.filter((row: { productName: string }) => row.productName === productName))
+      .toHaveLength(3);
+  });
+
   it("persists the sales, refunds, products, goals, and occupancy Worker routes in D1", async () => {
     const unique = crypto.randomUUID();
     const productName = `Worker route ${unique}`;

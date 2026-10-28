@@ -117,6 +117,8 @@ class MemorySalesD1 implements D1Database {
           : [];
       });
       results = [...draftOrigins, ...saleOrigins];
+    } else if (normalized === "select id from occupancy_modalities") {
+      results = [];
     } else if (normalized.startsWith("select * from sales_pending_drafts where status='pending'")) {
       results = [...this.pendingDrafts.values()].filter((draft) => draft.status === "pending");
     } else if (normalized.startsWith("select * from sales where id in")) {
@@ -204,6 +206,8 @@ class MemorySalesD1 implements D1Database {
         productName,
         unitAmountCents,
         totalCents,
+        modalityId,
+        modalityOverride,
         customerName,
         notes,
         createdBy,
@@ -219,6 +223,8 @@ class MemorySalesD1 implements D1Database {
         quantity: 1,
         unit_amount_cents: unitAmountCents,
         total_cents: totalCents,
+        modality_id: modalityId,
+        modality_override: modalityOverride,
         customer_name: customerName,
         notes,
         status: "active",

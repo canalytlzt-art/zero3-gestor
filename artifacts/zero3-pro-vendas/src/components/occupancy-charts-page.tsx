@@ -16,6 +16,7 @@ import {
 } from '@workspace/api-client-react';
 import type { GetOccupancyRecordsParams, GetSalesScoreboardParams, OccupancyModality } from '@workspace/api-client-react';
 import { ChartContainer } from '@/components/ui/chart';
+import { DownloadPdfButton, PdfPrintHeader, PdfPrintTable } from '@/components/dashboard-pdf-tools';
 import { PurpleSelect } from '@/components/ui/purple-select';
 import { buildFinancialChartAnalytics } from '@/lib/financial-chart-data';
 import { buildOccupancyChartAnalytics, type OccupancyChartSupportRow } from '@/lib/occupancy-chart-data';
@@ -252,10 +253,23 @@ function FinancialCharts({ onOccupancy, onContracts, onComplete }: { onOccupancy
   }, [analytics, timelineMode]);
   const chartBox = 'rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5';
   const money = (value: number) => value < 0 ? `−${formatCents(Math.abs(value))}` : formatCents(value);
+  const exportPeriod = periodMode === 'current' ? formatMonthKey(currentMonth)
+    : periodMode === 'single' ? formatMonthKey(singleMonth)
+      : periodMode === 'multiple' ? months.map(formatMonthKey).join(', ')
+        : periodMode === 'quarter' ? `${selectedQuarter}º trimestre de ${selectedYear}`
+          : periodMode === 'year' ? `Ano ${selectedYear}`
+            : periodMode === 'range' ? `${fromDate || '—'} a ${toDate || '—'}`
+              : 'Todo o histórico';
+  const exportFilters = [
+    `Produto: ${selectedProduct?.name ?? (productId ? 'Produto selecionado' : 'Todos')}`,
+    `Modalidade: ${modalities.find((item) => item.id === modalityId)?.name ?? (modalityId ? 'Modalidade selecionada' : 'Todas')}`,
+    `Dias: ${weekdays.length ? weekdays.map(getWeekdayNameForIsoDay).join(', ') : 'Todos'}`,
+    `Participação: ${shareBy === 'modality' ? 'modalidade' : 'produto'}`,
+  ].join(' · ');
 
   return (
-    <section className="space-y-5" aria-label="Gráficos financeiros" data-testid="page-financial-charts">
-      <div className="flex flex-col justify-between gap-4 rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:flex-row sm:items-center sm:px-6">
+    <section className="pdf-report-root space-y-5" aria-label="Gráficos financeiros" data-testid="page-financial-charts">
+      <div data-pdf-hide-on-export className="flex flex-col justify-between gap-4 rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:flex-row sm:items-center sm:px-6">
         <div>
           <p className="text-[9px] font-bold uppercase tracking-[.14em] text-[#8a8491]">zero3 pro <span className="mx-1 text-[#b2abb8]">/</span> gráficos</p>
           <h1 className="mt-1 font-[family-name:var(--app-font-serif)] text-3xl font-extrabold leading-none tracking-[-.07em] text-[#342d40] sm:text-[2.6rem]">Faturamento<span className="ml-1 text-[#a9d75a]">.</span></h1>
@@ -269,7 +283,7 @@ function FinancialCharts({ onOccupancy, onContracts, onComplete }: { onOccupancy
         </div>
       </div>
 
-      <section className={chartBox} data-testid="panel-financial-filters">
+      <section className={chartBox} data-testid="panel-financial-filters" data-pdf-hide-on-export>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2"><SlidersHorizontal size={15} className="text-[#8c73b4]" /><h2 className="text-sm font-extrabold text-[#443d50]">Recorte do Scoreboard</h2></div>
           <button type="button" onClick={refresh} disabled={refreshing} className="inline-flex h-9 items-center gap-2 rounded-full border border-[#e7e2ea] px-3 text-xs font-bold text-[#62586d] transition hover:bg-[#f7f3f9] disabled:opacity-60" data-testid="button-refresh-financial-charts">
@@ -337,33 +351,48 @@ function FinancialCharts({ onOccupancy, onContracts, onComplete }: { onOccupancy
       {scoreboard.isLoading || productsQuery.isLoading || modalitiesQuery.isLoading || goalsQuery.isLoading ? <div className="grid gap-5 lg:grid-cols-2" aria-label="Carregando dados financeiros" data-testid="loading-financial-charts">{[0, 1, 2, 3].map((item) => <div key={item} className="h-[300px] animate-pulse rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-5"><div className="h-4 w-36 rounded bg-[#eee9f1]" /><div className="mt-7 h-56 rounded-2xl bg-[#f5f2f6]" /></div>)}</div>
         : (scoreboard.isError || productsQuery.isError || modalitiesQuery.isError || goalsQuery.isError) ? <div className="rounded-[22px] border border-[#ecd5d4] bg-[#fff9f8] p-6" role="alert" data-testid="error-financial-charts"><p className="font-bold text-[#673d3c]">Não foi possível carregar os dados financeiros.</p><p className="mt-1 text-xs text-[#806462]">Confira a conexão com o Scoreboard e tente novamente.</p><button type="button" onClick={refresh} className="mt-4 rounded-full bg-[#65479c] px-4 py-2 text-xs font-bold text-white" data-testid="button-retry-financial-charts">Tentar novamente</button></div>
           : !invalid && analytics && <>
-            {!analytics.reconcilesByProduct || !analytics.reconcilesByMonth ? <p className="flex items-start gap-2 rounded-xl border border-[#ecd7aa] bg-[#fff8e9] px-4 py-3 text-xs leading-5 text-[#765c31]" role="status" data-testid="warning-financial-reconciliation"><CircleAlert size={15} className="mt-0.5 shrink-0" />Os agrupamentos por produto ou mês não reconciliam com os totais oficiais deste recorte. Os totais do Scoreboard permanecem como referência.</p> : null}
-            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Totais financeiros do período" data-testid="summary-financial-totals">
+            {!analytics.reconcilesByProduct || !analytics.reconcilesByMonth ? <p className="flex items-start gap-2 rounded-xl border border-[#ecd7aa] bg-[#fff8e9] px-4 py-3 text-xs leading-5 text-[#765c31]" role="status" data-testid="warning-financial-reconciliation" data-pdf-hide-on-export><CircleAlert size={15} className="mt-0.5 shrink-0" />Os agrupamentos por produto ou mês não reconciliam com os totais oficiais deste recorte. Os totais do Scoreboard permanecem como referência.</p> : null}
+            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Totais financeiros do período" data-testid="summary-financial-totals" data-pdf-hide-on-export>
               {[['Vendas registradas', money(analytics.totals.salesCents), 'bruto'], ['Estornos', money(analytics.totals.refundCents), 'estornos'], ['Líquido após estornos', money(analytics.totals.netCents), 'líquido'], ['Unidades vendidas', analytics.totals.quantity.toLocaleString('pt-BR'), 'unidades']].map(([label, value, id]) => <article key={id} className="rounded-2xl border border-[#e9e4eb] bg-[#fffefc] px-4 py-4" data-testid={`metric-financial-${id}`}><p className="text-[10px] font-bold uppercase tracking-[.09em] text-[#837b8b]">{label}</p><p className="mt-2 text-xl font-extrabold tracking-[-.04em] tabular-nums text-[#342d40]" data-testid={`text-financial-${id}`}>{value}</p></article>)}
             </section>
             <section className="grid gap-5 xl:grid-cols-2">
-              <article className={chartBox} data-testid="chart-financial-modality"><SectionHeading eyebrow="vendas brutas" title="Por modalidade" detail="R$ registrados no período" />
-                {analytics.byModality.length ? <ChartContainer role="img" aria-label="Colunas de vendas brutas por modalidade, em reais" config={{ sales: { label: 'Vendas brutas', color: '#7655a8' } }} className="h-[300px] w-full"><BarChart data={analytics.byModality} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}><CartesianGrid vertical={false} stroke="#eee9f1" /><XAxis dataKey="name" interval="preserveStartEnd" tick={{ fill: palette.ink, fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis tickFormatter={(value) => money(Number(value))} tick={{ fill: palette.muted, fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip formatter={(value) => money(Number(value))} labelStyle={{ color: palette.ink }} /><Bar dataKey="salesCents" name="Vendas brutas" fill="#7655a8" radius={[6, 6, 0, 0]} maxBarSize={42} /></BarChart></ChartContainer> : <ChartEmpty title="Sem vendas neste recorte" detail="Não há vendas brutas registradas por modalidade." />}
+              <article className={chartBox} data-testid="chart-financial-modality" data-pdf-panel="financial-modality">
+                <PdfPrintHeader title="Faturamento por modalidade" period={exportPeriod} filters={exportFilters} />
+                <div className="flex items-start justify-between gap-2"><SectionHeading eyebrow="vendas brutas" title="Por modalidade" detail="R$ registrados no período" /><DownloadPdfButton scope="financial-modality" title="Faturamento por modalidade" period={exportPeriod} compact disabled={invalid || !analytics} /></div>
+                {analytics.byModality.length ? <ChartContainer role="img" aria-label="Colunas de vendas brutas por modalidade, em reais" config={{ sales: { label: 'Vendas brutas', color: '#7655a8' } }} className="dashboard-pdf-chart h-[300px] w-full"><BarChart data={analytics.byModality} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}><CartesianGrid vertical={false} stroke="#eee9f1" /><XAxis dataKey="name" interval="preserveStartEnd" tick={{ fill: palette.ink, fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis tickFormatter={(value) => money(Number(value))} tick={{ fill: palette.muted, fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip formatter={(value) => money(Number(value))} labelStyle={{ color: palette.ink }} /><Bar dataKey="salesCents" name="Vendas brutas" fill="#7655a8" radius={[6, 6, 0, 0]} maxBarSize={42} /></BarChart></ChartContainer> : <ChartEmpty title="Sem vendas neste recorte" detail="Não há vendas brutas registradas por modalidade." />}
+                <PdfPrintTable headers={['Modalidade', 'Faturamento bruto']} rows={analytics.byModality.map((row) => [row.name, money(row.salesCents)])} summary={['Total', money(analytics.totals.salesCents)]} />
               </article>
-              <article className={chartBox} data-testid="chart-financial-product"><SectionHeading eyebrow="vendas brutas" title="Por produto" detail="R$ registrados no período" />
-                {analytics.byProduct.length ? <ChartContainer role="img" aria-label="Colunas de vendas brutas por produto, em reais" config={{ sales: { label: 'Vendas brutas', color: '#7655a8' } }} className="h-[300px] w-full"><BarChart data={analytics.byProduct} margin={{ top: 8, right: 12, bottom: 70, left: 8 }}><CartesianGrid vertical={false} stroke="#eee9f1" /><XAxis dataKey="name" interval="preserveStartEnd" angle={-32} textAnchor="end" height={78} tick={{ fill: palette.ink, fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis tickFormatter={(value) => money(Number(value))} tick={{ fill: palette.muted, fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip formatter={(value) => money(Number(value))} labelStyle={{ color: palette.ink }} /><Bar dataKey="salesCents" name="Vendas brutas" fill="#7655a8" radius={[6, 6, 0, 0]} maxBarSize={42} /></BarChart></ChartContainer> : <ChartEmpty title="Sem vendas neste recorte" detail="Não há produtos com vendas registradas." />}
+              <article className={chartBox} data-testid="chart-financial-product" data-pdf-panel="financial-product">
+                <PdfPrintHeader title="Faturamento por produto" period={exportPeriod} filters={exportFilters} />
+                <div className="flex items-start justify-between gap-2"><SectionHeading eyebrow="vendas brutas" title="Por produto" detail="R$ registrados no período" /><DownloadPdfButton scope="financial-product" title="Faturamento por produto" period={exportPeriod} compact disabled={invalid || !analytics} /></div>
+                {analytics.byProduct.length ? <ChartContainer role="img" aria-label="Colunas de vendas brutas por produto, em reais" config={{ sales: { label: 'Vendas brutas', color: '#7655a8' } }} className="dashboard-pdf-chart h-[300px] w-full"><BarChart data={analytics.byProduct} margin={{ top: 8, right: 12, bottom: 70, left: 8 }}><CartesianGrid vertical={false} stroke="#eee9f1" /><XAxis dataKey="name" interval="preserveStartEnd" angle={-32} textAnchor="end" height={78} tick={{ fill: palette.ink, fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis tickFormatter={(value) => money(Number(value))} tick={{ fill: palette.muted, fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip formatter={(value) => money(Number(value))} labelStyle={{ color: palette.ink }} /><Bar dataKey="salesCents" name="Vendas brutas" fill="#7655a8" radius={[6, 6, 0, 0]} maxBarSize={42} /></BarChart></ChartContainer> : <ChartEmpty title="Sem vendas neste recorte" detail="Não há produtos com vendas registradas." />}
+                <PdfPrintTable headers={['Produto', 'Faturamento bruto']} rows={analytics.byProduct.map((row) => [row.name, money(row.salesCents)])} summary={['Total', money(analytics.totals.salesCents)]} />
               </article>
             </section>
             <section className="grid gap-5 xl:grid-cols-[1.25fr_.75fr]">
               <article className={chartBox} data-testid="chart-financial-monthly">
-                <SectionHeading eyebrow="movimento no tempo" title="Vendas, estornos e líquido" detail="Colunas agrupadas · R$" />
-                <div className="mb-3 flex flex-wrap gap-1 rounded-full bg-[#f3f0f5] p-1" role="group" aria-label="Granularidade da evolução financeira" data-testid="group-financial-timeline">
+                <div data-pdf-panel="financial-timeline">
+                <PdfPrintHeader title="Vendas, estornos e líquido" period={exportPeriod} filters={`${exportFilters} · Granularidade: ${timelineMode === 'daily' ? 'diária' : timelineMode === 'weekly' ? 'semanal' : 'mensal'}`} />
+                <div className="flex items-start justify-between gap-2"><SectionHeading eyebrow="movimento no tempo" title="Vendas, estornos e líquido" detail="Colunas agrupadas · R$" /><DownloadPdfButton scope="financial-timeline" title="Vendas, estornos e líquido" period={exportPeriod} compact disabled={invalid || !analytics} /></div>
+                <div className="mb-3 flex flex-wrap gap-1 rounded-full bg-[#f3f0f5] p-1" role="group" aria-label="Granularidade da evolução financeira" data-testid="group-financial-timeline" data-pdf-hide-on-export>
                   {(['daily', 'weekly', 'monthly'] as const).map((mode) => <button key={mode} type="button" aria-pressed={timelineMode === mode} onClick={() => setTimelineMode(mode)} className={`rounded-full px-3 py-1.5 text-[10px] font-bold ${timelineMode === mode ? 'bg-[#65479c] text-white' : 'text-[#716879]'}`} data-testid={`button-financial-timeline-${mode}`}>{mode === 'daily' ? 'Diária' : mode === 'weekly' ? 'Semanal' : 'Mensal'}</button>)}
                 </div>
-                {timelineRows.length ? <ChartContainer role="img" aria-label={`Vendas, estornos e líquido por período ${timelineMode === 'daily' ? 'diário' : timelineMode === 'weekly' ? 'semanal' : 'mensal'}, em reais`} config={{ salesCents: { label: 'Vendas', color: '#7655a8' }, refundCents: { label: 'Estornos', color: '#d18b57' }, netCents: { label: 'Líquido', color: '#6f9d45' } }} className="h-[310px] w-full"><BarChart data={timelineRows} margin={{ top: 6, right: 8, bottom: 4, left: 6 }}><CartesianGrid vertical={false} stroke="#eee9f1" /><XAxis dataKey="periodKey" interval="preserveStartEnd" tickFormatter={(value) => financialPeriodLabel(String(value), timelineMode)} tick={{ fill: palette.muted, fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis tickFormatter={(value) => money(Number(value))} tick={{ fill: palette.muted, fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip labelFormatter={(label) => financialPeriodLabel(String(label), timelineMode)} formatter={(value, name) => [money(Number(value)), String(name)]} /><Bar dataKey="salesCents" name="Vendas" fill="#7655a8" radius={[4, 4, 0, 0]} /><Bar dataKey="refundCents" name="Estornos" fill="#d18b57" radius={[4, 4, 0, 0]} /><Bar dataKey="netCents" name="Líquido" fill="#6f9d45" radius={[4, 4, 0, 0]} /></BarChart></ChartContainer> : <ChartEmpty title={`Sem dados ${timelineMode === 'daily' ? 'diários' : timelineMode === 'weekly' ? 'semanais' : 'mensais'}`} detail="O Scoreboard não retornou movimentações nesta granularidade e neste recorte." />}
+                {timelineRows.length ? <ChartContainer role="img" aria-label={`Vendas, estornos e líquido por período ${timelineMode === 'daily' ? 'diário' : timelineMode === 'weekly' ? 'semanal' : 'mensal'}, em reais`} config={{ salesCents: { label: 'Vendas', color: '#7655a8' }, refundCents: { label: 'Estornos', color: '#d18b57' }, netCents: { label: 'Líquido', color: '#6f9d45' } }} className="dashboard-pdf-chart h-[310px] w-full"><BarChart data={timelineRows} margin={{ top: 6, right: 8, bottom: 4, left: 6 }}><CartesianGrid vertical={false} stroke="#eee9f1" /><XAxis dataKey="periodKey" interval="preserveStartEnd" tickFormatter={(value) => financialPeriodLabel(String(value), timelineMode)} tick={{ fill: palette.muted, fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis tickFormatter={(value) => money(Number(value))} tick={{ fill: palette.muted, fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip labelFormatter={(label) => financialPeriodLabel(String(label), timelineMode)} formatter={(value, name) => [money(Number(value)), String(name)]} /><Bar dataKey="salesCents" name="Vendas" fill="#7655a8" radius={[4, 4, 0, 0]} /><Bar dataKey="refundCents" name="Estornos" fill="#d18b57" radius={[4, 4, 0, 0]} /><Bar dataKey="netCents" name="Líquido" fill="#6f9d45" radius={[4, 4, 0, 0]} /></BarChart></ChartContainer> : <ChartEmpty title={`Sem dados ${timelineMode === 'daily' ? 'diários' : timelineMode === 'weekly' ? 'semanais' : 'mensais'}`} detail="O Scoreboard não retornou movimentações nesta granularidade e neste recorte." />}
+                <PdfPrintTable headers={['Período', 'Vendas', 'Estornos', 'Líquido', 'Unidades']} rows={timelineRows.map((row) => [financialPeriodLabel(row.periodKey, timelineMode), money(row.salesCents), money(row.refundCents), money(row.netCents), row.quantity.toLocaleString('pt-BR')])} summary={['Total', money(analytics.totals.salesCents), money(analytics.totals.refundCents), money(analytics.totals.netCents), analytics.totals.quantity.toLocaleString('pt-BR')]} />
+                </div>
               </article>
-              <article className={chartBox} data-testid="chart-financial-share">
-                <div className="flex flex-wrap items-start justify-between gap-2"><SectionHeading eyebrow="composição das vendas" title="Participação no bruto" detail="Somente vendas acima de zero" /><div className="flex rounded-full bg-[#f3f0f5] p-1" role="group" aria-label="Agrupar participação por" data-testid="group-financial-share-mode"><button type="button" aria-pressed={shareBy === 'modality'} onClick={() => setShareBy('modality')} className={`rounded-full px-3 py-1.5 text-[10px] font-bold ${shareBy === 'modality' ? 'bg-[#65479c] text-white' : 'text-[#716879]'}`} data-testid="button-share-by-modality">Modalidade</button><button type="button" aria-pressed={shareBy === 'product'} onClick={() => setShareBy('product')} className={`rounded-full px-3 py-1.5 text-[10px] font-bold ${shareBy === 'product' ? 'bg-[#65479c] text-white' : 'text-[#716879]'}`} data-testid="button-share-by-product">Produto</button></div></div>
-                {shareData.length ? <><div className="h-[220px] w-full"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={shareData} dataKey="salesCents" nameKey="name" innerRadius="58%" outerRadius="82%" paddingAngle={2} stroke="none">{shareData.map((slice, index) => <Cell key={slice.key} fill={financeColors[index % financeColors.length]} />)}</Pie><Tooltip formatter={(value) => money(Number(value))} labelStyle={{ color: palette.ink }} /></PieChart></ResponsiveContainer></div><div className="flex flex-wrap gap-x-4 gap-y-2" data-testid="legend-financial-share">{shareData.map((slice, index) => <span key={slice.key} className="inline-flex items-center gap-1.5 text-[10px] text-[#62586d]" data-testid={`legend-financial-share-${slice.key}`}><i className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: financeColors[index % financeColors.length] }} />{slice.name}<b>{shareTotal ? ((slice.salesCents / shareTotal) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) : '0'}%</b></span>)}</div></> : <ChartEmpty title="Sem vendas positivas" detail="A participação considera apenas valores de vendas brutas maiores que zero." />}
+              <article className={chartBox} data-testid="chart-financial-share" data-pdf-panel="financial-share">
+                <PdfPrintHeader title="Participação no faturamento bruto" period={exportPeriod} filters={exportFilters} />
+                <div className="flex flex-wrap items-start justify-between gap-2"><SectionHeading eyebrow="composição das vendas" title="Participação no bruto" detail="Somente vendas acima de zero" /><div className="flex flex-wrap items-center gap-2"><div className="flex rounded-full bg-[#f3f0f5] p-1" role="group" aria-label="Agrupar participação por" data-testid="group-financial-share-mode" data-pdf-hide-on-export><button type="button" aria-pressed={shareBy === 'modality'} onClick={() => setShareBy('modality')} className={`rounded-full px-3 py-1.5 text-[10px] font-bold ${shareBy === 'modality' ? 'bg-[#65479c] text-white' : 'text-[#716879]'}`} data-testid="button-share-by-modality">Modalidade</button><button type="button" aria-pressed={shareBy === 'product'} onClick={() => setShareBy('product')} className={`rounded-full px-3 py-1.5 text-[10px] font-bold ${shareBy === 'product' ? 'bg-[#65479c] text-white' : 'text-[#716879]'}`} data-testid="button-share-by-product">Produto</button></div><DownloadPdfButton scope="financial-share" title="Participação no faturamento" period={exportPeriod} compact disabled={invalid || !analytics} /></div></div>
+                {shareData.length ? <><div className="dashboard-pdf-chart h-[220px] w-full"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={shareData} dataKey="salesCents" nameKey="name" innerRadius="58%" outerRadius="82%" paddingAngle={2} stroke="none">{shareData.map((slice, index) => <Cell key={slice.key} fill={financeColors[index % financeColors.length]} />)}</Pie><Tooltip formatter={(value) => money(Number(value))} labelStyle={{ color: palette.ink }} /></PieChart></ResponsiveContainer></div><div className="flex flex-wrap gap-x-4 gap-y-2" data-testid="legend-financial-share">{shareData.map((slice, index) => <span key={slice.key} className="inline-flex items-center gap-1.5 text-[10px] text-[#62586d]" data-testid={`legend-financial-share-${slice.key}`}><i className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: financeColors[index % financeColors.length] }} />{slice.name}<b>{shareTotal ? ((slice.salesCents / shareTotal) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) : '0'}%</b></span>)}</div></> : <ChartEmpty title="Sem vendas positivas" detail="A participação considera apenas valores de vendas brutas maiores que zero." />}
+                <PdfPrintTable headers={['Grupo', 'Faturamento bruto', 'Participação']} rows={shareData.map((row) => [row.name, money(row.salesCents), shareTotal ? `${(row.salesCents / shareTotal * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%` : '0%'])} summary={['Total', money(shareTotal), '100%']} />
               </article>
             </section>
-            <article className={chartBox} data-testid="chart-financial-quantity"><SectionHeading eyebrow="volume vendido" title="Unidades por produto" detail="Soma das quantidades registradas, não contagem de vendas" />
-              {analytics.byProduct.length ? <ChartContainer role="img" aria-label="Quantidade total de unidades vendidas por produto" config={{ quantity: { label: 'Unidades', color: '#6f9d45' } }} className="h-[300px] w-full"><BarChart data={analytics.byProduct} layout="vertical" margin={{ top: 4, right: 12, bottom: 4, left: 8 }}><CartesianGrid horizontal={false} stroke="#eee9f1" /><XAxis type="number" tickFormatter={(value) => Number(value).toLocaleString('pt-BR')} tick={{ fill: palette.muted, fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis type="category" dataKey="name" width={150} tick={{ fill: palette.ink, fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip formatter={(value) => [`${Number(value).toLocaleString('pt-BR')} unidades`, 'Quantidade']} labelStyle={{ color: palette.ink }} /><Bar dataKey="quantity" name="Unidades" fill="#6f9d45" radius={[0, 6, 6, 0]} maxBarSize={22} /></BarChart></ChartContainer> : <ChartEmpty title="Sem unidades neste recorte" detail="Não há quantidades registradas por produto." />}
+            <article className={chartBox} data-testid="chart-financial-quantity" data-pdf-panel="financial-quantity">
+              <PdfPrintHeader title="Unidades vendidas por produto" period={exportPeriod} filters={exportFilters} />
+              <div className="flex items-start justify-between gap-2"><SectionHeading eyebrow="volume vendido" title="Unidades por produto" detail="Soma das quantidades registradas, não contagem de vendas" /><DownloadPdfButton scope="financial-quantity" title="Unidades por produto" period={exportPeriod} compact disabled={invalid || !analytics} /></div>
+              {analytics.byProduct.length ? <ChartContainer role="img" aria-label="Quantidade total de unidades vendidas por produto" config={{ quantity: { label: 'Unidades', color: '#6f9d45' } }} className="dashboard-pdf-chart h-[300px] w-full"><BarChart data={analytics.byProduct} layout="vertical" margin={{ top: 4, right: 12, bottom: 4, left: 8 }}><CartesianGrid horizontal={false} stroke="#eee9f1" /><XAxis type="number" tickFormatter={(value) => Number(value).toLocaleString('pt-BR')} tick={{ fill: palette.muted, fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis type="category" dataKey="name" width={150} tick={{ fill: palette.ink, fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip formatter={(value) => [`${Number(value).toLocaleString('pt-BR')} unidades`, 'Quantidade']} labelStyle={{ color: palette.ink }} /><Bar dataKey="quantity" name="Unidades" fill="#6f9d45" radius={[0, 6, 6, 0]} maxBarSize={22} /></BarChart></ChartContainer> : <ChartEmpty title="Sem unidades neste recorte" detail="Não há quantidades registradas por produto." />}
+              <PdfPrintTable headers={['Produto', 'Unidades vendidas']} rows={analytics.byProduct.map((row) => [row.name, row.quantity.toLocaleString('pt-BR')])} summary={['Total', analytics.totals.quantity.toLocaleString('pt-BR')]} />
             </article>
             {productModalityConflict ? <p className="rounded-xl bg-[#f6f3f8] px-4 py-3 text-xs text-[#716879]" data-testid="status-financial-goal-unavailable">Meta não comparada: o produto não pertence à modalidade selecionada.</p> : modalityId && !productId ? <p className="rounded-xl bg-[#f6f3f8] px-4 py-3 text-xs text-[#716879]" data-testid="status-financial-goal-unavailable">Meta não exibida: o recorte por modalidade não corresponde a uma meta mensal geral ou por produto.</p> : productId && !selectedProduct ? <p className="rounded-xl bg-[#f6f3f8] px-4 py-3 text-xs text-[#716879]" data-testid="status-financial-goal-unavailable">Meta não exibida: o produto selecionado não está disponível para comparação.</p> : comparison?.status === 'partial-range' ? <p className="rounded-xl bg-[#f6f3f8] px-4 py-3 text-xs text-[#716879]" data-testid="status-financial-goal-partial-range">Meta mensal não aplicada: o recorte contém parte de meses ou filtra dias da semana.</p> : comparison?.status === 'partial' ? <p className="rounded-xl bg-[#fbf4e7] px-4 py-3 text-xs text-[#765c31]" data-testid="status-financial-goal-partial">Cobertura parcial da meta: configurada para {comparison.configuredGoalCount} de {comparison.monthCount} meses. O combinado não é apresentado.</p> : comparison?.status === 'complete' ? <section className="flex flex-wrap items-center justify-between gap-4 rounded-[22px] border border-[#dfe8d3] bg-[#f5f9ef] px-5 py-4" data-testid="panel-financial-goal-comparison"><div><p className="text-[9px] font-bold uppercase tracking-[.12em] text-[#688646]">meta mensal · cobertura completa</p><p className="mt-1 text-lg font-extrabold text-[#3c4e2e]" data-testid="text-financial-goal-target">{formatCents(comparison.targetCents)} <span className="text-xs font-medium text-[#738064]">de meta</span></p></div><div className="text-right"><p className="text-xs font-semibold text-[#59694b]" data-testid="text-financial-goal-achievement">{(Number(comparison.achievementTenthsPercent) / 10).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% atingido</p><p className="mt-1 text-[10px] text-[#738064]" data-testid="text-financial-goal-actual">Realizado líquido: {money(analytics.totals.netCents)}</p><p className="mt-1 text-[10px] font-semibold text-[#59694b]" data-testid="text-financial-goal-difference">{BigInt(analytics.totals.netCents) >= comparison.targetCents ? `Excedente: ${formatCents(BigInt(analytics.totals.netCents) - comparison.targetCents)}` : `Falta: ${formatCents(comparison.targetCents - BigInt(analytics.totals.netCents))}`}</p></div></section> : null}
           </>}
@@ -459,6 +488,11 @@ export default function OccupancyChartsPage() {
   const anyError = modalitiesQuery.isError || recordsQuery.isError || filterOptionsQuery.isError;
   const initialLoading = modalitiesQuery.isLoading || filterOptionsQuery.isLoading || (!filterInvalid && recordsQuery.isLoading);
   const hasContent = analytics.supportRows.length > 0;
+  const occupancyExportPeriod = filters.periodMode === 'day' ? formatDay(filters.day)
+    : filters.periodMode === 'range' ? `${filters.fromDate ? formatDay(filters.fromDate) : '—'} a ${filters.toDate ? formatDay(filters.toDate) : '—'}`
+      : filters.periodMode === 'months' ? filters.months.map(formatMonthKey).join(', ') || 'Nenhum mês selecionado'
+        : filters.year ? `Ano ${filters.year}${filters.quarter ? ` · ${filters.quarter}º trimestre` : ''}` : 'Todo o histórico';
+  const occupancyExportFilters = `${occupancyFilterSummary(filters)} · Modalidade: ${selectedModality?.name ?? (filters.modalityId ? 'selecionada' : 'todas')} · Turma: ${filters.className.trim() || 'todas'} · Horários: ${filters.startTimes.length ? filters.startTimes.map((time) => time.slice(0, 5)).join(', ') : 'todos'} · Dias: ${filters.weekdays.length ? filters.weekdays.map(getWeekdayNameForIsoDay).join(', ') : 'todos'}`;
 
   const addMonth = () => {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthToAdd) || filters.months.includes(monthToAdd)) return;
@@ -480,8 +514,8 @@ export default function OccupancyChartsPage() {
   }
 
   return (
-    <section className="space-y-5" aria-label="Gráficos de Check-in e Ocupação" data-testid="page-occupancy-charts">
-      <div className="flex flex-col justify-between gap-4 rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:flex-row sm:items-center sm:px-6">
+    <section className="pdf-report-root space-y-5" aria-label="Gráficos de Check-in e Ocupação" data-testid="page-occupancy-charts">
+      <div data-pdf-hide-on-export className="flex flex-col justify-between gap-4 rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:flex-row sm:items-center sm:px-6">
         <div>
           <p className="text-[9px] font-bold uppercase tracking-[.14em] text-[#8a8491]">zero3 pro <span className="mx-1 text-[#b2abb8]">/</span> gráficos</p>
           <h1 className="mt-1 font-[family-name:var(--app-font-serif)] text-3xl font-extrabold leading-none tracking-[-.07em] text-[#342d40] sm:text-[2.6rem]">Check-in e Ocupação<span className="ml-1 text-[#a9d75a]">.</span></h1>
@@ -497,7 +531,7 @@ export default function OccupancyChartsPage() {
         </div>
       </div>
 
-      <div className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" data-testid="panel-occupancy-filters">
+      <div className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" data-testid="panel-occupancy-filters" data-pdf-hide-on-export>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2"><SlidersHorizontal size={15} className="text-[#8c73b4]" /><h2 className="text-sm font-extrabold text-[#443d50]">Filtros do gráfico</h2></div>
           <div className="flex gap-2">
@@ -604,7 +638,7 @@ export default function OccupancyChartsPage() {
         <h2 className="mt-4 text-base font-extrabold text-[#443d50]">Nenhum percentual neste recorte</h2>
         <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-[#837b8b]">Ajuste o período ou a turma. Os gráficos exibem apenas percentuais persistidos, sem completar dias ou meses ausentes.</p>
       </div> : <>
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Indicadores de ocupação" data-testid="occupancy-indicators">
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Indicadores de ocupação" data-testid="occupancy-indicators" data-pdf-hide-on-export>
           <article className="rounded-[20px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_10px_28px_-28px_rgba(55,40,72,.3)]" data-testid="metric-occupancy-classes">
             <p className="text-[9px] font-bold uppercase tracking-[.12em] text-[#8a8491]">Aulas registradas</p>
             <p className="mt-2 font-[family-name:var(--app-font-serif)] text-2xl font-extrabold tabular-nums tracking-[-.05em] text-[#342d40]">{formatCount(analytics.totals.classes)}</p>
@@ -626,8 +660,9 @@ export default function OccupancyChartsPage() {
             <p className="mt-1 text-[10px] text-[#837b8b]">{analytics.totals.percentage == null ? 'Sem base de presenças e vagas' : `${formatCount(analytics.totals.presences)} de ${formatCount(analytics.totals.capacity)} presenças/vagas`}</p>
           </article>
         </section>
-        <section className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" aria-label="Indicadores de agregadores e check-in" data-testid="panel-occupancy-aggregators">
-          <SectionHeading eyebrow="agregadores · check-in" title="Participação nas aulas" detail="Contagem de presenças em aulas, não de pessoas únicas." />
+        <section className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" aria-label="Indicadores de agregadores e check-in" data-testid="panel-occupancy-aggregators" data-pdf-panel="occupancy-aggregators">
+          <PdfPrintHeader title="Agregadores e check-in" period={occupancyExportPeriod} filters={occupancyExportFilters} />
+          <div className="flex items-start justify-between gap-2"><SectionHeading eyebrow="agregadores · check-in" title="Participação nas aulas" detail="Contagem de presenças em aulas, não de pessoas únicas." /><DownloadPdfButton scope="occupancy-aggregators" title="Agregadores e check-in" period={occupancyExportPeriod} compact disabled={initialLoading || anyError} /></div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <article className="rounded-2xl border border-[#e9e4eb] bg-[#fffefc] p-4" data-testid="metric-occupancy-aggregator-presences">
               <p className="text-[9px] font-bold uppercase tracking-[.12em] text-[#8a8491]">Presenças agregadoras</p>
@@ -675,17 +710,22 @@ export default function OccupancyChartsPage() {
               </div>
             ) : <p className="text-xs text-[#837b8b]">Nenhuma aula medida neste recorte.</p>}
           </div>
+          <PdfPrintTable
+            headers={['Mês', 'Agregadores', 'Presenças totais', 'Participação', 'Aulas informadas']}
+            rows={analytics.aggregatorsByMonth.map((row) => [formatMonthKey(row.month), row.aggregatorPresences == null ? 'Não informado' : formatCount(row.aggregatorPresences), formatCount(row.totalPresences), formatPercent(row.sharePercentage), `${formatCount(row.aggregatorInformedClassCount)} de ${formatCount(row.measuredClassCount)}`])}
+          />
         </section>
         {analytics.totals.legacyRecordCount > 0 && <p className="rounded-xl bg-[#f6f3f8] px-4 py-2.5 text-[10px] leading-4 text-[#716879]" role="status" data-testid="status-occupancy-legacy-count">{formatCount(analytics.totals.legacyRecordCount)} registro(s) legado(s) sem presenças/vagas permanecem fora do cálculo ponderado.</p>}
         <div className="grid gap-5 lg:grid-cols-[.9fr_1.1fr]">
-          <section className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" data-testid="card-occupancy-donut">
-            <SectionHeading eyebrow="ocupação calculada" title="Ocupação e capacidade restante" detail={selectedModality?.name ?? 'Todas as modalidades'} />
+          <section className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" data-testid="card-occupancy-donut" data-pdf-panel="occupancy-donut">
+            <PdfPrintHeader title="Ocupação e capacidade restante" period={occupancyExportPeriod} filters={occupancyExportFilters} />
+            <div className="flex items-start justify-between gap-2"><SectionHeading eyebrow="ocupação calculada" title="Ocupação e capacidade restante" detail={selectedModality?.name ?? 'Todas as modalidades'} /><DownloadPdfButton scope="occupancy-donut" title="Ocupação e capacidade restante" period={occupancyExportPeriod} compact disabled={initialLoading || anyError} /></div>
             {analytics.donut ? <>
               <div className="mb-2 flex flex-wrap items-end justify-between gap-3 rounded-2xl bg-[#f8f5fb] px-4 py-3">
                 <div><p className="text-[9px] font-bold uppercase tracking-[.12em] text-[#806aa0]">Taxa real</p><p className="mt-1 font-[family-name:var(--app-font-serif)] text-3xl font-extrabold tracking-[-.06em] text-[#65479c]" data-testid="text-occupancy-donut-real-rate">{formatPercent(analytics.donut.occupied)}</p></div>
                 {analytics.donut.occupied > 100 && <p className="max-w-[230px] text-right text-[10px] font-semibold leading-4 text-[#765c31]" data-testid="text-occupancy-capacity-exceeded">{analytics.donut.presences != null && analytics.donut.capacity != null ? `Excedente: ${formatCount(analytics.donut.presences - analytics.donut.capacity)} presença(s) acima das vagas` : `Ocupação acima da capacidade em ${formatPercent(analytics.donut.occupied - 100)} p.p.`}</p>}
               </div>
-              <div className="relative mx-auto h-[220px] max-w-[360px]" role="img" aria-label={`${selectedModality?.name ?? 'Todas as modalidades'}: ${formatPercent(analytics.donut.occupied)} de ocupação real e ${formatPercent(analytics.donut.unoccupied)} de complemento visual`}>
+              <div className="dashboard-pdf-chart relative mx-auto h-[220px] max-w-[360px]" role="img" aria-label={`${selectedModality?.name ?? 'Todas as modalidades'}: ${formatPercent(analytics.donut.occupied)} de ocupação real e ${formatPercent(analytics.donut.unoccupied)} de complemento visual`}>
                 <ChartContainer config={{ occupied: { label: 'Ocupada', color: palette.purple }, unoccupied: { label: 'Complemento', color: '#e6e0eb' } }} className="h-full w-full">
                   <PieChart>
                     <Pie data={donutData} dataKey="value" nameKey="name" innerRadius="65%" outerRadius="88%" paddingAngle={2} stroke="none">
@@ -704,10 +744,18 @@ export default function OccupancyChartsPage() {
               </p>
               <CoverageNote covered={analytics.donut.coveredPeriods} available={analytics.donut.availablePeriods} />
             </> : <ChartEmpty title="Sem base para calcular" detail="A rosca exige contagens agregáveis ou uma única observação percentual numa modalidade e período definidos." />}
+            <PdfPrintTable headers={['Indicador', 'Valor']} rows={[
+              ['Ocupação', formatPercent(analytics.donut?.occupied)],
+              ['Complemento', formatPercent(analytics.donut?.unoccupied)],
+              ['Presenças', formatCount(analytics.donut?.presences ?? null)],
+              ['Capacidade', formatCount(analytics.donut?.capacity ?? null)],
+              ['Fonte', analytics.donut ? sourceLabel(analytics.donut.source) : 'Sem dados'],
+            ]} />
           </section>
 
-          <section className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" data-testid="card-occupancy-comparison">
-            <SectionHeading eyebrow="mesmo período selecionado" title="Comparativo por modalidade" detail={comparisonMax > 100 ? `Escala até ${formatPercent(comparisonMax)}` : 'Escala de 0 a 100%'} />
+          <section className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" data-testid="card-occupancy-comparison" data-pdf-panel="occupancy-comparison">
+            <PdfPrintHeader title="Comparativo de ocupação por modalidade" period={occupancyExportPeriod} filters={occupancyExportFilters} />
+            <div className="flex items-start justify-between gap-2"><SectionHeading eyebrow="mesmo período selecionado" title="Comparativo por modalidade" detail={comparisonMax > 100 ? `Escala até ${formatPercent(comparisonMax)}` : 'Escala de 0 a 100%'} /><DownloadPdfButton scope="occupancy-comparison" title="Comparativo por modalidade" period={occupancyExportPeriod} compact disabled={initialLoading || anyError} /></div>
             {comparisonData.length ? <ChartContainer role="img" aria-label={`Percentuais de ocupação comparados por modalidade, escala de zero a ${formatPercent(comparisonMax)}`} config={{ percentage: { label: 'Ocupação', color: palette.purple } }} className="h-[270px] w-full">
               <BarChart data={comparisonData} margin={{ top: 8, right: 10, bottom: 38, left: 0 }}>
                 <CartesianGrid vertical={false} stroke="#eee9f1" />
@@ -718,14 +766,16 @@ export default function OccupancyChartsPage() {
               </BarChart>
             </ChartContainer> : <ChartEmpty title="Sem comparação disponível" detail="Não há modalidades com percentuais registrados neste recorte." />}
             <p className="mt-1 text-[10px] leading-4 text-[#837b8b]" data-testid="text-comparison-coverage">Aulas com presenças e vagas são ponderadas pelos totais; percentuais legados permanecem separados. Períodos sem registro não contam como 0%.</p>
+            <PdfPrintTable headers={['Modalidade', 'Ocupação', 'Períodos cobertos']} rows={comparisonData.map((row) => [row.modalityName, formatPercent(row.percentage), `${formatCount(row.coveredPeriods)} de ${formatCount(row.availablePeriods)}`])} />
           </section>
         </div>
 
         <section className="grid gap-5 lg:grid-cols-2" aria-label="Ocupação por horário e dia da semana">
-          <article className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" data-testid="card-occupancy-by-hour">
-            <SectionHeading eyebrow="horário inicial · ordem cronológica" title="Ocupação por horário" detail="Aulas diárias com horário registrado" />
+          <article className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" data-testid="card-occupancy-by-hour" data-pdf-panel="occupancy-hour">
+            <PdfPrintHeader title="Ocupação por horário" period={occupancyExportPeriod} filters={occupancyExportFilters} />
+            <div className="flex items-start justify-between gap-2"><SectionHeading eyebrow="horário inicial · ordem cronológica" title="Ocupação por horário" detail="Aulas diárias com horário registrado" /><DownloadPdfButton scope="occupancy-hour" title="Ocupação por horário" period={occupancyExportPeriod} compact disabled={initialLoading || anyError} /></div>
             {analytics.byHour.length ? <>
-              <ChartContainer role="img" aria-label="Ocupação calculada por horário inicial, em ordem cronológica" config={{ percentage: { label: 'Ocupação', color: palette.purple } }} className="h-[270px] w-full">
+              <ChartContainer role="img" aria-label="Ocupação calculada por horário inicial, em ordem cronológica" config={{ percentage: { label: 'Ocupação', color: palette.purple } }} className="dashboard-pdf-chart h-[270px] w-full">
                 <BarChart data={analytics.byHour} margin={{ top: 10, right: 12, bottom: 4, left: -18 }}>
                   <CartesianGrid vertical={false} stroke="#eee9f1" />
                   <XAxis dataKey="label" tick={{ fill: palette.ink, fontSize: 10 }} tickLine={false} axisLine={false} />
@@ -736,12 +786,14 @@ export default function OccupancyChartsPage() {
               </ChartContainer>
               <p className="mt-1 text-[10px] leading-4 text-[#837b8b]">Só entram aulas diárias com horário de início. Resumos mensais não são atribuídos a um horário; percentuais legados não se misturam às medições.</p>
             </> : <ChartEmpty title="Sem aulas com horário inicial" detail="Não há registros diários com horário no recorte atual." />}
+            <PdfPrintTable headers={['Horário', 'Aulas', 'Presenças', 'Vagas', 'Ocupação']} rows={analytics.byHour.map((row) => [row.label, formatCount(row.recordCount), formatCount(row.presences), formatCount(row.capacity), formatPercent(row.percentage)])} />
           </article>
 
-          <article className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" data-testid="card-occupancy-by-weekday">
-            <SectionHeading eyebrow="segunda a domingo" title="Ocupação por dia da semana" detail="Aulas diárias do recorte aplicado" />
+          <article className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" data-testid="card-occupancy-by-weekday" data-pdf-panel="occupancy-weekday">
+            <PdfPrintHeader title="Ocupação por dia da semana" period={occupancyExportPeriod} filters={occupancyExportFilters} />
+            <div className="flex items-start justify-between gap-2"><SectionHeading eyebrow="segunda a domingo" title="Ocupação por dia da semana" detail="Aulas diárias do recorte aplicado" /><DownloadPdfButton scope="occupancy-weekday" title="Ocupação por dia da semana" period={occupancyExportPeriod} compact disabled={initialLoading || anyError} /></div>
             {analytics.byWeekday.length ? <>
-              <ChartContainer role="img" aria-label="Ocupação calculada por dia da semana, de segunda a domingo" config={{ percentage: { label: 'Ocupação', color: palette.purple } }} className="h-[270px] w-full">
+              <ChartContainer role="img" aria-label="Ocupação calculada por dia da semana, de segunda a domingo" config={{ percentage: { label: 'Ocupação', color: palette.purple } }} className="dashboard-pdf-chart h-[270px] w-full">
                 <BarChart data={analytics.byWeekday} margin={{ top: 10, right: 12, bottom: 4, left: -18 }}>
                   <CartesianGrid vertical={false} stroke="#eee9f1" />
                   <XAxis dataKey="label" tick={{ fill: palette.ink, fontSize: 10 }} tickLine={false} axisLine={false} />
@@ -768,20 +820,22 @@ export default function OccupancyChartsPage() {
               </div>
               <p className="mt-1 text-[10px] leading-4 text-[#837b8b]">Dias sem registros não são convertidos em ocupação zero.</p>
             </> : <ChartEmpty title="Sem aulas diárias no recorte" detail="A comparação por dia da semana precisa de registros com data diária." />}
+            <PdfPrintTable headers={['Dia', 'Aulas', 'Presenças', 'Vagas', 'Ocupação']} rows={analytics.byWeekday.map((row) => [row.label, formatCount(row.recordCount), formatCount(row.presences), formatCount(row.capacity), formatPercent(row.percentage)])} />
           </article>
         </section>
 
-        <section className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" data-testid="card-occupancy-evolution">
+        <section className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" data-testid="card-occupancy-evolution" data-pdf-panel="occupancy-evolution">
+          <PdfPrintHeader title="Evolução da ocupação" period={occupancyExportPeriod} filters={`${occupancyExportFilters} · Visão: ${viewMode === 'daily' ? 'diária' : viewMode === 'monthly' ? 'mensal' : 'trimestral'}`} />
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-            <SectionHeading eyebrow="histórico do recorte" title="Evolução da ocupação" detail={selectedModality?.name ?? 'Todas as modalidades'} />
-            <div className="flex w-fit rounded-full bg-[#f3f0f5] p-1" role="group" aria-label="Granularidade da evolução">
+            <div className="flex items-start justify-between gap-2"><SectionHeading eyebrow="histórico do recorte" title="Evolução da ocupação" detail={selectedModality?.name ?? 'Todas as modalidades'} /><DownloadPdfButton scope="occupancy-evolution" title="Evolução da ocupação" period={occupancyExportPeriod} compact disabled={initialLoading || anyError} /></div>
+            <div className="flex w-fit rounded-full bg-[#f3f0f5] p-1" role="group" aria-label="Granularidade da evolução" data-pdf-hide-on-export>
               <button type="button" aria-pressed={viewMode === 'daily'} onClick={() => setViewMode('daily')} className={`rounded-full px-4 py-2 text-xs font-bold transition ${viewMode === 'daily' ? 'bg-[#65479c] text-white shadow-sm' : 'text-[#716879] hover:bg-white'}`} data-testid="button-view-daily">Diária</button>
               <button type="button" aria-pressed={viewMode === 'monthly'} onClick={() => setViewMode('monthly')} className={`rounded-full px-4 py-2 text-xs font-bold transition ${viewMode === 'monthly' ? 'bg-[#65479c] text-white shadow-sm' : 'text-[#716879] hover:bg-white'}`} data-testid="button-view-monthly">Mensal</button>
               <button type="button" aria-pressed={viewMode === 'quarterly'} onClick={() => setViewMode('quarterly')} className={`rounded-full px-4 py-2 text-xs font-bold transition ${viewMode === 'quarterly' ? 'bg-[#65479c] text-white shadow-sm' : 'text-[#716879] hover:bg-white'}`} data-testid="button-view-quarterly">Trimestral</button>
             </div>
           </div>
           {evolutionData.some((point) => point.value !== null) ? <>
-            <ChartContainer role="img" aria-label={`Evolução ${viewMode === 'daily' ? 'diária' : viewMode === 'monthly' ? 'mensal' : 'trimestral'} de ocupação para ${selectedModality?.name ?? 'todas as modalidades'}`} config={{ value: { label: 'Ocupação', color: palette.purple } }} className="h-[270px] w-full">
+            <ChartContainer role="img" aria-label={`Evolução ${viewMode === 'daily' ? 'diária' : viewMode === 'monthly' ? 'mensal' : 'trimestral'} de ocupação para ${selectedModality?.name ?? 'todas as modalidades'}`} config={{ value: { label: 'Ocupação', color: palette.purple } }} className="dashboard-pdf-chart h-[270px] w-full">
               <BarChart data={evolutionData} margin={{ top: 8, right: 12, bottom: 5, left: -18 }}>
                 <CartesianGrid vertical={false} stroke="#eee9f1" />
                 <XAxis dataKey="label" tick={{ fill: palette.muted, fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
@@ -795,9 +849,10 @@ export default function OccupancyChartsPage() {
               available={analytics.evolution.length}
             />
           </> : <ChartEmpty title="Sem dados de evolução" detail="Não há percentuais registrados para o período e os filtros selecionados." />}
+          <PdfPrintTable headers={['Período', 'Ocupação', 'Presenças', 'Capacidade', 'Aulas']} rows={analytics.evolution.map((row) => [periodLabel(row.period, viewMode), formatPercent(row.percentage), formatCount(row.presences), formatCount(row.capacity), formatCount(row.recordCount)])} />
         </section>
 
-        <section className="overflow-hidden rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)]" data-testid="card-occupancy-support-table">
+        <section className="overflow-hidden rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)]" data-testid="card-occupancy-support-table" data-pdf-hide-on-export>
           <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[#eee9f1] px-4 py-4 sm:px-5">
             <div><p className="text-[9px] font-bold uppercase tracking-[.15em] text-[#8c73b4]">rastreabilidade</p><h2 className="mt-1 font-[family-name:var(--app-font-serif)] text-xl font-extrabold tracking-[-.045em] text-[#342d40]">Dados que compõem a leitura</h2></div>
             <p className="text-[10px] text-[#837b8b]" data-testid="text-support-row-count">{supportRows.length} {supportRows.length === 1 ? 'linha' : 'linhas'} · sem soma de percentuais</p>

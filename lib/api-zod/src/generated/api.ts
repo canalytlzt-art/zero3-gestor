@@ -1221,6 +1221,8 @@ export const getSalesResponseCustomerNameMax = 120;
 export const GetSalesResponseItem = zod.object({
   "id": zod.string().uuid(),
   "productId": zod.string().uuid().nullable(),
+  "modalityId": zod.string().uuid().nullable(),
+  "modalityOverride": zod.boolean(),
   "saleDate": zod.string(),
   "productName": zod.string(),
   "quantity": zod.number().int(),
@@ -1258,6 +1260,7 @@ export const CreateSaleBody = zod.object({
   "productName": zod.string().min(1).max(createSaleBodyOneProductNameMax),
   "quantity": zod.number().int().min(1).max(createSaleBodyOneQuantityMax),
   "unitAmountCents": zod.number().int().min(createSaleBodyOneUnitAmountCentsMin).max(createSaleBodyOneUnitAmountCentsMax),
+  "modalityId": zod.string().uuid().nullish(),
   "customerName": zod.string().max(createSaleBodyOneCustomerNameMax).nullish(),
   "notes": zod.string().max(createSaleBodyOneNotesMax).nullable()
 }).and(zod.object({
@@ -1272,6 +1275,8 @@ export const createSaleResponseCustomerNameMax = 120;
 export const CreateSaleResponse = zod.object({
   "id": zod.string().uuid(),
   "productId": zod.string().uuid().nullable(),
+  "modalityId": zod.string().uuid().nullable(),
+  "modalityOverride": zod.boolean(),
   "saleDate": zod.string(),
   "productName": zod.string(),
   "quantity": zod.number().int(),
@@ -1310,6 +1315,8 @@ export const GetSalesPendingDraftsResponseItem = zod.object({
   "linkedSaleId": zod.string().uuid().nullable(),
   "version": zod.number().int().min(1),
   "createdAt": zod.coerce.date(),
+  "modalityId": zod.string().uuid().nullish(),
+  "modalityOverride": zod.boolean().optional(),
   "updatedAt": zod.coerce.date()
 })
 export const GetSalesPendingDraftsResponse = zod.array(GetSalesPendingDraftsResponseItem)
@@ -1374,11 +1381,15 @@ export const UpdateSalesPendingDraftResponse = zod.object({
   "linkedSaleId": zod.string().uuid().nullable(),
   "version": zod.number().int().min(1),
   "createdAt": zod.coerce.date(),
+  "modalityId": zod.string().uuid().nullish(),
+  "modalityOverride": zod.boolean().optional(),
   "updatedAt": zod.coerce.date()
 }),zod.null()]),
   "sale": zod.union([zod.object({
   "id": zod.string().uuid(),
   "productId": zod.string().uuid().nullable(),
+  "modalityId": zod.string().uuid().nullable(),
+  "modalityOverride": zod.boolean(),
   "saleDate": zod.string(),
   "productName": zod.string(),
   "quantity": zod.number().int(),
@@ -1462,6 +1473,7 @@ export const ImportSalesBody = zod.object({
   "rows": zod.array(zod.object({
   "saleDate": zod.coerce.date(),
   "productName": zod.string().max(importSalesBodyRowsItemProductNameMax).nullish(),
+  "modalityId": zod.string().uuid().nullish(),
   "customerName": zod.string().max(importSalesBodyRowsItemCustomerNameMax).nullable(),
   "notes": zod.string().max(importSalesBodyRowsItemNotesMax).nullish(),
   "totalCents": zod.number().int().min(importSalesBodyRowsItemTotalCentsMin).max(importSalesBodyRowsItemTotalCentsMax),
@@ -1505,6 +1517,8 @@ export const ImportSalesResponse = zod.object({
   "sales": zod.array(zod.object({
   "id": zod.string().uuid(),
   "productId": zod.string().uuid().nullable(),
+  "modalityId": zod.string().uuid().nullable(),
+  "modalityOverride": zod.boolean(),
   "saleDate": zod.string(),
   "productName": zod.string(),
   "quantity": zod.number().int(),
@@ -1532,6 +1546,8 @@ export const getSalesHistoryResponseCustomerNameMax = 120;
 export const GetSalesHistoryResponseItem = zod.object({
   "id": zod.string().uuid(),
   "productId": zod.string().uuid().nullable(),
+  "modalityId": zod.string().uuid().nullable(),
+  "modalityOverride": zod.boolean(),
   "saleDate": zod.string(),
   "productName": zod.string(),
   "quantity": zod.number().int(),
@@ -2419,6 +2435,8 @@ export const PreviewMonthlySalesBackupRestoreBody = zod.union([zod.object({
   "goalCount": zod.number().int().min(previewMonthlySalesBackupRestoreBodyThreeGoalCountMin).max(previewMonthlySalesBackupRestoreBodyThreeGoalCountMax),
   "sales": zod.array(zod.object({
   "id": zod.string().uuid(),
+  "modalityId": zod.string().uuid().nullish(),
+  "modalityOverride": zod.boolean().optional(),
   "saleDate": zod.coerce.date(),
   "productName": zod.string().min(1).max(previewMonthlySalesBackupRestoreBodyThreeSalesItemProductNameMax),
   "quantity": zod.number().int().min(1).max(previewMonthlySalesBackupRestoreBodyThreeSalesItemQuantityMax),
@@ -2693,6 +2711,8 @@ export const RestoreMonthlySalesBackupBody = zod.union([zod.object({
   "goalCount": zod.number().int().min(restoreMonthlySalesBackupBodyThreeGoalCountMin).max(restoreMonthlySalesBackupBodyThreeGoalCountMax),
   "sales": zod.array(zod.object({
   "id": zod.string().uuid(),
+  "modalityId": zod.string().uuid().nullish(),
+  "modalityOverride": zod.boolean().optional(),
   "saleDate": zod.coerce.date(),
   "productName": zod.string().min(1).max(restoreMonthlySalesBackupBodyThreeSalesItemProductNameMax),
   "quantity": zod.number().int().min(1).max(restoreMonthlySalesBackupBodyThreeSalesItemQuantityMax),
@@ -2784,6 +2804,7 @@ export const UpdateSaleBody = zod.object({
   "productName": zod.string().min(1).max(updateSaleBodyOneProductNameMax),
   "quantity": zod.number().int().min(1).max(updateSaleBodyOneQuantityMax),
   "unitAmountCents": zod.number().int().min(updateSaleBodyOneUnitAmountCentsMin).max(updateSaleBodyOneUnitAmountCentsMax),
+  "modalityId": zod.string().uuid().nullish(),
   "customerName": zod.string().max(updateSaleBodyOneCustomerNameMax).nullish(),
   "notes": zod.string().max(updateSaleBodyOneNotesMax).nullable()
 }).and(zod.object({
@@ -2799,6 +2820,8 @@ export const updateSaleResponseCustomerNameMax = 120;
 export const UpdateSaleResponse = zod.object({
   "id": zod.string().uuid(),
   "productId": zod.string().uuid().nullable(),
+  "modalityId": zod.string().uuid().nullable(),
+  "modalityOverride": zod.boolean(),
   "saleDate": zod.string(),
   "productName": zod.string(),
   "quantity": zod.number().int(),
@@ -2840,6 +2863,8 @@ export const cancelSaleResponseCustomerNameMax = 120;
 export const CancelSaleResponse = zod.object({
   "id": zod.string().uuid(),
   "productId": zod.string().uuid().nullable(),
+  "modalityId": zod.string().uuid().nullable(),
+  "modalityOverride": zod.boolean(),
   "saleDate": zod.string(),
   "productName": zod.string(),
   "quantity": zod.number().int(),

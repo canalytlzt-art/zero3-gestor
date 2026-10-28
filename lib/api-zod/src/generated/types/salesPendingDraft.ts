@@ -37,5 +37,8 @@ export interface SalesPendingDraft {
   /** @minimum 1 */
   version: number;
   createdAt: Date;
+  /** @nullable */
+  modalityId?: string | null;
+  modalityOverride?: boolean;
   updatedAt: Date;
 }

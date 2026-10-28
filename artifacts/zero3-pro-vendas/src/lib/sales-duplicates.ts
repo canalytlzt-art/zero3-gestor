@@ -17,6 +17,17 @@ export type SaleDuplicateMatch = {
   fields: SaleDuplicateField[];
 };
 
+export type SaleImportDuplicateLine = SaleDuplicateCandidate & {
+  key: string;
+  label: string;
+  included: boolean;
+};
+
+export type SaleImportDuplicateNotice = {
+  label: string;
+  fields: SaleDuplicateField[];
+};
+
 export const saleDuplicateFieldLabels: Record<SaleDuplicateField, string> = {
   customerName: "nome do cliente",
   saleDate: "data",
@@ -75,4 +86,34 @@ export function findPossibleSaleDuplicates(
     const fields = matchingSaleDuplicateFields(candidate, record);
     return fields.length >= minimumMatches ? [{ record, fields }] : [];
   });
+}
+
+export function findSalesImportDuplicateNotices(
+  lines: readonly SaleImportDuplicateLine[],
+  existingRecords: readonly SaleDuplicateRecord[],
+): Map<string, SaleImportDuplicateNotice[]> {
+  const includedLines = lines.filter((line) => line.included);
+  const noticesByKey = new Map<string, SaleImportDuplicateNotice[]>();
+
+  for (const line of lines) {
+    const existingMatches = findPossibleSaleDuplicates(line, existingRecords).map(({ record, fields }) => ({
+      label: record.duplicateLabel ?? "Venda já registrada",
+      fields,
+    }));
+    const spreadsheetMatches = findPossibleSaleDuplicates(
+      line,
+      includedLines.filter((other) => other.key !== line.key).map((other): SaleDuplicateRecord => ({
+        ...other,
+        duplicateLabel: other.label,
+      })),
+    ).map(({ record, fields }) => ({
+      label: record.duplicateLabel ?? "Outra linha da planilha",
+      fields,
+    }));
+    if (existingMatches.length || spreadsheetMatches.length) {
+      noticesByKey.set(line.key, [...existingMatches, ...spreadsheetMatches]);
+    }
+  }
+
+  return noticesByKey;
 }

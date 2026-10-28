@@ -4,6 +4,7 @@ import {
   useGetActiveContracts,
 } from '@workspace/api-client-react';
 import { ChartContainer } from '@/components/ui/chart';
+import { DownloadPdfButton, PdfPrintHeader, PdfPrintTable } from '@/components/dashboard-pdf-tools';
 import { formatMonthKey } from '@/lib/sales-utils';
 import {
   Bar,
@@ -63,8 +64,8 @@ export default function ActiveContractsDashboard({
   const chartRecords = records.slice(-24);
 
   return (
-    <section className="space-y-5" aria-label="Painel de contratos ativos" data-testid="page-active-contracts-dashboard">
-      <div className="flex flex-col justify-between gap-4 rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:flex-row sm:items-center sm:px-6">
+    <section className="pdf-report-root space-y-5" aria-label="Painel de contratos ativos" data-testid="page-active-contracts-dashboard">
+      <div data-pdf-hide-on-export className="flex flex-col justify-between gap-4 rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:flex-row sm:items-center sm:px-6">
         <div>
           <p className="text-[9px] font-bold uppercase tracking-[.14em] text-[#8a8491]">zero3 pro <span className="mx-1 text-[#b2abb8]">/</span> painel de gestão</p>
           <h1 className="mt-1 font-[family-name:var(--app-font-serif)] text-3xl font-extrabold leading-none tracking-[-.07em] text-[#342d40] sm:text-[2.6rem]">Contratos ativos<span className="ml-1 text-[#a9d75a]">.</span></h1>
@@ -98,7 +99,7 @@ export default function ActiveContractsDashboard({
         </div>
       ) : (
         <>
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Indicadores de contratos ativos" data-testid="summary-active-contracts">
+          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Indicadores de contratos ativos" data-testid="summary-active-contracts" data-pdf-hide-on-export>
             <article className="rounded-[20px] border border-[#e9e4eb] bg-[#fffefc] p-4" data-testid="metric-active-contracts-latest">
               <p className="text-[9px] font-bold uppercase tracking-[.12em] text-[#8a8491]">Último saldo registrado</p>
               <p className="mt-2 text-2xl font-extrabold tabular-nums tracking-[-.04em] text-[#342d40]">{count(latest?.activeCount)}</p>
@@ -121,12 +122,13 @@ export default function ActiveContractsDashboard({
             </article>
           </section>
 
-          <section className={panelClass} data-testid="chart-active-contracts-monthly">
-            <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-              <div><p className="text-[9px] font-bold uppercase tracking-[.15em] text-[#8c73b4]">evolução mensal</p><h2 className="mt-1 font-[family-name:var(--app-font-serif)] text-xl font-extrabold tracking-[-.045em] text-[#342d40]">Contratos ativos e meta</h2></div>
-              <p className="text-[10px] text-[#837b8b]">{chartRecords.length} meses com registro · sem valores presumidos</p>
+          <section className={panelClass} data-testid="chart-active-contracts-monthly" data-pdf-panel="contracts-monthly">
+            <PdfPrintHeader title="Contratos ativos e meta" period="Histórico mensal registrado" filters="Exibição do gráfico: até 24 meses; sem valores presumidos para meses sem cadastro" />
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+              <div><p className="text-[9px] font-bold uppercase tracking-[.15em] text-[#8c73b4]">evolução mensal</p><h2 className="mt-1 font-[family-name:var(--app-font-serif)] text-xl font-extrabold tracking-[-.045em] text-[#342d40]">Contratos ativos e meta</h2><p className="mt-1 text-[10px] text-[#837b8b]">{chartRecords.length} meses com registro · sem valores presumidos</p></div>
+              <DownloadPdfButton scope="contracts-monthly" title="Contratos ativos e meta" period="Histórico mensal" compact disabled={contractsQuery.isLoading || contractsQuery.isError} />
             </div>
-            <ChartContainer role="img" aria-label="Gráfico de barras mensais de contratos ativos comparados à meta" config={{ activeCount: { label: 'Contratos ativos', color: '#7655a8' }, targetCount: { label: 'Meta', color: '#a9d75a' } }} className="h-[310px] w-full">
+            <ChartContainer role="img" aria-label="Gráfico de barras mensais de contratos ativos comparados à meta" config={{ activeCount: { label: 'Contratos ativos', color: '#7655a8' }, targetCount: { label: 'Meta', color: '#a9d75a' } }} className="dashboard-pdf-chart h-[310px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartRecords} margin={{ top: 8, right: 12, bottom: 36, left: 4 }} barGap={4}>
                   <CartesianGrid vertical={false} stroke="#eee9f1" />
@@ -140,9 +142,17 @@ export default function ActiveContractsDashboard({
               </ResponsiveContainer>
             </ChartContainer>
             {records.length > 24 && <p className="mt-2 text-[10px] text-[#837b8b]" data-testid="status-active-contracts-chart-window">O gráfico mostra os 24 meses mais recentes; a tabela abaixo mantém todo o histórico.</p>}
+            <PdfPrintTable
+              headers={['Mês', 'Contratos ativos', 'Meta', 'Diferença', 'Atingimento']}
+              rows={chartRecords.map((record) => {
+                const difference = record.targetCount == null ? null : record.activeCount - record.targetCount;
+                const percentage = record.targetCount != null && record.targetCount > 0 ? record.activeCount / record.targetCount * 100 : null;
+                return [formatMonthKey(record.month), count(record.activeCount), count(record.targetCount), difference == null ? '—' : monthDifference(difference, 0), percentage == null ? '—' : `${percentage.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`];
+              })}
+            />
           </section>
 
-          <section className={panelClass} data-testid="table-active-contracts-history">
+          <section className={panelClass} data-testid="table-active-contracts-history" data-pdf-hide-on-export>
             <div className="mb-3 flex items-center gap-2"><UsersRound size={16} className="text-[#7655a8]" /><h2 className="text-sm font-extrabold text-[#443d50]">Comparativo mensal</h2></div>
             <div className="overflow-x-auto rounded-xl border border-[#eeeaf1]">
               <table className="w-full min-w-[760px] border-collapse text-left text-xs">

@@ -583,6 +583,9 @@ export interface Sale {
   id: string;
   /** @nullable */
   productId: string | null;
+  /** @nullable */
+  modalityId: string | null;
+  modalityOverride: boolean;
   saleDate: string;
   productName: string;
   quantity: number;
@@ -621,6 +624,8 @@ export interface SaleInput {
      * @maximum 9007199254740991
      */
   unitAmountCents: number;
+  /** @nullable */
+  modalityId?: string | null;
   /**
      * @maxLength 120
      * @nullable
@@ -826,6 +831,8 @@ export interface SalesImportRow {
      * @nullable
      */
   productName?: string | null;
+  /** @nullable */
+  modalityId?: string | null;
   /**
      * @maxLength 120
      * @nullable
@@ -938,6 +945,9 @@ export interface SalesPendingDraft {
   /** @minimum 1 */
   version: number;
   createdAt: string;
+  /** @nullable */
+  modalityId?: string | null;
+  modalityOverride?: boolean;
   updatedAt: string;
 }
 
@@ -1102,7 +1112,43 @@ export type SalesRefundRecord = SalesRefund & ({
      */
   totalCents: number;
   saleStatus: SalesRefundRecordSaleStatus;
-});
+}) & Required<Pick<SalesRefund & ({
+  saleDate: string;
+  /** @nullable */
+  productId: string | null;
+  productName: string;
+  /** @minimum 1 */
+  quantity: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  unitAmountCents: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  totalCents: number;
+  saleStatus: SalesRefundRecordSaleStatus;
+}), Extract<keyof (SalesRefund & ({
+  saleDate: string;
+  /** @nullable */
+  productId: string | null;
+  productName: string;
+  /** @minimum 1 */
+  quantity: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  unitAmountCents: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
+  totalCents: number;
+  saleStatus: SalesRefundRecordSaleStatus;
+})), 'modalityId' | 'modalityOverride'>>>;
 
 export interface SalesScoreboardTotals {
   /**
@@ -1210,6 +1256,9 @@ export interface VoidSalesRefundInput {
 
 export interface SalesBackupV1Record {
   id: string;
+  /** @nullable */
+  modalityId?: string | null;
+  modalityOverride?: boolean;
   saleDate: string;
   /**
      * @minLength 1

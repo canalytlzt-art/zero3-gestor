@@ -63,6 +63,8 @@ before(async () => {
     CREATE TABLE sales (
       id uuid PRIMARY KEY,
       product_id uuid REFERENCES products(id) ON DELETE RESTRICT,
+      modality_id uuid REFERENCES occupancy_modalities(id) ON DELETE SET NULL,
+      modality_override boolean NOT NULL DEFAULT false,
       sale_date date NOT NULL,
       product_name text NOT NULL,
       quantity integer NOT NULL,
@@ -508,6 +510,101 @@ test("Scoreboard modality filters preserve gross sales, refunds, net revenue, an
     });
     assert.equal(reactivatedResponse.status, 200);
     assert.equal(((await reactivatedResponse.json()) as { isActive: boolean }).isActive, true);
+  });
+});
+
+test("sale-level modality overrides the product link and survives reads", async () => {
+  await withSalesApi(getTestDatabase(), async (baseUrl) => {
+    const modalityA = randomUUID();
+    const modalityB = randomUUID();
+    for (const [id, name] of [[modalityA, "Boxe"], [modalityB, "Pilates"]] as const) {
+      await testPool!.query(
+        "INSERT INTO occupancy_modalities (id, name, normalized_name) VALUES ($1, $2, $3)",
+        [id, name, `${name.toLocaleLowerCase("pt-BR")}-${id}`],
+      );
+    }
+
+    const productName = `Produto multimodal ${randomUUID()}`;
+    const productKey = randomUUID();
+    const productResponse = await apiRequest(baseUrl, "/products", {
+      method: "POST",
+      body: {
+        name: productName,
+        suggestedPriceCents: 0,
+        isActive: true,
+        modalityId: modalityA,
+        idempotencyKey: productKey,
+      },
+    });
+    assert.equal(productResponse.status, 201);
+
+    const create = async (modality: string | null | undefined, amount: number) => {
+      const idempotencyKey = randomUUID();
+      const response = await apiRequest(baseUrl, "/sales", {
+        method: "POST",
+        body: {
+          saleDate: "2098-05-15",
+          productName,
+          quantity: 1,
+          unitAmountCents: amount,
+          notes: null,
+          ...(modality === undefined ? {} : { modalityId: modality }),
+          idempotencyKey,
+        },
+      });
+      assert.equal(response.status, 201);
+      return response.json() as Promise<{
+        id: string;
+        modalityId: string | null;
+        modalityOverride: boolean;
+      }>;
+    };
+    const inherited = await create(undefined, 10_000);
+    const overridden = await create(modalityB, 3_000);
+    const explicitlyUnlinked = await create(null, 2_000);
+    assert.deepEqual(
+      [inherited.modalityId, inherited.modalityOverride],
+      [null, false],
+    );
+    assert.deepEqual(
+      [overridden.modalityId, overridden.modalityOverride],
+      [modalityB, true],
+    );
+    assert.deepEqual(
+      [explicitlyUnlinked.modalityId, explicitlyUnlinked.modalityOverride],
+      [null, true],
+    );
+
+    const [forA, forB] = await Promise.all([modalityA, modalityB].map(async (id) => {
+      const response = await apiRequest(
+        baseUrl,
+        `/sales/scoreboard?fromDate=2098-05-01&toDate=2098-05-31&modalityId=${id}`,
+      );
+      assert.equal(response.status, 200);
+      return response.json() as Promise<{ totals: { quantity: number; salesCents: number } }>;
+    }));
+    assert.equal(forA.totals.quantity, 1);
+    assert.equal(forA.totals.salesCents, 10_000);
+    assert.equal(forB.totals.quantity, 1);
+    assert.equal(forB.totals.salesCents, 3_000);
+
+    const historyResponse = await apiRequest(baseUrl, "/sales/history");
+    assert.equal(historyResponse.status, 200);
+    const history = await historyResponse.json() as Array<{
+      id: string;
+      modalityId: string | null;
+      modalityOverride: boolean;
+    }>;
+    assert.deepEqual(
+      history.filter(({ id }) => [inherited.id, overridden.id, explicitlyUnlinked.id].includes(id))
+        .map(({ id, modalityId, modalityOverride }) => [id, modalityId, modalityOverride])
+        .sort(([a], [b]) => String(a).localeCompare(String(b))),
+      [
+        [inherited.id, null, false],
+        [overridden.id, modalityB, true],
+        [explicitlyUnlinked.id, null, true],
+      ].sort(([a], [b]) => String(a).localeCompare(String(b))),
+    );
   });
 });
 

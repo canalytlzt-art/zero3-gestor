@@ -13,6 +13,8 @@ export interface SalesImportRow {
      * @nullable
      */
   productName?: string | null;
+  /** @nullable */
+  modalityId?: string | null;
   /**
      * @maxLength 120
      * @nullable

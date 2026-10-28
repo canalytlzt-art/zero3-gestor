@@ -89,6 +89,8 @@ function saleOut(row: Row) {
   return {
     id: String(row.id),
     productId: row.product_id === null ? null : String(row.product_id),
+    modalityId: row.modality_id === null ? null : String(row.modality_id),
+    modalityOverride: Boolean(row.modality_override),
     saleDate: String(row.sale_date),
     productName: String(row.product_name),
     quantity: Number(row.quantity),
@@ -375,6 +377,14 @@ async function createSale(
   const now = nowIso();
   const customerName = input.customerName?.trim().replace(/\s+/g, " ") || null;
   const notes = input.notes?.trim() || null;
+  if (input.modalityId) {
+    const modality = await env.DB
+      .prepare("SELECT id FROM occupancy_modalities WHERE id=?")
+      .bind(input.modalityId)
+      .first<Row>();
+    if (!modality) throw new ApiFailure(400, "A modalidade selecionada não existe.");
+  }
+  const modalityOverride = input.modalityId === undefined ? 0 : 1;
 
   const operation = await runIdempotent(
     env.DB,
@@ -397,8 +407,9 @@ async function createSale(
         .prepare(
           `INSERT INTO sales
             (id, product_id, sale_date, product_name, quantity, unit_amount_cents, total_cents,
+             modality_id, modality_override,
              customer_name, notes, status, cancellation_reason, version, created_by, updated_by, created_at, updated_at)
-           SELECT ?, id, ?, name, ?, ?, ?, ?, ?, 'active', NULL, 1, ?, ?, ?, ?
+           SELECT ?, id, ?, name, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, 1, ?, ?, ?, ?
            FROM products
            WHERE normalized_name = ? AND is_active = 1
              AND EXISTS (SELECT 1 FROM idempotency_keys WHERE id = ?)`,
@@ -409,6 +420,8 @@ async function createSale(
           input.quantity,
           input.unitAmountCents,
           totalCents,
+          input.modalityId ?? null,
+          modalityOverride,
           customerName,
           notes,
           actor.userId,
@@ -425,7 +438,8 @@ async function createSale(
            SELECT ?, 'sale', id, 'create', ?, NULL, json_object('id', id, 'productId', product_id,
              'saleDate', sale_date, 'productName', product_name, 'quantity', quantity,
              'unitAmountCents', unit_amount_cents, 'totalCents', total_cents,
-             'customerName', customer_name, 'notes', notes, 'status', status,
+              'modalityId', modality_id, 'modalityOverride', modality_override,
+              'customerName', customer_name, 'notes', notes, 'status', status,
              'version', version, 'createdAt', created_at, 'updatedAt', updated_at), ?
            FROM sales WHERE id = ? AND EXISTS (SELECT 1 FROM idempotency_keys WHERE id = ?)`,
         )
@@ -456,6 +470,14 @@ async function updateSale(
   }
   const customerName = input.customerName?.trim().replace(/\s+/g, " ") || null;
   const notes = input.notes?.trim() || null;
+  if (input.modalityId) {
+    const modality = await env.DB
+      .prepare("SELECT id FROM occupancy_modalities WHERE id=?")
+      .bind(input.modalityId)
+      .first<Row>();
+    if (!modality) throw new ApiFailure(400, "A modalidade selecionada não existe.");
+  }
+  const hasModalityOverride = input.modalityId !== undefined;
   const requestData = { ...input, saleDate, productName, customerName, notes };
   const previous = await findIdempotent(
     env.DB,
@@ -510,6 +532,8 @@ async function updateSale(
         .prepare(
           `UPDATE sales SET product_id = (SELECT id FROM products WHERE normalized_name = ?),
              product_name = (SELECT name FROM products WHERE normalized_name = ?),
+              modality_id = CASE WHEN ?=1 THEN ? ELSE modality_id END,
+              modality_override = CASE WHEN ?=1 THEN 1 ELSE modality_override END,
              sale_date = ?, quantity = ?, unit_amount_cents = ?, total_cents = ?,
              customer_name = ?, notes = ?, version = version + 1, updated_by = ?, updated_at = ?
            WHERE id = ? AND status = 'active' AND version = ?
@@ -518,6 +542,9 @@ async function updateSale(
         .bind(
           productNameNormalized,
           productNameNormalized,
+          hasModalityOverride ? 1 : 0,
+          input.modalityId ?? null,
+          hasModalityOverride ? 1 : 0,
           saleDate,
           input.quantity,
           input.unitAmountCents,
@@ -537,7 +564,8 @@ async function updateSale(
            SELECT ?, 'sale', id, 'update', ?, ?, json_object('id', id, 'productId', product_id,
              'saleDate', sale_date, 'productName', product_name, 'quantity', quantity,
              'unitAmountCents', unit_amount_cents, 'totalCents', total_cents,
-             'customerName', customer_name, 'notes', notes, 'status', status,
+              'modalityId', modality_id, 'modalityOverride', modality_override,
+              'customerName', customer_name, 'notes', notes, 'status', status,
              'version', version, 'createdAt', created_at, 'updatedAt', updated_at), ?
            FROM sales WHERE id = ? AND version = ? AND updated_at = ?
              AND EXISTS (SELECT 1 FROM idempotency_keys WHERE id = ?)`,
@@ -653,20 +681,25 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
   }
   const sales = await asRows(
     env.DB.prepare(
-      `SELECT s.*, p.name AS current_product_name, p.modality_id, m.name AS modality_name
+      `SELECT s.*, p.name AS current_product_name,
+         CASE WHEN s.modality_override=1 THEN s.modality_id ELSE p.modality_id END AS effective_modality_id,
+         m.name AS modality_name
        FROM sales s LEFT JOIN products p ON p.id=s.product_id
-       LEFT JOIN occupancy_modalities m ON m.id=p.modality_id
+       LEFT JOIN occupancy_modalities m
+         ON m.id=CASE WHEN s.modality_override=1 THEN s.modality_id ELSE p.modality_id END
        WHERE s.status='active'`,
     ),
   );
   const refunds = await asRows(
     env.DB.prepare(
       `SELECT r.*, s.product_id, s.product_name, p.name AS current_product_name,
-         p.modality_id, m.name AS modality_name, s.sale_date, s.quantity,
+         CASE WHEN s.modality_override=1 THEN s.modality_id ELSE p.modality_id END AS effective_modality_id,
+         m.name AS modality_name, s.sale_date, s.quantity,
          s.unit_amount_cents, s.total_cents, s.status AS sale_status
        FROM sales_refunds r JOIN sales s ON s.id=r.sale_id
        LEFT JOIN products p ON p.id=s.product_id
-       LEFT JOIN occupancy_modalities m ON m.id=p.modality_id
+       LEFT JOIN occupancy_modalities m
+         ON m.id=CASE WHEN s.modality_override=1 THEN s.modality_id ELSE p.modality_id END
        WHERE r.status='active'`,
     ),
   );
@@ -677,7 +710,7 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
   };
   const productMatches = (row: Row) =>
     (!params.productId || row.product_id === params.productId) &&
-    (!params.modalityId || row.modality_id === params.modalityId);
+    (!params.modalityId || row.effective_modality_id === params.modalityId);
 
   type Aggregate = {
     productId: string | null;
@@ -698,13 +731,17 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
   const weekly = new Map<string, CalendarAggregate>();
   const getProduct = (row: Row) => {
     const id = row.product_id === null ? null : String(row.product_id);
-    const key = id ?? `name:${String(row.product_name ?? "Não categorizado")}`;
+    const modalityValue = Object.hasOwn(row, "effective_modality_id")
+      ? row.effective_modality_id
+      : row.modality_id;
+    const modalityId = modalityValue === null || modalityValue === undefined ? null : String(modalityValue);
+    const key = `${id ?? `name:${String(row.product_name ?? "Não categorizado")}`}|${modalityId ?? "unlinked"}`;
     let aggregate = products.get(key);
     if (!aggregate) {
       aggregate = {
         productId: id,
         productName: String(row.current_product_name ?? row.product_name ?? "Não categorizado"),
-        modalityId: row.modality_id === null ? null : String(row.modality_id),
+        modalityId,
         modalityName: row.modality_name === null ? null : String(row.modality_name),
         quantity: 0n,
         salesCents: 0n,
@@ -767,7 +804,7 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
     getDay(String(refund.refund_date)).refundCents += cents;
     getWeek(String(refund.refund_date)).refundCents += cents;
   }
-  if (params.productId && !products.has(params.productId)) {
+  if (params.productId && ![...products.values()].some((item) => item.productId === params.productId)) {
     const product = await env.DB
       .prepare(
         `SELECT p.id, p.name, p.modality_id, m.name AS modality_name
@@ -1077,6 +1114,7 @@ async function importSales(
       saleDate,
       productName,
       productKey: productName ? nameKey(productName) : null,
+      modalityId: row.modalityId,
       quantity: 1,
       unitAmountCents: row.totalCents,
       totalCents: row.totalCents,
@@ -1129,6 +1167,18 @@ async function importSales(
   });
   if (!normalizedRows.length && !normalizedDraftRows.length) {
     throw new ApiFailure(400, "Selecione ao menos uma venda pronta ou pendência para salvar.");
+  }
+  const availableModalityIds = new Set(
+    (await asRows(env.DB.prepare("SELECT id FROM occupancy_modalities"))).map((row) => String(row.id)),
+  );
+  const invalidModalityRow = normalizedRows.find(
+    (row) => row.modalityId && !availableModalityIds.has(row.modalityId),
+  );
+  if (invalidModalityRow) {
+    throw new ApiFailure(
+      400,
+      `A modalidade selecionada não existe na aba ${invalidModalityRow.sourceSheet}, linha ${invalidModalityRow.sourceRow}.`,
+    );
   }
   if (normalizedRows.length + normalizedDraftRows.length > 500) {
     throw new ApiFailure(400, "O limite é de 500 linhas por importação.");
@@ -1188,12 +1238,13 @@ async function importSales(
         .prepare(
           `INSERT INTO sales
             (id, product_id, sale_date, product_name, quantity, unit_amount_cents, total_cents,
+             modality_id, modality_override,
              customer_name, notes, status, cancellation_reason, version, created_by, updated_by, created_at, updated_at)
            VALUES (?, ${
              productKey ? "(SELECT id FROM products WHERE normalized_name=?)" : "NULL"
-           }, ?, ${
+            }, ?, ${
              productKey ? "(SELECT name FROM products WHERE normalized_name=?)" : "?"
-           }, 1, ?, ?, ?, ?, 'active', NULL, 1, ?, ?, ?, ?)`,
+            }, 1, ?, ?, ?, ?, ?, ?, 'active', NULL, 1, ?, ?, ?, ?)`,
         )
         .bind(
           ...(productKey
@@ -1204,6 +1255,8 @@ async function importSales(
                 productKey,
                 row.unitAmountCents,
                 row.totalCents,
+                row.modalityId ?? null,
+                row.modalityId === undefined ? 0 : 1,
                 row.customerName,
                 row.notes,
                 actor.userId,
@@ -1217,6 +1270,8 @@ async function importSales(
                 productName,
                 row.unitAmountCents,
                 row.totalCents,
+                row.modalityId ?? null,
+                row.modalityId === undefined ? 0 : 1,
                 row.customerName,
                 row.notes,
                 actor.userId,
@@ -1251,6 +1306,7 @@ async function importSales(
              json_object('id', s.id, 'productId', s.product_id, 'saleDate', s.sale_date,
                'productName', s.product_name, 'quantity', s.quantity,
                'unitAmountCents', s.unit_amount_cents, 'totalCents', s.total_cents,
+                'modalityId', s.modality_id, 'modalityOverride', s.modality_override,
                'customerName', s.customer_name, 'notes', s.notes, 'status', s.status,
                'version', s.version, 'createdAt', s.created_at, 'updatedAt', s.updated_at,
                'importBatchId', ?, 'sourceFileHash', ?, 'sourceFileName', ?,
@@ -1532,6 +1588,7 @@ async function updateSalesPendingDraft(
        json_object('id', s.id, 'productId', s.product_id, 'saleDate', s.sale_date,
          'productName', s.product_name, 'quantity', s.quantity,
          'unitAmountCents', s.unit_amount_cents, 'totalCents', s.total_cents,
+        'modalityId', s.modality_id, 'modalityOverride', s.modality_override,
          'customerName', s.customer_name, 'notes', s.notes, 'status', s.status,
          'version', s.version, 'createdAt', s.created_at, 'updatedAt', s.updated_at,
          'importBatchId', (SELECT id FROM sales_import_batches WHERE file_hash=d.source_file_hash AND source='sales-file' LIMIT 1),
@@ -2021,6 +2078,8 @@ function financialDbValues(type: keyof typeof financialTables, record: Row): Row
       quantity: Number(record.quantity),
       unit_amount_cents: Number(record.unitAmountCents),
       total_cents: Number(record.totalCents),
+      modality_id: record.modalityId ?? null,
+      modality_override: Number(Boolean(record.modalityOverride)),
       customer_name: record.customerName ?? null,
       notes: record.notes ?? null,
       status: record.status ?? "active",

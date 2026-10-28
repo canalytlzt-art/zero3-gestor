@@ -5,7 +5,17 @@ export type SalesImportField =
   | "saleDate"
   | "totalAmount"
   | "productName"
+  | "modalityName"
   | "notes";
+
+export function normalizeImportModalityName(value: string): string {
+  return value
+    .trim()
+    .replace(/\s+/g, " ")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("pt-BR");
+}
 
 export type SalesImportMapping = Record<SalesImportField, number | null>;
 
@@ -51,6 +61,7 @@ export type MappedSalesImportRow = {
   saleDate: string;
   totalCents: number;
   productName: string | null;
+  modalityName: string | null;
   notes: string | null;
 };
 
@@ -81,6 +92,7 @@ export type SalesImportRowResult = {
     totalCents: number | null;
     amountText: string;
     productName: string | null;
+    modalityName: string | null;
   };
 };
 
@@ -89,6 +101,7 @@ const emptyMapping = (): SalesImportMapping => ({
   saleDate: null,
   totalAmount: null,
   productName: null,
+    modalityName: null,
   notes: null,
 });
 
@@ -108,24 +121,27 @@ function headerMatch(value: unknown, field: SalesImportField): number {
   if (!header) return 0;
 
   if (field === "customerName") {
-    if (/^(nome do cliente|nome cliente|cliente|nome)$/.test(header)) return 3;
+    if (/^(nome do cliente|cliente nome|nome cliente|nome do aluno|nome aluno|aluno|comprador|nome completo|cliente|nome)$/.test(header)) return 3;
     return 0;
   }
   if (field === "saleDate") {
-    if (/^(data de inicio|data inicio|dt inicio|inicio)$/.test(header)) return 5;
-    if (/^(data da venda|data de venda|data venda|sale date)$/.test(header)) return 4;
+    if (/^(data de inicio|data inicio|dt inicio|inicio|inicio do plano|data de inicio do plano|data de inicio do contrato|inicio do contrato|data inicial)$/.test(header)) return 5;
+    if (/^(data da venda|data de venda|data venda|data da compra|data de compra|data do pedido|sale date|purchase date|order date)$/.test(header)) return 4;
     if (/^(data|data principal)$/.test(header)) return 2;
     return 0;
   }
   if (field === "totalAmount") {
-    if (/\b(unitario|parcela|desconto|taxa|comissao|juros|vencimento)\b/.test(header)) return 0;
-    if (/^(valor da venda|valor venda|sale value)$/.test(header)) return 5;
-    if (/^(valor total|total da venda|total venda|total value)$/.test(header)) return 4;
+    if (/\b(unitario|parcela|desconto|taxa|comissao|juros|vencimento|mensalidade|saldo|estorno|reembolso)\b/.test(header)) return 0;
+    if (/^(valor da venda|valor venda|valor da compra|valor recebido|valor pago|sale value|purchase amount|amount paid)$/.test(header)) return 5;
+    if (/^(valor total|total da venda|total venda|total pago|total recebido|valor bruto|faturamento|total value|amount|value)$/.test(header)) return 4;
     if (/^(valor|total)$/.test(header)) return 2;
     return 0;
   }
   if (field === "productName") {
-    return /^(produto|plano|plano produto|produto plano|categoria|product|plan|category)$/.test(header) ? 3 : 0;
+    return /^(produto|plano|plano produto|produto plano|nome do produto|nome do plano|produto vendido|plano vendido|plano contratado|categoria|product|plan|product name|plan name|category)$/.test(header) ? 3 : 0;
+  }
+  if (field === "modalityName") {
+    return /^(modalidade|modalidade do check in|modalidade check in|aula|modalidade da venda|check in|modality)$/.test(header) ? 3 : 0;
   }
   if (field === "notes") {
     return /^(observacao|observacoes|nota|notas|notes|obs)$/.test(header) ? 3 : 0;
@@ -209,12 +225,13 @@ export async function parseSalesSpreadsheet(
         saleDate: detectColumn(header.cells, "saleDate"),
         totalAmount: detectColumn(header.cells, "totalAmount"),
         productName: detectColumn(header.cells, "productName"),
-        notes: detectColumn(header.cells, "notes"),
+        modalityName: null,
+        notes: null,
       } : emptyMapping(),
       dateInferred: false,
       dateAmbiguous: false,
     });
-    const isHeader = (row: ImportSourceRow) => (["customerName", "saleDate", "totalAmount"] as const)
+    const isHeader = (row: ImportSourceRow) => (["customerName", "saleDate", "totalAmount", "productName"] as const)
       .filter((field) => row.cells.some((cell) => headerMatch(cell, field) > 0)).length >= 2;
     const firstHeader = source.rows.find(isHeader);
     const blocks = [makeBlock(firstHeader)];
@@ -278,7 +295,7 @@ export async function parseSalesSpreadsheet(
       name, hidden: source.hidden, headerRow: first.headerRow,
       columns: first.columns, mapping: first.mapping,
       rows, blocks, ignoredRows, ignoredHeaderRows,
-      selected: !source.hidden && rows.length > 0,
+      selected: rows.length > 0,
       ignoredBlankRows, ignoredSummaryRows, date1904, filterRange: source.filterRange,
     };
   });
@@ -331,7 +348,7 @@ export function parseImportDate(value: unknown, date1904 = false): string | null
 
 function dateEvidence(row: ImportSourceRow, column: number, block: SalesImportBlock, date1904: boolean): boolean {
   const label = normalizeHeader(block.columns[column]?.label);
-  if (/\b(fim|vencimento|pagamento|cadastro|parcela|valor|taxa|desconto|numero)\b/.test(label)) return false;
+  if (/\b(fim|nascimento|aniversario|vencimento|pagamento|cadastro|criacao|atualizacao|parcela|valor|taxa|desconto|numero|cancelamento|estorno|reembolso)\b/.test(label)) return false;
   const value = row.cells[column];
   const metadata = row.sourceCells.find((cell) => cell.column === column);
   const identifiable = headerMatch(label, "saleDate") > 0 || metadata?.type === "d"
@@ -366,6 +383,7 @@ export function mapSalesImportRow(
   const saleDate = parseImportDate(cell("saleDate"), sheet.date1904);
   const totalCents = parseImportMoney(cell("totalAmount"));
   const rawProduct = String(cell("productName") ?? "").trim().replace(/\s+/g, " ");
+  const rawModality = String(cell("modalityName") ?? "").trim().replace(/\s+/g, " ");
   const rawNotes = String(cell("notes") ?? "").trim();
   const rawDateText = String(cell("saleDate") ?? "").trim();
   const rawAmountText = String(cell("totalAmount") ?? "").trim();
@@ -373,7 +391,7 @@ export function mapSalesImportRow(
   const hasCore = (["customerName", "saleDate", "totalAmount"] as const)
     .some((field) => String(cell(field) ?? "").trim());
   const optionalOnly = nonempty.length > 0 && nonempty.every((source) =>
-    /^(modalidade|recorrencia|produto|plano|categoria|observacao|observacoes|nota|notas|notes|obs)$/.test(normalizeHeader(block.columns[source.column]?.label)),
+    /^(modalidade|modalidade do check in|modalidade check in|modalidade da venda|check in|aula|recorrencia|produto|plano|categoria|observacao|observacoes|nota|notas|notes|obs)$/.test(normalizeHeader(block.columns[source.column]?.label)),
   );
   const hasOtherEvidence = nonempty.some((source) =>
     dateEvidence(row, source.column, block, sheet.date1904)
@@ -425,6 +443,7 @@ export function mapSalesImportRow(
     saleDate: saleDate!,
     totalCents: totalCents!,
     productName: rawProduct || null,
+    modalityName: rawModality.length <= 120 ? rawModality || null : null,
     notes: rawNotes || null,
   } : null;
   return {
@@ -438,6 +457,7 @@ export function mapSalesImportRow(
       totalCents,
       amountText: String(cell("totalAmount") ?? "").trim(),
       productName: rawProduct.length <= 120 ? rawProduct || null : null,
+      modalityName: rawModality.length <= 120 ? rawModality || null : null,
     },
     value,
     draftValue,
