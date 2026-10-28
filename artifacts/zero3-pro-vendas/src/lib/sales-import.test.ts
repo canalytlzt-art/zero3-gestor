@@ -57,6 +57,7 @@ test("detects headers after preface rows, preserves start dates, and reads multi
     saleDate: "2026-10-03",
     totalCents: 123456,
     productName: null,
+    notes: null,
   });
   const second = mapSalesImportRow(sheet, sheet.rows[1]);
   assert.equal(second.value?.saleDate, "2026-10-04");
@@ -77,6 +78,40 @@ test("detects headers after preface rows, preserves start dates, and reads multi
   );
   assert.equal(noHeader.sheets[0].headerRow, null);
   assert.equal(noHeader.sheets[0].rows.length, 2, "manual mapping does not discard the first data row");
+});
+
+test("keeps customer optional while missing date or amount creates an editable non-financial draft", async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ["Nome do cliente", "Data da venda", "Plano/produto", "Valor da venda", "Observações"],
+    ["", "2026-10-12", "Plano A", "R$ 50,00", "Venda sem nome"],
+    ["Cliente sem data", "", "Plano B", "R$ 30,00", "Conferir data"],
+    ["Cliente sem valor", "2026-10-13", "Plano C", "", ""],
+  ]), "Importação");
+  const parsed = await parseSalesSpreadsheet(
+    XLSX.write(workbook, { type: "array", bookType: "xlsx" }) as ArrayBuffer,
+    "pendencias.xlsx",
+  );
+  const [missingCustomer, missingDate, missingAmount] = parsed.sheets[0].rows.map((row) =>
+    mapSalesImportRow(parsed.sheets[0], row),
+  );
+
+  assert.equal(missingCustomer.kind, "ready");
+  assert.equal(missingCustomer.needsVerification, true);
+  assert.equal(missingCustomer.value?.customerName, null);
+  assert.equal(missingCustomer.value?.notes, "Venda sem nome");
+  assert.equal(missingCustomer.draftValue, null);
+
+  assert.equal(missingDate.kind, "pending");
+  assert.equal(missingDate.value, null);
+  assert.equal(missingDate.draftValue?.saleDate, null);
+  assert.equal(missingDate.draftValue?.totalCents, 3000);
+  assert.equal(missingDate.draftValue?.productName, "Plano B");
+
+  assert.equal(missingAmount.kind, "pending");
+  assert.equal(missingAmount.value, null);
+  assert.equal(missingAmount.draftValue?.saleDate, "2026-10-13");
+  assert.equal(missingAmount.draftValue?.totalCents, null);
 });
 
 test("accepts quoted CSV and exact Brazilian/ISO/Excel values while rejecting invalid money and dates", async () => {
@@ -218,6 +253,48 @@ test("recognizes repeated headers, reordered blocks, formulas, hidden rows and u
   assert.equal(formula.preview.saleDate, "2026-06-03");
   assert.equal(formula.errors.length, 1);
   assert.match(formula.errors[0], /fórmula em A10 sem resultado/);
+});
+
+test("reads customer, start date, plan or product name, and sale value from spreadsheet rows", async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ["Nome do cliente", "Data de início", "Plano", "Valor da venda"],
+    ["Cliente do plano", "2026-10-05", "Plano de acompanhamento", 125.5],
+  ]), "Planos");
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ["Nome do cliente", "Data de início", "Produto", "Valor da venda"],
+    ["Cliente do produto", "06/10/2026", "Aula especial", "R$ 75,25"],
+  ]), "Produtos");
+
+  const parsed = await parseSalesSpreadsheet(
+    XLSX.write(workbook, { type: "array", bookType: "xlsx" }),
+    "produtos-sinteticos.xlsx",
+  );
+  const values = parsed.sheets.map((sheet) => {
+    const row = sheet.rows.find((candidate) => candidate.sourceRow === 2)!;
+    const value = mapSalesImportRow(sheet, row).value!;
+    return {
+      customerName: value.customerName,
+      saleDate: value.saleDate,
+      totalCents: value.totalCents,
+      productName: value.productName,
+    };
+  });
+
+  assert.deepEqual(values, [
+    {
+      customerName: "Cliente do plano",
+      saleDate: "2026-10-05",
+      totalCents: 12_550,
+      productName: "Plano de acompanhamento",
+    },
+    {
+      customerName: "Cliente do produto",
+      saleDate: "2026-10-06",
+      totalCents: 7_525,
+      productName: "Aula especial",
+    },
+  ]);
 });
 
 test("ambiguous dates require one block mapping and arbitrary numbers are not inferred as dates", async () => {

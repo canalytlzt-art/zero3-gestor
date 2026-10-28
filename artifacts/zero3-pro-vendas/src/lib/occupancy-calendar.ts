@@ -38,6 +38,16 @@ export function getIsoWeekday(date: string): number | null {
   return weekday === 0 ? 7 : weekday;
 }
 
+export function getIsoWeekStart(date: string): string | null {
+  const weekday = getIsoWeekday(date);
+  if (weekday === null) return null;
+  const [year, month, day] = date.split('-').map(Number);
+  const calendarDate = new Date(0);
+  calendarDate.setUTCHours(0, 0, 0, 0);
+  calendarDate.setUTCFullYear(year, month - 1, day - weekday + 1);
+  return calendarDate.toISOString().slice(0, 10);
+}
+
 export function getWeekdayName(date: string, style: 'long' | 'short' = 'long'): string | null {
   const weekday = getIsoWeekday(date);
   if (weekday === null) return null;

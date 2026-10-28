@@ -68,3 +68,9 @@ Derivar o dia da semana dinamicamente da data diária original, inclusive para r
 **Why:** O usuário pediu filtros e gráficos retroativos para registros já existentes, com preservação integral das datas e sem inventar dias para resumos mensais.
 
 **How to apply:** Use a data ISO armazenada para calcular filtros e agrupamentos por dia da semana em leituras; mantenha a granularidade mensal separada e evite migrações apenas para preencher o dia.
+
+Aplicar a mesma regra a vendas: dia da semana, semana ISO, mês, trimestre e ano são derivados de `sale_date` nas consultas, incluindo vendas antigas; não reimportar nem regravar lançamentos para habilitar filtros de calendário.
+
+**Why:** O usuário pediu filtros retroativos no faturamento, preservando os registros financeiros existentes e sem alterar o D1.
+
+**How to apply:** Tratar `sale_date` como data civil (`YYYY-MM-DD`), calcular dias e semanas sem conversão de fuso, manter intervalos inclusivos e não criar migrações para atributos que podem ser derivados.

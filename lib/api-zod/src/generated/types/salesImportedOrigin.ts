@@ -5,9 +5,14 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { SalesImportedOriginState } from './salesImportedOriginState';
 
 export interface SalesImportedOrigin {
   sourceSheet: string;
   sourceRow: number;
-  saleId: string;
+  state: SalesImportedOriginState;
+  /** @nullable */
+  saleId: string | null;
+  /** @nullable */
+  draftId: string | null;
 }

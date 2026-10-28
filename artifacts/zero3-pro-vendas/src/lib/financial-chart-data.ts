@@ -19,6 +19,23 @@ export interface FinancialMonthRow {
   netCents: number;
 }
 
+export interface FinancialDayRow {
+  date: string;
+  weekday: number;
+  quantity: number;
+  salesCents: number;
+  refundCents: number;
+  netCents: number;
+}
+
+export interface FinancialWeekRow {
+  weekStart: string;
+  quantity: number;
+  salesCents: number;
+  refundCents: number;
+  netCents: number;
+}
+
 export interface FinancialShareRow {
   key: string;
   name: string;
@@ -78,6 +95,21 @@ export function buildFinancialChartAnalytics(report: SalesScoreboard) {
     refundCents: month.refundCents,
     netCents: month.netCents,
   }));
+  const days: FinancialDayRow[] = report.days.map((day) => ({
+    date: day.date,
+    weekday: day.weekday,
+    quantity: day.quantity,
+    salesCents: day.salesCents,
+    refundCents: day.refundCents,
+    netCents: day.netCents,
+  }));
+  const weeks: FinancialWeekRow[] = report.weeks.map((week) => ({
+    weekStart: week.weekStart,
+    quantity: week.quantity,
+    salesCents: week.salesCents,
+    refundCents: week.refundCents,
+    netCents: week.netCents,
+  }));
 
   const productTotals = byProduct.reduce(
     (total, row) => ({
@@ -108,6 +140,8 @@ export function buildFinancialChartAnalytics(report: SalesScoreboard) {
     byProduct,
     byModality,
     months,
+    days,
+    weeks,
     salesShareByModality,
     salesShareByProduct,
     totals: report.totals,

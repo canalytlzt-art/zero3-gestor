@@ -20,6 +20,14 @@ test('builds the exact query filters used by the Scoreboard period controls', ()
   assert.deepEqual(buildScoreboardQueryParams({ ...common, periodMode: 'current' }), {
     months: ['2097-11'],
   });
+  assert.deepEqual(buildScoreboardQueryParams({
+    ...common,
+    periodMode: 'current',
+    weekdays: [7, 2, 2],
+  }), {
+    months: ['2097-11'],
+    weekdays: [2, 7],
+  });
   assert.deepEqual(buildScoreboardQueryParams({ ...common, periodMode: 'single' }), {
     months: ['2097-10'],
   });

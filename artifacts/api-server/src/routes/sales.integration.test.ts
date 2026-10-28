@@ -266,6 +266,7 @@ async function recordSale(
   saleDate: string,
   unitAmountCents = 5000,
   quantity = 1,
+  customerName: string | null = "Cliente de teste",
 ): Promise<string> {
   const idempotencyKey = randomUUID();
   createdIdempotencyKeys.push(idempotencyKey);
@@ -276,6 +277,7 @@ async function recordSale(
       productName,
       quantity,
       unitAmountCents,
+      customerName,
       notes: null,
       idempotencyKey,
     },
@@ -671,6 +673,168 @@ test("imports customer, date, and exact total without creating a product or dedu
     (await testPool!.query("SELECT count(*)::text AS count FROM products")).rows[0]?.count ?? 0,
   );
   assert.equal(productCountAfter, productCountBefore);
+});
+
+test("persists import drafts without counting them, then converts each once after completion", async () => {
+  const fileHash = randomUUID().replaceAll("-", "").repeat(2);
+  const requestBody = {
+    fileHash,
+    filename: "pendencias-vendas.xlsx",
+    rows: [{
+      customerName: null,
+      saleDate: "2098-12-04",
+      productName: "Plano importado novo",
+      totalCents: 15000,
+      sourceSheet: "Vendas",
+      sourceRow: 2,
+    }],
+    pendingRows: [
+      {
+        customerName: null,
+        saleDate: "2098-12-05",
+        saleDateText: null,
+        productName: "Plano pendente valor",
+        totalCents: null,
+        amountText: "aguardando confirmação",
+        notes: "dados sintéticos",
+        sourceSheet: "Vendas",
+        sourceRow: 3,
+      },
+      {
+        customerName: "Cliente sem data",
+        saleDate: null,
+        saleDateText: "data não informada",
+        productName: "Plano pendente data",
+        totalCents: 25000,
+        amountText: null,
+        notes: null,
+        sourceSheet: "Vendas",
+        sourceRow: 4,
+      },
+    ],
+  };
+
+  await withSalesApi(getTestDatabase(), async (baseUrl) => {
+    const importedResponse = await apiRequest(baseUrl, "/sales/import", {
+      method: "POST",
+      body: requestBody,
+    });
+    assert.equal(importedResponse.status, 201);
+    const imported = await importedResponse.json() as {
+      importedCount: number;
+      pendingCount: number;
+      skippedCount: number;
+      skippedPendingCount: number;
+      sales: Array<{ id: string; customerName: string | null; productId: string | null }>;
+    };
+    assert.equal(imported.importedCount, 1);
+    assert.equal(imported.pendingCount, 2);
+    assert.equal(imported.skippedCount, 0);
+    assert.equal(imported.skippedPendingCount, 0);
+    assert.equal(imported.sales[0]?.customerName, null);
+    assert.ok(imported.sales[0]?.productId);
+    createdSaleIds.push(...imported.sales.map(({ id }) => id));
+
+    const createdProduct = await testPool!.query(
+      "SELECT suggested_price_cents::text AS price FROM products WHERE normalized_name = 'plano importado novo'",
+    );
+    assert.equal(createdProduct.rows[0]?.price, "0");
+
+    const firstScoreboardResponse = await apiRequest(
+      baseUrl,
+      "/sales/scoreboard?fromDate=2098-12-01&toDate=2098-12-31",
+    );
+    const firstScoreboard = await firstScoreboardResponse.json() as {
+      totals: { quantity: number; salesCents: number };
+    };
+    assert.equal(firstScoreboard.totals.quantity, 1);
+    assert.equal(firstScoreboard.totals.salesCents, 15000);
+
+    const pendingResponse = await apiRequest(baseUrl, "/sales/pending");
+    assert.equal(pendingResponse.status, 200);
+    const pending = await pendingResponse.json() as Array<{
+      id: string;
+      version: number;
+      saleDate: string | null;
+      totalCents: number | null;
+      missingFields: string[];
+    }>;
+    assert.equal(pending.length, 2);
+    const missingAmount = pending.find((draft) => draft.missingFields.includes("totalCents"));
+    const missingDate = pending.find((draft) => draft.missingFields.includes("saleDate"));
+    assert.ok(missingAmount);
+    assert.ok(missingDate);
+
+    const completeAmountResponse = await apiRequest(baseUrl, `/sales/pending/${missingAmount.id}`, {
+      method: "PATCH",
+      body: {
+        customerName: null,
+        saleDate: "2098-12-05",
+        saleDateText: null,
+        productName: "Plano pendente valor",
+        totalCents: 10000,
+        amountText: null,
+        notes: "dados sintéticos",
+        expectedVersion: missingAmount.version,
+      },
+    });
+    assert.equal(completeAmountResponse.status, 200);
+    const completedAmount = await completeAmountResponse.json() as {
+      status: string;
+      sale: { id: string; totalCents: number } | null;
+    };
+    assert.equal(completedAmount.status, "completed");
+    assert.equal(completedAmount.sale?.totalCents, 10000);
+    if (completedAmount.sale) createdSaleIds.push(completedAmount.sale.id);
+
+    const completeDateResponse = await apiRequest(baseUrl, `/sales/pending/${missingDate.id}`, {
+      method: "PATCH",
+      body: {
+        customerName: "Cliente sem data",
+        saleDate: "2098-12-06",
+        saleDateText: null,
+        productName: "Plano pendente data",
+        totalCents: 25000,
+        amountText: null,
+        notes: null,
+        expectedVersion: missingDate.version,
+      },
+    });
+    assert.equal(completeDateResponse.status, 200);
+    const completedDate = await completeDateResponse.json() as {
+      status: string;
+      sale: { id: string; totalCents: number } | null;
+    };
+    assert.equal(completedDate.status, "completed");
+    assert.equal(completedDate.sale?.totalCents, 25000);
+    if (completedDate.sale) createdSaleIds.push(completedDate.sale.id);
+
+    const finalPendingResponse = await apiRequest(baseUrl, "/sales/pending");
+    assert.deepEqual(await finalPendingResponse.json(), []);
+    const finalScoreboardResponse = await apiRequest(
+      baseUrl,
+      "/sales/scoreboard?fromDate=2098-12-01&toDate=2098-12-31",
+    );
+    const finalScoreboard = await finalScoreboardResponse.json() as {
+      totals: { quantity: number; salesCents: number };
+    };
+    assert.equal(finalScoreboard.totals.quantity, 3);
+    assert.equal(finalScoreboard.totals.salesCents, 50000);
+
+    const replayResponse = await apiRequest(baseUrl, "/sales/import", {
+      method: "POST",
+      body: requestBody,
+    });
+    assert.equal(replayResponse.status, 200);
+    const replay = await replayResponse.json() as {
+      importedCount: number;
+      pendingCount: number;
+      replayed: boolean;
+    };
+    assert.equal(replay.importedCount, 0);
+    assert.equal(replay.pendingCount, 0);
+    assert.equal(replay.replayed, true);
+  });
 });
 
 const originalImportFile = new URL("../../../../attached_assets/0_Clientes_Individuais_1792690299275.xlsx", import.meta.url);
@@ -1301,8 +1465,7 @@ test("period financial backups reconcile dates, preserve cross-month dependencie
         method: "POST",
         body: selection,
       });
-      assert.equal(response.status, 200);
-      return response.json() as Promise<{
+      const payload = await response.json() as {
         schemaVersion: number;
         period: string;
         selection: SalesPeriodBackupSelection;
@@ -1322,7 +1485,29 @@ test("period financial backups reconcile dates, preserve cross-month dependencie
         refunds: Array<{ scope: string; record: { id: string; saleId: string; refundDate: string } }>;
         goals: Array<{ scope: string; record: { id: string } }>;
         histories: Array<{ scope: string; record: { id: string } }>;
-      }>;
+      } | { error?: string };
+      assert.equal(response.status, 200, JSON.stringify(payload));
+      return payload as {
+        schemaVersion: number;
+        period: string;
+        selection: SalesPeriodBackupSelection;
+        partial: boolean;
+        generatedAt: string;
+        counts: {
+          totalRecords: number;
+          periodSales: number;
+          periodRefunds: number;
+          periodGoals: number;
+          dependencySales: number;
+          dependencyRefunds: number;
+        };
+        totals: { salesCents: number; refundsCents: number; netCents: number; quantity: number };
+        products: Array<{ scope: string; record: { id: string } }>;
+        sales: Array<{ scope: string; record: { id: string; saleDate: string; status: string; notes: string | null } }>;
+        refunds: Array<{ scope: string; record: { id: string; saleId: string; refundDate: string } }>;
+        goals: Array<{ scope: string; record: { id: string } }>;
+        histories: Array<{ scope: string; record: { id: string } }>;
+      };
     }
 
     const october = await createBackup({
@@ -1458,6 +1643,24 @@ test("period financial backups reconcile dates, preserve cross-month dependencie
     assert.equal(decemberScoreboardResponse.status, 200);
     const decemberScoreboard = await decemberScoreboardResponse.json() as { totals: { quantity: number; salesCents: number; refundCents: number; netCents: number } };
     assert.deepEqual(decemberScoreboard.totals, { quantity: 1, salesCents: 9900, refundCents: 0, netCents: 9900 });
+    const unverifiedSaleId = await recordSale(baseUrl, mainProduct, "2026-10-18", 4000);
+    await database.update(salesTable).set({ customerName: null }).where(eq(salesTable.id, unverifiedSaleId));
+    const pendingCadastro = await createBackup({
+      mode: "months",
+      months: ["2026-10"],
+      cadastralStatus: "needs-review",
+    });
+    assert.deepEqual(pendingCadastro.selection, {
+      mode: "months",
+      months: ["2026-10"],
+      productName: null,
+      cadastralStatus: "needs-review",
+    });
+    assert.equal(pendingCadastro.partial, true);
+    assert.deepEqual(pendingCadastro.sales.map(({ record }) => record.id), [unverifiedSaleId]);
+    assert.equal(pendingCadastro.counts.periodSales, 1);
+    assert.equal(pendingCadastro.counts.periodRefunds, 0);
+    assert.equal(pendingCadastro.totals.salesCents, 4000);
     assert.ok(rangeOctoberSaleId);
     assert.ok(rangeNovemberSaleId);
     } finally {

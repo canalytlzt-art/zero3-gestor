@@ -5,6 +5,7 @@ import {
   CreateSalesRefundBody,
   GetSalesImportOriginsQueryParams,
   GetSalesImportOriginsResponse,
+  GetSalesPendingDraftsResponse,
   GetProductsResponse,
   GetSaleHistoryParams,
   GetSaleHistoryResponse,
@@ -27,6 +28,9 @@ import {
   CreateSalesPeriodBackupResponse,
   ImportSalesBody,
   ImportSalesResponse,
+  UpdateSalesPendingDraftBody,
+  UpdateSalesPendingDraftParams,
+  UpdateSalesPendingDraftResponse,
   UpdateProductBody,
   UpdateSaleBody,
   UpdateSalesRefundBody,
@@ -40,6 +44,7 @@ import {
 import type { AuthContext, D1Database, WorkerEnv } from "./types";
 import { apiError, json, readJson } from "./http";
 import { ApiFailure, findIdempotent, runIdempotent } from "./idempotency";
+import { getIsoWeekStart, getIsoWeekday } from "../lib/occupancy-calendar";
 
 type Row = Record<string, unknown>;
 
@@ -379,11 +384,11 @@ async function createSale(
         .prepare(
           `INSERT INTO products
             (id, name, normalized_name, suggested_price_cents, is_active, version, created_at, updated_at)
-           SELECT ?, ?, ?, ?, 1, 1, ?, ?
+           SELECT ?, ?, ?, 0, 1, 1, ?, ?
            WHERE EXISTS (SELECT 1 FROM idempotency_keys WHERE id = ?)
            ON CONFLICT(normalized_name) DO NOTHING`,
         )
-        .bind(productId, productName, productKey, input.unitAmountCents, now, now, operationId),
+        .bind(productId, productName, productKey, now, now, operationId),
       env.DB
         .prepare(
           `INSERT INTO sales
@@ -492,11 +497,11 @@ async function updateSale(
         .prepare(
           `INSERT INTO products
             (id, name, normalized_name, suggested_price_cents, is_active, version, created_at, updated_at)
-           SELECT ?, ?, ?, ?, 1, 1, ?, ?
+           SELECT ?, ?, ?, 0, 1, 1, ?, ?
            WHERE EXISTS (SELECT 1 FROM idempotency_keys WHERE id = ?)
            ON CONFLICT(normalized_name) DO NOTHING`,
         )
-        .bind(productId, productName, productNameNormalized, input.unitAmountCents, now, now, operationId),
+        .bind(productId, productName, productNameNormalized, now, now, operationId),
       env.DB
         .prepare(
           `UPDATE sales SET product_id = (SELECT id FROM products WHERE normalized_name = ?),
@@ -613,6 +618,7 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
   const rawMonths = url.searchParams.getAll("months").flatMap((value) => value.split(","));
   const rawFromDate = url.searchParams.get("fromDate");
   const rawToDate = url.searchParams.get("toDate");
+  const rawWeekdays = url.searchParams.getAll("weekdays").flatMap((value) => value.split(","));
   if (
     (rawFromDate !== null && !dateOnly(rawFromDate)) ||
     (rawToDate !== null && !dateOnly(rawToDate))
@@ -623,12 +629,14 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
     fromDate: rawFromDate ? new Date(`${rawFromDate}T00:00:00.000Z`) : undefined,
     toDate: rawToDate ? new Date(`${rawToDate}T00:00:00.000Z`) : undefined,
     months: rawMonths.length ? rawMonths : undefined,
+    weekdays: rawWeekdays.length ? rawWeekdays : undefined,
     productId: url.searchParams.get("productId") ?? undefined,
     modalityId: url.searchParams.get("modalityId") ?? undefined,
   });
   const fromDate = params.fromDate?.toISOString().slice(0, 10);
   const toDate = params.toDate?.toISOString().slice(0, 10);
   const months = [...new Set(params.months ?? [])].sort();
+  const weekdays = [...new Set(params.weekdays ?? [])];
   if (
     Boolean(fromDate) !== Boolean(toDate) ||
     (fromDate && toDate && fromDate > toDate) ||
@@ -659,9 +667,9 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
     ),
   );
   const dateMatches = (value: string) => {
-    if (fromDate && toDate) return value >= fromDate && value <= toDate;
-    if (months.length) return months.includes(value.slice(0, 7));
-    return true;
+    if (fromDate && toDate && (value < fromDate || value > toDate)) return false;
+    if (months.length && !months.includes(value.slice(0, 7))) return false;
+    return !weekdays.length || weekdays.includes(getIsoWeekday(value) ?? 0);
   };
   const productMatches = (row: Row) =>
     (!params.productId || row.product_id === params.productId) &&
@@ -681,6 +689,9 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
     string,
     { month: string; quantity: bigint; salesCents: bigint; refundCents: bigint }
   >();
+  type CalendarAggregate = { quantity: bigint; salesCents: bigint; refundCents: bigint };
+  const daily = new Map<string, CalendarAggregate & { weekday: number }>();
+  const weekly = new Map<string, CalendarAggregate>();
   const getProduct = (row: Row) => {
     const id = row.product_id === null ? null : String(row.product_id);
     const key = id ?? `name:${String(row.product_name ?? "Não categorizado")}`;
@@ -707,6 +718,24 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
     }
     return value;
   };
+  const getDay = (date: string) => {
+    let value = daily.get(date);
+    if (!value) {
+      value = { weekday: getIsoWeekday(date) ?? 0, quantity: 0n, salesCents: 0n, refundCents: 0n };
+      daily.set(date, value);
+    }
+    return value;
+  };
+  const getWeek = (date: string) => {
+    const weekStart = getIsoWeekStart(date);
+    if (!weekStart) throw new ApiFailure(500, "Não foi possível agrupar a data da movimentação.");
+    let value = weekly.get(weekStart);
+    if (!value) {
+      value = { quantity: 0n, salesCents: 0n, refundCents: 0n };
+      weekly.set(weekStart, value);
+    }
+    return value;
+  };
   for (const sale of sales) {
     if (!dateMatches(String(sale.sale_date)) || !productMatches(sale)) continue;
     const quantity = BigInt(String(sale.quantity));
@@ -718,6 +747,12 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
     const monthTotal = getMonth(month);
     monthTotal.quantity += quantity;
     monthTotal.salesCents += cents;
+    const dayTotal = getDay(String(sale.sale_date));
+    dayTotal.quantity += quantity;
+    dayTotal.salesCents += cents;
+    const weekTotal = getWeek(String(sale.sale_date));
+    weekTotal.quantity += quantity;
+    weekTotal.salesCents += cents;
   }
   for (const refund of refunds) {
     if (!dateMatches(String(refund.refund_date)) || !productMatches(refund)) continue;
@@ -725,6 +760,8 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
     const month = String(refund.refund_date).slice(0, 7);
     getProduct(refund).refundCents += cents;
     getMonth(month).refundCents += cents;
+    getDay(String(refund.refund_date)).refundCents += cents;
+    getWeek(String(refund.refund_date)).refundCents += cents;
   }
   if (params.productId && !products.has(params.productId)) {
     const product = await env.DB
@@ -818,6 +855,25 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
       };
     })
     .sort((a, b) => a.month.localeCompare(b.month));
+  const dayResults = [...daily.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([date, item]) => ({
+      date,
+      weekday: item.weekday,
+      quantity: safeNumber(item.quantity, "quantidade diária"),
+      salesCents: safeNumber(item.salesCents, "vendas diárias"),
+      refundCents: safeNumber(item.refundCents, "estornos diários"),
+      netCents: safeNumber(item.salesCents - item.refundCents, "faturamento líquido diário"),
+    }));
+  const weekResults = [...weekly.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([weekStart, item]) => ({
+      weekStart,
+      quantity: safeNumber(item.quantity, "quantidade semanal"),
+      salesCents: safeNumber(item.salesCents, "vendas semanais"),
+      refundCents: safeNumber(item.refundCents, "estornos semanais"),
+      netCents: safeNumber(item.salesCents - item.refundCents, "faturamento líquido semanal"),
+    }));
   const totalQuantity = [...products.values()].reduce((sum, item) => sum + item.quantity, 0n);
   const totalSales = [...products.values()].reduce((sum, item) => sum + item.salesCents, 0n);
   const totalRefunds = [...products.values()].reduce((sum, item) => sum + item.refundCents, 0n);
@@ -831,6 +887,8 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
       },
       products: productResults,
       months: monthResults,
+      days: dayResults,
+      weeks: weekResults,
     }),
   );
 }
@@ -864,16 +922,61 @@ async function salesImportOrigins(env: WorkerEnv, fileHash: string) {
   return asRows(
     env.DB
       .prepare(
-        `SELECT entity_id AS sale_id,
-           json_extract(after_data, '$.sourceSheet') AS source_sheet,
-           CAST(json_extract(after_data, '$.sourceRow') AS INTEGER) AS source_row
-         FROM sales_history
-         WHERE entity_type='sale' AND operation='import'
-           AND json_valid(after_data)
-           AND json_extract(after_data, '$.sourceFileHash')=?`,
+        `SELECT source_sheet, source_row, state, sale_id, draft_id
+         FROM (
+           SELECT source_sheet, source_row,
+             CASE WHEN status='completed' THEN 'sale' ELSE 'pending' END AS state,
+             linked_sale_id AS sale_id,
+             CASE WHEN status='pending' THEN id ELSE NULL END AS draft_id
+           FROM sales_pending_drafts
+           WHERE source_file_hash=?
+           UNION ALL
+           SELECT
+             json_extract(h.after_data, '$.sourceSheet') AS source_sheet,
+             CAST(json_extract(h.after_data, '$.sourceRow') AS INTEGER) AS source_row,
+             'sale' AS state,
+             h.entity_id AS sale_id,
+             NULL AS draft_id
+           FROM sales_history h
+           WHERE h.entity_type='sale' AND h.operation='import'
+             AND json_valid(h.after_data)
+             AND json_extract(h.after_data, '$.sourceFileHash')=?
+             AND NOT EXISTS (
+               SELECT 1 FROM sales_pending_drafts d
+               WHERE d.source_file_hash=?
+                 AND d.source_sheet=json_extract(h.after_data, '$.sourceSheet')
+                 AND d.source_row=CAST(json_extract(h.after_data, '$.sourceRow') AS INTEGER)
+             )
+         )
+         ORDER BY source_sheet, source_row`,
       )
-      .bind(fileHash),
+      .bind(fileHash, fileHash, fileHash),
   );
+}
+
+function pendingDraftOut(row: Row) {
+  const missingFields: Array<"saleDate" | "totalCents"> = [];
+  if (row.sale_date === null) missingFields.push("saleDate");
+  if (row.total_cents === null) missingFields.push("totalCents");
+  return {
+    id: String(row.id),
+    status: String(row.status),
+    customerName: row.customer_name === null ? null : String(row.customer_name),
+    saleDate: row.sale_date === null ? null : String(row.sale_date),
+    saleDateText: row.sale_date_text === null ? null : String(row.sale_date_text),
+    productName: row.product_name === null ? null : String(row.product_name),
+    totalCents: row.total_cents === null ? null : Number(row.total_cents),
+    amountText: row.amount_text === null ? null : String(row.amount_text),
+    notes: row.notes === null ? null : String(row.notes),
+    sourceFileName: row.source_file_name === null ? null : String(row.source_file_name),
+    sourceSheet: row.source_sheet === null ? null : String(row.source_sheet),
+    sourceRow: row.source_row === null ? null : Number(row.source_row),
+    missingFields,
+    linkedSaleId: row.linked_sale_id === null ? null : String(row.linked_sale_id),
+    version: Number(row.version),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
 }
 
 async function importSales(
@@ -909,18 +1012,20 @@ async function importSales(
         ? rawRow.saleDate.toISOString().slice(0, 10)
         : dateOnly(rawRow.saleDate);
     const productName = row.productName ? normalizeName(row.productName) : null;
-    const customerName = row.customerName.trim().replace(/\s+/g, " ");
+    const customerName = row.customerName?.trim().replace(/\s+/g, " ") || null;
+    const notes = row.notes?.trim() || null;
     if (
       !saleDate ||
       (productName !== null && productName.length > 120) ||
-      !customerName ||
-      customerName.length > 120 ||
+      (customerName !== null && customerName.length > 120) ||
+      (notes !== null && notes.length > 1000) ||
       !row.sourceSheet.trim() ||
       row.sourceSheet.length > 255
     ) {
       throw new ApiFailure(400, `Dados inválidos na aba ${row.sourceSheet || "Planilha"}, linha ${row.sourceRow}.`);
     }
     return {
+      id: crypto.randomUUID(),
       saleDate,
       productName,
       productKey: productName ? nameKey(productName) : null,
@@ -928,12 +1033,62 @@ async function importSales(
       unitAmountCents: row.totalCents,
       totalCents: row.totalCents,
       customerName,
-      notes: row.notes?.trim() || null,
+      notes,
       sourceSheet: row.sourceSheet,
       sourceRow: row.sourceRow,
     };
   });
-  const sourceKeys = normalizedRows.map((row) => `${row.sourceSheet}:${row.sourceRow}`);
+  const normalizedDraftRows = (input.pendingRows ?? []).map((row) => {
+    const saleDate = row.saleDate instanceof Date
+      ? row.saleDate.toISOString().slice(0, 10)
+      : row.saleDate
+        ? dateOnly(row.saleDate)
+        : null;
+    const customerName = row.customerName?.trim().replace(/\s+/g, " ") || null;
+    const productName = row.productName ? normalizeName(row.productName) : null;
+    const notes = row.notes?.trim() || null;
+    if (
+      (row.saleDate !== null && !saleDate) ||
+      (customerName !== null && customerName.length > 1000) ||
+      (productName !== null && productName.length > 500) ||
+      (notes !== null && notes.length > 1000) ||
+      (row.saleDateText !== null && row.saleDateText.length > 200) ||
+      (row.amountText !== null && row.amountText.length > 120) ||
+      !row.sourceSheet.trim() ||
+      row.sourceSheet.length > 255 ||
+      (saleDate !== null && row.totalCents !== null)
+    ) {
+      throw new ApiFailure(400, `Pendência inválida na aba ${row.sourceSheet || "Planilha"}, linha ${row.sourceRow}.`);
+    }
+    if (
+      !saleDate && row.totalCents === null && !customerName && !productName
+      && !notes && !row.saleDateText && !row.amountText
+    ) {
+      throw new ApiFailure(400, `A linha ${row.sourceRow} não contém informações para salvar como pendência.`);
+    }
+    return {
+      id: crypto.randomUUID(),
+      saleDate,
+      saleDateText: row.saleDateText?.trim() || null,
+      totalCents: row.totalCents,
+      amountText: row.amountText?.trim() || null,
+      customerName,
+      productName,
+      notes,
+      sourceSheet: row.sourceSheet,
+      sourceRow: row.sourceRow,
+    };
+  });
+  if (!normalizedRows.length && !normalizedDraftRows.length) {
+    throw new ApiFailure(400, "Selecione ao menos uma venda pronta ou pendência para salvar.");
+  }
+  if (normalizedRows.length + normalizedDraftRows.length > 500) {
+    throw new ApiFailure(400, "O limite é de 500 linhas por importação.");
+  }
+  const sourceKeys = [
+    ...normalizedRows.map((row) => `${row.sourceSheet}:${row.sourceRow}`),
+    ...normalizedDraftRows.map((row) => `${row.sourceSheet}:${row.sourceRow}`),
+  ];
   if (new Set(sourceKeys).size !== sourceKeys.length) {
     throw new ApiFailure(400, "O envio contém a mesma aba/linha mais de uma vez.");
   }
@@ -960,17 +1115,23 @@ async function importSales(
   let originMap = new Map(
     origins.map((origin) => [
       `${String(origin.source_sheet)}:${String(origin.source_row)}`,
-      String(origin.sale_id),
+      {
+        state: String(origin.state),
+        saleId: origin.sale_id === null ? null : String(origin.sale_id),
+        draftId: origin.draft_id === null ? null : String(origin.draft_id),
+      },
     ]),
   );
   const newRows = normalizedRows.filter(
+    (row) => !originMap.has(`${row.sourceSheet}:${row.sourceRow}`),
+  );
+  const newDraftRows = normalizedDraftRows.filter(
     (row) => !originMap.has(`${row.sourceSheet}:${row.sourceRow}`),
   );
 
   for (let offset = 0; offset < newRows.length; offset += 250) {
     const chunk = newRows.slice(offset, offset + 250);
     const statements = chunk.flatMap((row) => {
-      const saleId = crypto.randomUUID();
       const productId = row.productName ? crypto.randomUUID() : null;
       const createdAt = nowIso();
       const productName = row.productName ?? "Não categorizado";
@@ -989,7 +1150,7 @@ async function importSales(
         .bind(
           ...(productKey
             ? [
-                saleId,
+                row.id,
                 productKey,
                 row.saleDate,
                 productKey,
@@ -1003,7 +1164,7 @@ async function importSales(
                 createdAt,
               ]
             : [
-                saleId,
+                row.id,
                 row.saleDate,
                 productName,
                 row.unitAmountCents,
@@ -1022,14 +1183,13 @@ async function importSales(
               .prepare(
                 `INSERT INTO products
                   (id, name, normalized_name, suggested_price_cents, is_active, version, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, 1, 1, ?, ?)
+                 VALUES (?, ?, ?, 0, 1, 1, ?, ?)
                  ON CONFLICT(normalized_name) DO NOTHING`,
               )
               .bind(
                 productId,
                 productName,
                 productKey,
-                row.unitAmountCents,
                 createdAt,
                 createdAt,
               ),
@@ -1058,7 +1218,7 @@ async function importSales(
           row.sourceSheet,
           row.sourceRow,
           createdAt,
-          saleId,
+          row.id,
         );
       return [...insertProduct, saleInsert, history];
     });
@@ -1080,14 +1240,60 @@ async function importSales(
     originMap = new Map(
       origins.map((origin) => [
         `${String(origin.source_sheet)}:${String(origin.source_row)}`,
-        String(origin.sale_id),
+        {
+          state: String(origin.state),
+          saleId: origin.sale_id === null ? null : String(origin.sale_id),
+          draftId: origin.draft_id === null ? null : String(origin.draft_id),
+        },
+      ]),
+    );
+  }
+
+  for (let offset = 0; offset < newDraftRows.length; offset += 250) {
+    const chunk = newDraftRows.slice(offset, offset + 250);
+    const statements = chunk.map((row) => env.DB.prepare(
+      `INSERT OR IGNORE INTO sales_pending_drafts
+        (id, status, customer_name, sale_date, sale_date_text, product_name,
+         total_cents, amount_text, notes, source_file_hash, source_file_name,
+         source_sheet, source_row, linked_sale_id, version, created_by, updated_by,
+         created_at, updated_at)
+       VALUES (?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, ?, ?, ?, ?)
+       `,
+    ).bind(
+      row.id,
+      row.customerName,
+      row.saleDate,
+      row.saleDateText,
+      row.productName,
+      row.totalCents,
+      row.amountText,
+      row.notes,
+      input.fileHash,
+      input.filename,
+      row.sourceSheet,
+      row.sourceRow,
+      actor.userId,
+      actor.userId,
+      now,
+      now,
+    ));
+    await env.DB.batch(statements);
+    origins = await salesImportOrigins(env, input.fileHash);
+    originMap = new Map(
+      origins.map((origin) => [
+        `${String(origin.source_sheet)}:${String(origin.source_row)}`,
+        {
+          state: String(origin.state),
+          saleId: origin.sale_id === null ? null : String(origin.sale_id),
+          draftId: origin.draft_id === null ? null : String(origin.draft_id),
+        },
       ]),
     );
   }
 
   const selectedIds = normalizedRows.flatMap((row) => {
-    const id = originMap.get(`${row.sourceSheet}:${row.sourceRow}`);
-    return id ? [id] : [];
+    const origin = originMap.get(`${row.sourceSheet}:${row.sourceRow}`);
+    return origin?.saleId ? [origin.saleId] : [];
   });
   const sales = selectedIds.length
     ? await asRows(
@@ -1103,7 +1309,12 @@ async function importSales(
     const row = byId.get(id);
     return row ? [saleOut(row)] : [];
   });
-  const importedCount = newRows.length;
+  const importedCount = newRows.filter((row) =>
+    originMap.get(`${row.sourceSheet}:${row.sourceRow}`)?.saleId === row.id,
+  ).length;
+  const pendingCount = newDraftRows.filter((row) =>
+    originMap.get(`${row.sourceSheet}:${row.sourceRow}`)?.draftId === row.id,
+  ).length;
   const completedAt = nowIso();
   await env.DB
     .prepare(
@@ -1117,11 +1328,219 @@ async function importSales(
       fileName: input.filename,
       importedCount,
       skippedCount: normalizedRows.length - importedCount,
-      replayed: importedCount === 0,
+      pendingCount,
+      skippedPendingCount: normalizedDraftRows.length - pendingCount,
+      replayed: importedCount === 0 && pendingCount === 0,
       sales: orderedSales,
     }),
-    importedCount === 0 ? 200 : 201,
+    importedCount === 0 && pendingCount === 0 ? 200 : 201,
   );
+}
+
+async function listSalesPendingDrafts(env: WorkerEnv): Promise<Response> {
+  const rows = await asRows(
+    env.DB.prepare(
+      "SELECT * FROM sales_pending_drafts WHERE status='pending' ORDER BY created_at DESC, id",
+    ),
+  );
+  return json(GetSalesPendingDraftsResponse.parse(rows.map(pendingDraftOut)));
+}
+
+async function updateSalesPendingDraft(
+  request: Request,
+  env: WorkerEnv,
+  actor: AuthContext,
+  id: string,
+): Promise<Response> {
+  const params = bodyParse(UpdateSalesPendingDraftParams, { id });
+  const input = bodyParse(UpdateSalesPendingDraftBody, await readJson(request));
+  const saleDate = input.saleDate instanceof Date
+    ? input.saleDate.toISOString().slice(0, 10)
+    : input.saleDate === null
+      ? null
+      : dateOnly(input.saleDate);
+  const customerName = input.customerName?.trim().replace(/\s+/g, " ") || null;
+  const productName = input.productName ? normalizeName(input.productName) : null;
+  const notes = input.notes?.trim() || null;
+  if (
+    (input.saleDate !== null && !saleDate) ||
+    (customerName !== null && customerName.length > 120) ||
+    (productName !== null && productName.length > 120) ||
+    (notes !== null && notes.length > 1000)
+  ) {
+    throw new ApiFailure(400, "Confira os dados informados para a pendência.");
+  }
+
+  const current = await env.DB
+    .prepare("SELECT * FROM sales_pending_drafts WHERE id=?")
+    .bind(params.id)
+    .first<Row>();
+  if (!current) throw new ApiFailure(404, "Pendência não encontrada.");
+  if (String(current.status) === "completed" && current.linked_sale_id) {
+    const completedSale = await env.DB
+      .prepare("SELECT * FROM sales WHERE id=?")
+      .bind(String(current.linked_sale_id))
+      .first<Row>();
+    return json(UpdateSalesPendingDraftResponse.parse({
+      status: "completed",
+      draft: pendingDraftOut(current),
+      sale: completedSale ? saleOut(completedSale) : null,
+    }));
+  }
+  if (Number(current.version) !== input.expectedVersion) {
+    throw new ApiFailure(409, "A pendência foi alterada. Atualize a lista antes de salvar.");
+  }
+
+  const amountText = input.totalCents === null
+    ? input.amountText?.trim() || null
+    : null;
+  const dateText = saleDate === null
+    ? input.saleDateText?.trim() || null
+    : null;
+  const updatedAt = nowIso();
+
+  if (!saleDate || input.totalCents === null) {
+    await env.DB.prepare(
+      `UPDATE sales_pending_drafts
+       SET customer_name=?, sale_date=?, sale_date_text=?, product_name=?,
+           total_cents=?, amount_text=?, notes=?, version=version+1,
+           updated_by=?, updated_at=?
+       WHERE id=? AND status='pending' AND version=?`,
+    ).bind(
+      customerName,
+      saleDate,
+      dateText,
+      productName,
+      input.totalCents,
+      amountText,
+      notes,
+      actor.userId,
+      updatedAt,
+      params.id,
+      input.expectedVersion,
+    ).run();
+    const updated = await env.DB
+      .prepare("SELECT * FROM sales_pending_drafts WHERE id=?")
+      .bind(params.id)
+      .first<Row>();
+    if (!updated) throw new ApiFailure(404, "Pendência não encontrada.");
+    if (Number(updated.version) !== input.expectedVersion + 1 || String(updated.status) !== "pending") {
+      throw new ApiFailure(409, "A pendência foi alterada. Atualize a lista antes de salvar.");
+    }
+    return json(UpdateSalesPendingDraftResponse.parse({
+      status: "pending",
+      draft: pendingDraftOut(updated),
+      sale: null,
+    }));
+  }
+
+  const saleId = crypto.randomUUID();
+  const productKey = productName ? nameKey(productName) : null;
+  const displayName = productName ?? "Não categorizado";
+  const productId = productKey ? crypto.randomUUID() : null;
+  const batch = [];
+  if (productKey) {
+    batch.push(env.DB.prepare(
+      `INSERT INTO products
+        (id, name, normalized_name, suggested_price_cents, is_active, version, created_at, updated_at)
+       SELECT ?, ?, ?, 0, 1, 1, ?, ?
+       WHERE EXISTS (
+         SELECT 1 FROM sales_pending_drafts WHERE id=? AND status='pending' AND version=?
+       )
+       ON CONFLICT(normalized_name) DO NOTHING`,
+    ).bind(productId, productName, productKey, updatedAt, updatedAt, params.id, input.expectedVersion));
+  }
+  batch.push(env.DB.prepare(
+    `INSERT INTO sales
+      (id, product_id, sale_date, product_name, quantity, unit_amount_cents, total_cents,
+       customer_name, notes, status, cancellation_reason, version, created_by, updated_by, created_at, updated_at)
+     SELECT ?, ${
+       productKey ? "(SELECT id FROM products WHERE normalized_name=?)" : "NULL"
+     }, ?, ${
+       productKey ? "(SELECT name FROM products WHERE normalized_name=?)" : "?"
+     }, 1, ?, ?, ?, ?, 'active', NULL, 1, ?, ?, ?, ?
+     WHERE EXISTS (
+       SELECT 1 FROM sales_pending_drafts WHERE id=? AND status='pending' AND version=?
+     )`,
+  ).bind(
+    ...(productKey
+      ? [
+          saleId, productKey, saleDate, productKey, input.totalCents, input.totalCents,
+          customerName, notes, actor.userId, actor.userId, updatedAt, updatedAt,
+          params.id, input.expectedVersion,
+        ]
+      : [
+          saleId, saleDate, displayName, input.totalCents, input.totalCents,
+          customerName, notes, actor.userId, actor.userId, updatedAt, updatedAt,
+          params.id, input.expectedVersion,
+        ]),
+  ));
+  batch.push(env.DB.prepare(
+    `INSERT INTO sales_history
+      (id, entity_type, entity_id, operation, actor_id, before_data, after_data, created_at)
+     SELECT ?, 'sale', s.id,
+       CASE WHEN d.source_file_hash IS NULL THEN 'create' ELSE 'import' END,
+       ?, NULL,
+       json_object('id', s.id, 'productId', s.product_id, 'saleDate', s.sale_date,
+         'productName', s.product_name, 'quantity', s.quantity,
+         'unitAmountCents', s.unit_amount_cents, 'totalCents', s.total_cents,
+         'customerName', s.customer_name, 'notes', s.notes, 'status', s.status,
+         'version', s.version, 'createdAt', s.created_at, 'updatedAt', s.updated_at,
+         'importBatchId', (SELECT id FROM sales_import_batches WHERE file_hash=d.source_file_hash AND source='sales-file' LIMIT 1),
+         'sourceFileHash', d.source_file_hash, 'sourceFileName', d.source_file_name,
+         'sourceSheet', d.source_sheet, 'sourceRow', d.source_row), ?
+     FROM sales s JOIN sales_pending_drafts d ON d.id=?
+     WHERE s.id=? AND d.status='pending' AND d.version=?`,
+  ).bind(crypto.randomUUID(), actor.userId, updatedAt, params.id, saleId, input.expectedVersion));
+  batch.push(env.DB.prepare(
+    `UPDATE sales_pending_drafts
+     SET status='completed', customer_name=?, sale_date=?, sale_date_text=NULL,
+         product_name=?, total_cents=?, amount_text=NULL, notes=?,
+         linked_sale_id=?, version=version+1, updated_by=?, updated_at=?
+     WHERE id=? AND status='pending' AND version=? AND EXISTS (SELECT 1 FROM sales WHERE id=?)`,
+  ).bind(
+    customerName,
+    saleDate,
+    productName,
+    input.totalCents,
+    notes,
+    saleId,
+    actor.userId,
+    updatedAt,
+    params.id,
+    input.expectedVersion,
+    saleId,
+  ));
+  await env.DB.batch(batch);
+
+  const updated = await env.DB
+    .prepare("SELECT * FROM sales_pending_drafts WHERE id=?")
+    .bind(params.id)
+    .first<Row>();
+  if (!updated) throw new ApiFailure(404, "Pendência não encontrada.");
+  if (String(updated.status) !== "completed" || String(updated.linked_sale_id) !== saleId) {
+    if (String(updated.status) === "completed" && updated.linked_sale_id) {
+      const existingSale = await env.DB
+        .prepare("SELECT * FROM sales WHERE id=?")
+        .bind(String(updated.linked_sale_id))
+        .first<Row>();
+      return json(UpdateSalesPendingDraftResponse.parse({
+        status: "completed",
+        draft: pendingDraftOut(updated),
+        sale: existingSale ? saleOut(existingSale) : null,
+      }));
+    }
+    throw new ApiFailure(409, "A pendência foi alterada. Atualize a lista antes de salvar.");
+  }
+  const completedSale = await env.DB
+    .prepare("SELECT * FROM sales WHERE id=?")
+    .bind(saleId)
+    .first<Row>();
+  return json(UpdateSalesPendingDraftResponse.parse({
+    status: "completed",
+    draft: pendingDraftOut(updated),
+    sale: completedSale ? saleOut(completedSale) : null,
+  }));
 }
 
 function monthEnd(month: string) {
@@ -1242,6 +1661,7 @@ async function buildFinancialBackup(
     fromDate?: string;
     toDate?: string;
     productName?: string | null;
+    cadastralStatus?: "all" | "needs-review" | "complete";
   },
   monthlyPeriod?: string,
 ) {
@@ -1269,12 +1689,23 @@ async function buildFinancialBackup(
     const product = sale.product_id ? productById.get(String(sale.product_id)) : undefined;
     return nameKey(String(product?.name ?? sale.product_name)) === nameKey(selected.productName);
   };
+  const saleNeedsReview = (sale: Row | undefined) =>
+    !String(sale?.customer_name ?? "").trim() || !sale?.product_id;
+  const cadastralStatusMatchesSale = (sale: Row | undefined) => {
+    if (selected.cadastralStatus === "needs-review") return saleNeedsReview(sale);
+    if (selected.cadastralStatus === "complete") return !saleNeedsReview(sale);
+    return true;
+  };
   const periodSales = allSales.filter(
-    (row) => dateInPeriod(String(row.sale_date)) && productMatchesSale(row),
+    (row) => dateInPeriod(String(row.sale_date))
+      && productMatchesSale(row)
+      && cadastralStatusMatchesSale(row),
   );
   const periodRefunds = allRefunds.filter((row) => {
     const sale = saleById.get(String(row.sale_id));
-    return dateInPeriod(String(row.refund_date)) && productMatchesSale(sale);
+    return dateInPeriod(String(row.refund_date))
+      && productMatchesSale(sale)
+      && cadastralStatusMatchesSale(sale);
   });
   const includedSaleIds = new Set([
     ...periodSales.map((row) => String(row.id)),
@@ -1403,6 +1834,7 @@ async function periodSalesBackup(request: Request, env: WorkerEnv) {
     fromDate: input.fromDate,
     toDate: input.toDate,
     productName: input.productName?.trim().replace(/\s+/g, " ") || null,
+    cadastralStatus: input.cadastralStatus ?? "all",
   };
   const data = await buildFinancialBackup(env, selected);
   const salesCents = data.periodSales.reduce((sum, row) => sum + BigInt(String(row.total_cents)), 0n);
@@ -1420,6 +1852,7 @@ async function periodSalesBackup(request: Request, env: WorkerEnv) {
     ...(input.fromDate ? { fromDate: input.fromDate } : {}),
     ...(input.toDate ? { toDate: input.toDate } : {}),
     ...(selected.productName ? { productName: selected.productName } : {}),
+    cadastralStatus: selected.cadastralStatus,
   };
   const period =
     input.mode === "all"
@@ -1435,7 +1868,9 @@ async function periodSalesBackup(request: Request, env: WorkerEnv) {
     generatedAt: nowIso(),
     period,
     selection,
-    partial: input.mode !== "all" || Boolean(selected.productName),
+    partial: input.mode !== "all"
+      || Boolean(selected.productName)
+      || selected.cadastralStatus !== "all",
     currency: "BRL",
     businessTimezone: "America/Sao_Paulo",
     counts: {
@@ -2271,6 +2706,13 @@ export async function handleSalesRequest(
   path: string,
 ): Promise<Response | null> {
   try {
+    if (path === "/sales/pending" && request.method === "GET") {
+      return await listSalesPendingDrafts(env);
+    }
+    const pendingDraftId = /^\/sales\/pending\/([0-9a-f-]+)$/i.exec(path)?.[1];
+    if (pendingDraftId && request.method === "PATCH") {
+      return await updateSalesPendingDraft(request, env, actor, pendingDraftId);
+    }
     if (path === "/sales/import/origins" && request.method === "GET") {
       const url = new URL(request.url);
       const query = bodyParse(GetSalesImportOriginsQueryParams, {
@@ -2282,7 +2724,9 @@ export async function handleSalesRequest(
           origins: origins.map((origin) => ({
             sourceSheet: String(origin.source_sheet),
             sourceRow: Number(origin.source_row),
-            saleId: String(origin.sale_id),
+            state: String(origin.state),
+            saleId: origin.sale_id === null ? null : String(origin.sale_id),
+            draftId: origin.draft_id === null ? null : String(origin.draft_id),
           })),
         }),
       );

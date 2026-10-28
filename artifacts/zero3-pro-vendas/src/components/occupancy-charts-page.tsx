@@ -17,7 +17,7 @@ import { ChartContainer } from '@/components/ui/chart';
 import { PurpleSelect } from '@/components/ui/purple-select';
 import { buildFinancialChartAnalytics } from '@/lib/financial-chart-data';
 import { buildOccupancyChartAnalytics, type OccupancyChartSupportRow } from '@/lib/occupancy-chart-data';
-import { getWeekdayName } from '@/lib/occupancy-calendar';
+import { getWeekdayName, getWeekdayNameForIsoDay } from '@/lib/occupancy-calendar';
 import { formatCents, formatMonthKey, getSaoPauloMonthKey, getSalesGoalComparison, isCompleteCalendarMonthRange, monthKeysBetween, monthsForYearQuarter } from '@/lib/sales-utils';
 import {
   changeOccupancyPeriod,
@@ -66,6 +66,12 @@ function periodLabel(value: string, mode: ViewMode) {
     return `${quarter}º tri · ${year}`;
   }
   return formatDay(value);
+}
+
+function financialPeriodLabel(value: string, mode: FinancialTimelineMode) {
+  if (mode === 'monthly') return formatMonthKey(value);
+  const formatted = formatDay(value);
+  return mode === 'weekly' ? `Sem. ${formatted.slice(0, 5)}` : formatted;
 }
 
 function formatCount(value: number | null) {
@@ -124,6 +130,7 @@ function CoverageNote({ covered, available }: { covered: number; available: numb
 }
 
 type FinancialPeriodMode = 'current' | 'single' | 'multiple' | 'quarter' | 'year' | 'range' | 'all';
+type FinancialTimelineMode = 'daily' | 'weekly' | 'monthly';
 type ShareBy = 'modality' | 'product';
 
 const financeColors = ['#7655a8', '#a9d75a', '#4d8d7b', '#d18b57', '#8b789b', '#6c9cb5', '#c16e78', '#b3a46b'];
@@ -141,6 +148,8 @@ function FinancialCharts({ onOccupancy }: { onOccupancy: () => void }) {
   const [productId, setProductId] = useState('');
   const [modalityId, setModalityId] = useState('');
   const [shareBy, setShareBy] = useState<ShareBy>('modality');
+  const [weekdays, setWeekdays] = useState<number[]>([]);
+  const [timelineMode, setTimelineMode] = useState<FinancialTimelineMode>('monthly');
 
   const invalid = (periodMode === 'single' && !singleMonth)
     || (periodMode === 'multiple' && months.length === 0)
@@ -160,8 +169,9 @@ function FinancialCharts({ onOccupancy }: { onOccupancy: () => void }) {
     }
     if (productId) query.productId = productId;
     if (modalityId) query.modalityId = modalityId;
+    if (weekdays.length) query.weekdays = [...weekdays].sort((a, b) => a - b);
     return query;
-  }, [periodMode, currentMonth, singleMonth, months, selectedYear, selectedQuarter, fromDate, toDate, productId, modalityId]);
+  }, [periodMode, currentMonth, singleMonth, months, selectedYear, selectedQuarter, fromDate, toDate, productId, modalityId, weekdays]);
 
   const scoreboard = useGetSalesScoreboard(params, {
     query: {
@@ -210,7 +220,7 @@ function FinancialCharts({ onOccupancy }: { onOccupancy: () => void }) {
     ? getSalesGoalComparison(
       BigInt(report?.totals.netCents ?? 0),
       goalMonths,
-      goalMode,
+      invalid ? 'invalid' : weekdays.length ? 'partial-range' : goalMode,
       productId ? selectedProduct!.name : null,
       goalsQuery.data ?? [],
     )
@@ -230,7 +240,14 @@ function FinancialCharts({ onOccupancy }: { onOccupancy: () => void }) {
     setToDate('');
     setProductId('');
     setModalityId('');
+    setWeekdays([]);
   };
+  const timelineRows = useMemo(() => {
+    if (!analytics) return [];
+    if (timelineMode === 'daily') return analytics.days.map((row) => ({ ...row, periodKey: row.date }));
+    if (timelineMode === 'weekly') return analytics.weeks.map((row) => ({ ...row, periodKey: row.weekStart }));
+    return analytics.months.map((row) => ({ ...row, periodKey: row.month }));
+  }, [analytics, timelineMode]);
   const chartBox = 'rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5';
   const money = (value: number) => value < 0 ? `−${formatCents(Math.abs(value))}` : formatCents(value);
 
@@ -294,6 +311,19 @@ function FinancialCharts({ onOccupancy }: { onOccupancy: () => void }) {
             />
           </label>
         </div>
+        <fieldset className="mt-4 border-t border-[#efebf0] pt-3">
+          <legend className={labelClass}>Dia da semana da movimentação</legend>
+          <div className="mt-2 flex flex-wrap gap-1.5" data-testid="filters-financial-weekdays">
+            {[1, 2, 3, 4, 5, 6, 7].map((weekday) => {
+              const selected = weekdays.includes(weekday);
+              return <label key={weekday} className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-bold ${selected ? 'border-[#7656b8] bg-[#eee8f7] text-[#5d4a78]' : 'border-[#e7e2ea] bg-white text-[#746c7e]'}`}>
+                <input type="checkbox" checked={selected} onChange={() => setWeekdays((current) => selected ? current.filter((item) => item !== weekday) : [...current, weekday].sort())} className="accent-[#7656b8]" data-testid={`filter-financial-weekday-${weekday}`} />
+                {getWeekdayNameForIsoDay(weekday)}
+              </label>;
+            })}
+          </div>
+          {weekdays.length > 0 && <p className="mt-2 text-[10px] leading-4 text-[#827b8b]" role="status" data-testid="status-financial-weekday-filter">Vendas são consideradas pela data da venda; estornos, pela data efetiva do estorno. A comparação com metas mensais não se aplica a este recorte.</p>}
+        </fieldset>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
           {invalid ? <p className="flex items-center gap-2 text-xs font-semibold text-[#a24f4d]" role="alert" data-testid="status-financial-invalid-filter"><CircleAlert size={14} />{periodMode === 'range' ? 'Informe um intervalo válido, com data inicial e final.' : periodMode === 'quarter' || periodMode === 'year' ? 'Informe um ano válido entre 1000 e 9999.' : 'Selecione ao menos um mês para consultar.'}</p> : productModalityConflict ? <p className="text-xs font-semibold text-[#765c31]" role="status" data-testid="status-financial-scope-conflict">O produto selecionado não está vinculado à modalidade escolhida. A combinação não tem vendas classificadas.</p> : <span className="text-[10px] text-[#837b8b]" data-testid="status-financial-filter-scope">Filtros aplicados diretamente ao Scoreboard oficial.</span>}
           <button type="button" onClick={clearFilters} className="rounded-lg px-3 py-2 text-xs font-semibold text-[#766d83] hover:bg-[#f6f3f8]" data-testid="button-financial-clear-filters">Limpar filtros</button>
@@ -316,8 +346,12 @@ function FinancialCharts({ onOccupancy }: { onOccupancy: () => void }) {
               </article>
             </section>
             <section className="grid gap-5 xl:grid-cols-[1.25fr_.75fr]">
-              <article className={chartBox} data-testid="chart-financial-monthly"><SectionHeading eyebrow="movimento no tempo" title="Vendas, estornos e líquido" detail="Colunas agrupadas · R$" />
-                {analytics.months.length ? <ChartContainer role="img" aria-label="Vendas, estornos e líquido por mês, em reais" config={{ salesCents: { label: 'Vendas', color: '#7655a8' }, refundCents: { label: 'Estornos', color: '#d18b57' }, netCents: { label: 'Líquido', color: '#6f9d45' } }} className="h-[310px] w-full"><BarChart data={analytics.months} margin={{ top: 6, right: 8, bottom: 4, left: 6 }}><CartesianGrid vertical={false} stroke="#eee9f1" /><XAxis dataKey="month" tickFormatter={formatMonthKey} tick={{ fill: palette.muted, fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis tickFormatter={(value) => money(Number(value))} tick={{ fill: palette.muted, fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip labelFormatter={(label) => formatMonthKey(String(label))} formatter={(value, name) => [money(Number(value)), String(name)]} /><Bar dataKey="salesCents" name="Vendas" fill="#7655a8" radius={[4, 4, 0, 0]} /><Bar dataKey="refundCents" name="Estornos" fill="#d18b57" radius={[4, 4, 0, 0]} /><Bar dataKey="netCents" name="Líquido" fill="#6f9d45" radius={[4, 4, 0, 0]} /></BarChart></ChartContainer> : <ChartEmpty title="Sem dados mensais" detail="O Scoreboard não retornou meses com movimentação neste recorte." />}
+              <article className={chartBox} data-testid="chart-financial-monthly">
+                <SectionHeading eyebrow="movimento no tempo" title="Vendas, estornos e líquido" detail="Colunas agrupadas · R$" />
+                <div className="mb-3 flex flex-wrap gap-1 rounded-full bg-[#f3f0f5] p-1" role="group" aria-label="Granularidade da evolução financeira" data-testid="group-financial-timeline">
+                  {(['daily', 'weekly', 'monthly'] as const).map((mode) => <button key={mode} type="button" aria-pressed={timelineMode === mode} onClick={() => setTimelineMode(mode)} className={`rounded-full px-3 py-1.5 text-[10px] font-bold ${timelineMode === mode ? 'bg-[#65479c] text-white' : 'text-[#716879]'}`} data-testid={`button-financial-timeline-${mode}`}>{mode === 'daily' ? 'Diária' : mode === 'weekly' ? 'Semanal' : 'Mensal'}</button>)}
+                </div>
+                {timelineRows.length ? <ChartContainer role="img" aria-label={`Vendas, estornos e líquido por período ${timelineMode === 'daily' ? 'diário' : timelineMode === 'weekly' ? 'semanal' : 'mensal'}, em reais`} config={{ salesCents: { label: 'Vendas', color: '#7655a8' }, refundCents: { label: 'Estornos', color: '#d18b57' }, netCents: { label: 'Líquido', color: '#6f9d45' } }} className="h-[310px] w-full"><BarChart data={timelineRows} margin={{ top: 6, right: 8, bottom: 4, left: 6 }}><CartesianGrid vertical={false} stroke="#eee9f1" /><XAxis dataKey="periodKey" interval="preserveStartEnd" tickFormatter={(value) => financialPeriodLabel(String(value), timelineMode)} tick={{ fill: palette.muted, fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis tickFormatter={(value) => money(Number(value))} tick={{ fill: palette.muted, fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip labelFormatter={(label) => financialPeriodLabel(String(label), timelineMode)} formatter={(value, name) => [money(Number(value)), String(name)]} /><Bar dataKey="salesCents" name="Vendas" fill="#7655a8" radius={[4, 4, 0, 0]} /><Bar dataKey="refundCents" name="Estornos" fill="#d18b57" radius={[4, 4, 0, 0]} /><Bar dataKey="netCents" name="Líquido" fill="#6f9d45" radius={[4, 4, 0, 0]} /></BarChart></ChartContainer> : <ChartEmpty title={`Sem dados ${timelineMode === 'daily' ? 'diários' : timelineMode === 'weekly' ? 'semanais' : 'mensais'}`} detail="O Scoreboard não retornou movimentações nesta granularidade e neste recorte." />}
               </article>
               <article className={chartBox} data-testid="chart-financial-share">
                 <div className="flex flex-wrap items-start justify-between gap-2"><SectionHeading eyebrow="composição das vendas" title="Participação no bruto" detail="Somente vendas acima de zero" /><div className="flex rounded-full bg-[#f3f0f5] p-1" role="group" aria-label="Agrupar participação por" data-testid="group-financial-share-mode"><button type="button" aria-pressed={shareBy === 'modality'} onClick={() => setShareBy('modality')} className={`rounded-full px-3 py-1.5 text-[10px] font-bold ${shareBy === 'modality' ? 'bg-[#65479c] text-white' : 'text-[#716879]'}`} data-testid="button-share-by-modality">Modalidade</button><button type="button" aria-pressed={shareBy === 'product'} onClick={() => setShareBy('product')} className={`rounded-full px-3 py-1.5 text-[10px] font-bold ${shareBy === 'product' ? 'bg-[#65479c] text-white' : 'text-[#716879]'}`} data-testid="button-share-by-product">Produto</button></div></div>
@@ -327,7 +361,7 @@ function FinancialCharts({ onOccupancy }: { onOccupancy: () => void }) {
             <article className={chartBox} data-testid="chart-financial-quantity"><SectionHeading eyebrow="volume vendido" title="Unidades por produto" detail="Soma das quantidades registradas, não contagem de vendas" />
               {analytics.byProduct.length ? <ChartContainer role="img" aria-label="Quantidade total de unidades vendidas por produto" config={{ quantity: { label: 'Unidades', color: '#6f9d45' } }} className="h-[300px] w-full"><BarChart data={analytics.byProduct} layout="vertical" margin={{ top: 4, right: 12, bottom: 4, left: 8 }}><CartesianGrid horizontal={false} stroke="#eee9f1" /><XAxis type="number" tickFormatter={(value) => Number(value).toLocaleString('pt-BR')} tick={{ fill: palette.muted, fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis type="category" dataKey="name" width={150} tick={{ fill: palette.ink, fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip formatter={(value) => [`${Number(value).toLocaleString('pt-BR')} unidades`, 'Quantidade']} labelStyle={{ color: palette.ink }} /><Bar dataKey="quantity" name="Unidades" fill="#6f9d45" radius={[0, 6, 6, 0]} maxBarSize={22} /></BarChart></ChartContainer> : <ChartEmpty title="Sem unidades neste recorte" detail="Não há quantidades registradas por produto." />}
             </article>
-            {productModalityConflict ? <p className="rounded-xl bg-[#f6f3f8] px-4 py-3 text-xs text-[#716879]" data-testid="status-financial-goal-unavailable">Meta não comparada: o produto não pertence à modalidade selecionada.</p> : modalityId && !productId ? <p className="rounded-xl bg-[#f6f3f8] px-4 py-3 text-xs text-[#716879]" data-testid="status-financial-goal-unavailable">Meta não exibida: o recorte por modalidade não corresponde a uma meta mensal geral ou por produto.</p> : productId && !selectedProduct ? <p className="rounded-xl bg-[#f6f3f8] px-4 py-3 text-xs text-[#716879]" data-testid="status-financial-goal-unavailable">Meta não exibida: o produto selecionado não está disponível para comparação.</p> : comparison?.status === 'partial-range' ? <p className="rounded-xl bg-[#f6f3f8] px-4 py-3 text-xs text-[#716879]" data-testid="status-financial-goal-partial-range">Meta mensal não aplicada: o intervalo não cobre meses completos.</p> : comparison?.status === 'partial' ? <p className="rounded-xl bg-[#fbf4e7] px-4 py-3 text-xs text-[#765c31]" data-testid="status-financial-goal-partial">Cobertura parcial da meta: configurada para {comparison.configuredGoalCount} de {comparison.monthCount} meses. O combinado não é apresentado.</p> : comparison?.status === 'complete' ? <section className="flex flex-wrap items-center justify-between gap-4 rounded-[22px] border border-[#dfe8d3] bg-[#f5f9ef] px-5 py-4" data-testid="panel-financial-goal-comparison"><div><p className="text-[9px] font-bold uppercase tracking-[.12em] text-[#688646]">meta mensal · cobertura completa</p><p className="mt-1 text-lg font-extrabold text-[#3c4e2e]" data-testid="text-financial-goal-target">{formatCents(comparison.targetCents)} <span className="text-xs font-medium text-[#738064]">de meta</span></p></div><div className="text-right"><p className="text-xs font-semibold text-[#59694b]" data-testid="text-financial-goal-achievement">{(Number(comparison.achievementTenthsPercent) / 10).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% atingido</p><p className="mt-1 text-[10px] text-[#738064]" data-testid="text-financial-goal-actual">Realizado líquido: {money(analytics.totals.netCents)}</p><p className="mt-1 text-[10px] font-semibold text-[#59694b]" data-testid="text-financial-goal-difference">{BigInt(analytics.totals.netCents) >= comparison.targetCents ? `Excedente: ${formatCents(BigInt(analytics.totals.netCents) - comparison.targetCents)}` : `Falta: ${formatCents(comparison.targetCents - BigInt(analytics.totals.netCents))}`}</p></div></section> : null}
+            {productModalityConflict ? <p className="rounded-xl bg-[#f6f3f8] px-4 py-3 text-xs text-[#716879]" data-testid="status-financial-goal-unavailable">Meta não comparada: o produto não pertence à modalidade selecionada.</p> : modalityId && !productId ? <p className="rounded-xl bg-[#f6f3f8] px-4 py-3 text-xs text-[#716879]" data-testid="status-financial-goal-unavailable">Meta não exibida: o recorte por modalidade não corresponde a uma meta mensal geral ou por produto.</p> : productId && !selectedProduct ? <p className="rounded-xl bg-[#f6f3f8] px-4 py-3 text-xs text-[#716879]" data-testid="status-financial-goal-unavailable">Meta não exibida: o produto selecionado não está disponível para comparação.</p> : comparison?.status === 'partial-range' ? <p className="rounded-xl bg-[#f6f3f8] px-4 py-3 text-xs text-[#716879]" data-testid="status-financial-goal-partial-range">Meta mensal não aplicada: o recorte contém parte de meses ou filtra dias da semana.</p> : comparison?.status === 'partial' ? <p className="rounded-xl bg-[#fbf4e7] px-4 py-3 text-xs text-[#765c31]" data-testid="status-financial-goal-partial">Cobertura parcial da meta: configurada para {comparison.configuredGoalCount} de {comparison.monthCount} meses. O combinado não é apresentado.</p> : comparison?.status === 'complete' ? <section className="flex flex-wrap items-center justify-between gap-4 rounded-[22px] border border-[#dfe8d3] bg-[#f5f9ef] px-5 py-4" data-testid="panel-financial-goal-comparison"><div><p className="text-[9px] font-bold uppercase tracking-[.12em] text-[#688646]">meta mensal · cobertura completa</p><p className="mt-1 text-lg font-extrabold text-[#3c4e2e]" data-testid="text-financial-goal-target">{formatCents(comparison.targetCents)} <span className="text-xs font-medium text-[#738064]">de meta</span></p></div><div className="text-right"><p className="text-xs font-semibold text-[#59694b]" data-testid="text-financial-goal-achievement">{(Number(comparison.achievementTenthsPercent) / 10).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% atingido</p><p className="mt-1 text-[10px] text-[#738064]" data-testid="text-financial-goal-actual">Realizado líquido: {money(analytics.totals.netCents)}</p><p className="mt-1 text-[10px] font-semibold text-[#59694b]" data-testid="text-financial-goal-difference">{BigInt(analytics.totals.netCents) >= comparison.targetCents ? `Excedente: ${formatCents(BigInt(analytics.totals.netCents) - comparison.targetCents)}` : `Falta: ${formatCents(comparison.targetCents - BigInt(analytics.totals.netCents))}`}</p></div></section> : null}
           </>}
     </section>
   );

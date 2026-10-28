@@ -4,7 +4,8 @@ export type SalesImportField =
   | "customerName"
   | "saleDate"
   | "totalAmount"
-  | "productName";
+  | "productName"
+  | "notes";
 
 export type SalesImportMapping = Record<SalesImportField, number | null>;
 
@@ -46,15 +47,31 @@ export type MappedSalesImportRow = {
   key: string;
   sourceSheet: string;
   sourceRow: number;
-  customerName: string;
+  customerName: string | null;
   saleDate: string;
   totalCents: number;
   productName: string | null;
+  notes: string | null;
+};
+
+export type MappedSalesDraftRow = {
+  key: string;
+  sourceSheet: string;
+  sourceRow: number;
+  customerName: string | null;
+  saleDate: string | null;
+  saleDateText: string | null;
+  totalCents: number | null;
+  amountText: string | null;
+  productName: string | null;
+  notes: string | null;
 };
 
 export type SalesImportRowResult = {
   kind: "ready" | "pending" | "auxiliary";
   value: MappedSalesImportRow | null;
+  draftValue: MappedSalesDraftRow | null;
+  needsVerification: boolean;
   errors: string[];
   reason: string;
   dateSource: string;
@@ -72,6 +89,7 @@ const emptyMapping = (): SalesImportMapping => ({
   saleDate: null,
   totalAmount: null,
   productName: null,
+  notes: null,
 });
 
 function normalizeHeader(value: unknown): string {
@@ -106,7 +124,12 @@ function headerMatch(value: unknown, field: SalesImportField): number {
     if (/^(valor|total)$/.test(header)) return 2;
     return 0;
   }
-  if (/^(produto|plano|categoria|product|plan|category)$/.test(header)) return 3;
+  if (field === "productName") {
+    return /^(produto|plano|plano produto|produto plano|categoria|product|plan|category)$/.test(header) ? 3 : 0;
+  }
+  if (field === "notes") {
+    return /^(observacao|observacoes|nota|notas|notes|obs)$/.test(header) ? 3 : 0;
+  }
   return 0;
 }
 
@@ -186,6 +209,7 @@ export async function parseSalesSpreadsheet(
         saleDate: detectColumn(header.cells, "saleDate"),
         totalAmount: detectColumn(header.cells, "totalAmount"),
         productName: detectColumn(header.cells, "productName"),
+        notes: detectColumn(header.cells, "notes"),
       } : emptyMapping(),
       dateInferred: false,
       dateAmbiguous: false,
@@ -342,11 +366,14 @@ export function mapSalesImportRow(
   const saleDate = parseImportDate(cell("saleDate"), sheet.date1904);
   const totalCents = parseImportMoney(cell("totalAmount"));
   const rawProduct = String(cell("productName") ?? "").trim().replace(/\s+/g, " ");
+  const rawNotes = String(cell("notes") ?? "").trim();
+  const rawDateText = String(cell("saleDate") ?? "").trim();
+  const rawAmountText = String(cell("totalAmount") ?? "").trim();
   const nonempty = row.sourceCells.filter((source) => String(source.value ?? "").trim());
   const hasCore = (["customerName", "saleDate", "totalAmount"] as const)
     .some((field) => String(cell(field) ?? "").trim());
   const optionalOnly = nonempty.length > 0 && nonempty.every((source) =>
-    /^(modalidade|recorrencia|produto|plano|categoria|observacao|observacoes|nota|notas)$/.test(normalizeHeader(block.columns[source.column]?.label)),
+    /^(modalidade|recorrencia|produto|plano|categoria|observacao|observacoes|nota|notas|notes|obs)$/.test(normalizeHeader(block.columns[source.column]?.label)),
   );
   const hasOtherEvidence = nonempty.some((source) =>
     dateEvidence(row, source.column, block, sheet.date1904)
@@ -364,17 +391,45 @@ export function mapSalesImportRow(
     }
     return `${label}${source ? ` (${source.address})` : ""}.`;
   };
-  if (!customerName) errors.push(fieldError("customerName", "Nome do cliente ausente"));
-  else if (customerName.length > 120) errors.push("Nome do cliente acima de 120 caracteres.");
+  if (customerName.length > 120) errors.push("Nome do cliente acima de 120 caracteres.");
+  if (rawProduct.length > 500) errors.push("Plano/produto acima de 500 caracteres.");
+  if (rawNotes.length > 1000) errors.push("Observação acima de 1000 caracteres.");
   if (!saleDate) errors.push(fieldError("saleDate", dateColumn === null
     ? "Data não identificada com segurança; confirme a coluna uma vez neste bloco"
     : "Data da venda ausente ou inválida"));
   if (totalCents === null) errors.push(fieldError("totalAmount", "Valor da venda ausente, inválido ou negativo"));
+  const isComplete = Boolean(saleDate && totalCents !== null)
+    && customerName.length <= 120
+    && rawProduct.length <= 120
+    && rawNotes.length <= 1000;
   const reason = auxiliary
     ? `Somente conteúdo auxiliar, sem lançamento nos campos obrigatórios. Células preenchidas: ${nonempty.map((source) => source.address).join(", ") || "nenhuma"}.`
     : errors.join(" ");
+  const draftValue = !auxiliary && !isComplete ? {
+    key: row.key,
+    sourceSheet: sheet.name,
+    sourceRow: row.sourceRow,
+    customerName: customerName || null,
+    saleDate,
+    saleDateText: rawDateText.slice(0, 200) || null,
+    totalCents,
+    amountText: rawAmountText.slice(0, 120) || null,
+    productName: rawProduct.slice(0, 500) || null,
+    notes: rawNotes.slice(0, 1000) || null,
+  } : null;
+  const value = !auxiliary && isComplete ? {
+    key: row.key,
+    sourceSheet: sheet.name,
+    sourceRow: row.sourceRow,
+    customerName: customerName || null,
+    saleDate: saleDate!,
+    totalCents: totalCents!,
+    productName: rawProduct || null,
+    notes: rawNotes || null,
+  } : null;
   return {
-    kind: auxiliary ? "auxiliary" : errors.length ? "pending" : "ready",
+    kind: auxiliary ? "auxiliary" : value ? "ready" : "pending",
+    needsVerification: Boolean(value && (!customerName || !rawProduct)),
     reason,
     dateSource: dateColumn === null ? "Data não identificada" : `${excelColumnName(dateColumn)}${row.sourceRow} · ${block.columns[dateColumn]?.label ?? ""}${dateFallback || block.dateInferred ? " (única data identificável)" : ""}`,
     preview: {
@@ -384,23 +439,8 @@ export function mapSalesImportRow(
       amountText: String(cell("totalAmount") ?? "").trim(),
       productName: rawProduct.length <= 120 ? rawProduct || null : null,
     },
-    value: !auxiliary && customerName
-      && customerName.length <= 120
-      && saleDate
-      && totalCents !== null
-      && mapping.customerName !== null
-      && dateColumn !== null
-      && mapping.totalAmount !== null
-      ? {
-          key: row.key,
-          sourceSheet: sheet.name,
-          sourceRow: row.sourceRow,
-          customerName,
-          saleDate,
-          totalCents,
-           productName: rawProduct.length <= 120 ? rawProduct || null : null,
-        }
-      : null,
+    value,
+    draftValue,
     errors: auxiliary ? [] : errors,
   };
 }

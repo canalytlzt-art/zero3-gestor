@@ -1,8 +1,11 @@
 import { SELF } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
+import * as XLSX from "xlsx";
+import type { Product, Sale, SalesRefundRecord } from "@workspace/api-client-react";
 import { buildFinancialChartAnalytics } from "../lib/financial-chart-data";
 import { buildOccupancyChartAnalytics } from "../lib/occupancy-chart-data";
+import { createSalesWorkbook } from "../lib/sales-workbook";
 import { handleOccupancyRequest } from "./occupancy";
 import { handleSalesRequest } from "./sales";
 import type { AuthContext, WorkerEnv } from "./types";
@@ -14,6 +17,10 @@ const authorizedFixture: AuthContext = {
   email: "worker-test@example.invalid",
   authorized: true,
 };
+
+function normalizedProductName(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR");
+}
 
 async function callSales(
   path: string,
@@ -217,11 +224,32 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
       totalCents: 2_900,
       customerName: "Cliente sintético",
     });
+    expect(sale.payload.productId).toBeTruthy();
+
+    const saleWithNameVariant = await callSales("/sales", "POST", {
+      saleDate: "2027-01-03",
+      productName: `  ${productName.toLocaleUpperCase("pt-BR").replace(/ /g, "   ")}  `,
+      quantity: 1,
+      unitAmountCents: 9_876,
+      customerName: "Cliente sintético 2",
+      notes: null,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(saleWithNameVariant.response.status).toBe(201);
+    expect(saleWithNameVariant.payload.productId).toBe(sale.payload.productId);
 
     const saleId = sale.payload.id as string;
     const products = await callSales("/products");
     expect(products.response.status).toBe(200);
-    expect(products.payload.some((product: { name: string }) => product.name === productName)).toBe(true);
+    const matchingProducts = products.payload.filter(
+      (product: { name: string }) => normalizedProductName(product.name) === normalizedProductName(productName),
+    );
+    expect(matchingProducts).toHaveLength(1);
+    expect(matchingProducts[0]).toMatchObject({
+      id: sale.payload.productId,
+      name: productName,
+      suggestedPriceCents: 0,
+    });
 
     const sales = await callSales("/sales");
     const history = await callSales("/sales/history");
@@ -248,6 +276,26 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
       totalCents: 4_500,
       customerName: "Cliente atualizado",
       version: 2,
+    });
+    const editedProductName = `Produto da edição ${unique}`;
+    const updatedWithNewProduct = await callSales(`/sales/${saleId}`, "PATCH", {
+      saleDate: "2026-12-03",
+      productName: editedProductName,
+      quantity: 3,
+      unitAmountCents: 1_500,
+      customerName: "Cliente atualizado",
+      notes: "Venda editada no teste D1",
+      idempotencyKey: crypto.randomUUID(),
+      expectedVersion: updatedSale.payload.version,
+    });
+    expect(updatedWithNewProduct.response.status).toBe(200);
+    expect(updatedWithNewProduct.payload.productName).toBe(editedProductName);
+    const editedProduct = (await callSales("/products")).payload.find(
+      (product: { name: string }) => product.name === editedProductName,
+    );
+    expect(editedProduct).toMatchObject({
+      id: updatedWithNewProduct.payload.productId,
+      suggestedPriceCents: 0,
     });
     const reloadedSales = await callSales("/sales");
     expect(reloadedSales.payload.find((row: { id: string }) => row.id === saleId)).toMatchObject({
@@ -376,15 +424,30 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
   });
 
   it("imports into isolated D1 idempotently and reconciles the dashboard", async () => {
+    const unique = crypto.randomUUID();
+    const fileHash = unique.replace(/-/g, "").repeat(2);
+    const existingProductName = `Produto existente ${unique}`;
+    const newProductName = `Plano automático ${unique}`;
+    const distinctProductName = `Plano distinto ${unique}`;
+
+    const existingProduct = await callSales("/products", "POST", {
+      name: existingProductName,
+      suggestedPriceCents: 5_555,
+      modalityId: null,
+      isActive: true,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(existingProduct.response.status).toBe(201);
+
     const importBody = {
-      fileHash: "b".repeat(64),
+      fileHash,
       filename: "vendas-d1-sinteticas.xlsx",
       rows: [
         {
           customerName: "Cliente sintético D1",
           saleDate: "2026-09-12",
-          totalCents: 1_250,
-          productName: "Plano sintético importado",
+          totalCents: 1_800,
+          productName: `  ${existingProductName.toLocaleUpperCase("pt-BR").replace(/ /g, "   ")}  `,
           sourceSheet: "Setembro",
           sourceRow: 2,
         },
@@ -392,49 +455,392 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
           customerName: "Cliente sintético D1",
           saleDate: "2026-09-12",
           totalCents: 1_250,
-          productName: "Plano sintético importado",
+          productName: newProductName,
           sourceSheet: "Setembro",
           sourceRow: 3,
+        },
+        {
+          customerName: "Cliente sintético D1",
+          saleDate: "2026-09-13",
+          totalCents: 3_250,
+          productName: `  ${newProductName.toLocaleUpperCase("pt-BR").replace(/ /g, "   ")}  `,
+          sourceSheet: "Setembro",
+          sourceRow: 4,
+        },
+        {
+          customerName: "Cliente sintético D1",
+          saleDate: "2026-09-14",
+          totalCents: 700,
+          productName: distinctProductName,
+          sourceSheet: "Setembro",
+          sourceRow: 5,
         },
       ],
     };
 
+    const preview = await callSales(`/sales/import/origins?fileHash=${fileHash}`);
+    expect(preview.response.status).toBe(200);
+    expect(preview.payload.origins).toEqual([]);
+    const productsBeforeConfirmation = await callSales("/products");
+    expect(productsBeforeConfirmation.payload.some(
+      (product: { name: string }) => normalizedProductName(product.name) === normalizedProductName(newProductName),
+    )).toBe(false);
+
     const firstImport = await callSales("/sales/import", "POST", importBody);
     expect(firstImport.response.status).toBe(201);
     expect(firstImport.payload).toMatchObject({
-      importedCount: 2,
+      importedCount: 4,
       skippedCount: 0,
       replayed: false,
     });
-    expect(new Set(firstImport.payload.sales.map((sale: { id: string }) => sale.id)).size).toBe(2);
+    expect(new Set(firstImport.payload.sales.map((sale: { id: string }) => sale.id)).size).toBe(4);
+
+    const [existingSale, firstNewSale, secondNewSale, distinctSale] = firstImport.payload.sales as Array<{
+      id: string;
+      productId: string;
+      productName: string;
+    }>;
+    expect(existingSale.productId).toBe(existingProduct.payload.id);
+    expect(firstNewSale.productId).toBe(secondNewSale.productId);
+    expect(firstNewSale.productName).toBe(newProductName);
+    expect(secondNewSale.productName).toBe(newProductName);
+    expect(distinctSale.productId).not.toBe(firstNewSale.productId);
+
+    const productsAfterImport = await callSales("/products");
+    const importedProducts = productsAfterImport.payload.filter((product: { name: string }) =>
+      [existingProductName, newProductName, distinctProductName]
+        .some((name) => normalizedProductName(name) === normalizedProductName(product.name)),
+    );
+    expect(importedProducts).toHaveLength(3);
+    expect(importedProducts.find((product: { id: string }) => product.id === existingProduct.payload.id))
+      .toMatchObject({ suggestedPriceCents: 5_555, isActive: true });
+    expect(importedProducts.filter((product: { name: string }) =>
+      normalizedProductName(product.name) !== normalizedProductName(existingProductName),
+    ).every((product: { suggestedPriceCents: number }) => product.suggestedPriceCents === 0)).toBe(true);
 
     const replay = await callSales("/sales/import", "POST", importBody);
     expect(replay.response.status).toBe(200);
     expect(replay.payload).toMatchObject({
       importedCount: 0,
-      skippedCount: 2,
+      skippedCount: 4,
       replayed: true,
     });
     expect(replay.payload.sales.map((sale: { id: string }) => sale.id)).toEqual(
       firstImport.payload.sales.map((sale: { id: string }) => sale.id),
     );
+    const productsAfterReplay = await callSales("/products");
+    expect(productsAfterReplay.payload.filter((product: { name: string }) =>
+      normalizedProductName(product.name) === normalizedProductName(newProductName),
+    )).toHaveLength(1);
 
     const refreshedSales = await callSales("/sales");
     expect(refreshedSales.response.status).toBe(200);
     for (const sale of firstImport.payload.sales as Array<{ id: string }>) {
       expect(refreshedSales.payload.some((row: { id: string }) => row.id === sale.id)).toBe(true);
     }
+    const salesHistory = await callSales("/sales/history");
+    expect(salesHistory.response.status).toBe(200);
+    expect(salesHistory.payload.find((sale: { id: string }) => sale.id === firstNewSale.id))
+      .toMatchObject({ productId: firstNewSale.productId, productName: newProductName });
+
+    const importedProductRefund = await callSales(`/sales/${firstNewSale.id}/refunds`, "POST", {
+      refundDate: "2026-09-15",
+      amountCents: 500,
+      reason: "Estorno sintético do produto importado",
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(importedProductRefund.response.status).toBe(201);
 
     const scoreboard = await callSales("/sales/scoreboard?months=2026-09");
     expect(scoreboard.response.status).toBe(200);
     expect(scoreboard.payload.totals).toMatchObject({
+      quantity: 4,
+      salesCents: 7_000,
+      refundCents: 500,
+      netCents: 6_500,
+    });
+    const scoreboardProducts = scoreboard.payload.products as Array<{
+      productId: string;
+      productName: string;
+      quantity: number;
+      salesCents: number;
+      refundCents: number;
+      netCents: number;
+    }>;
+    expect(scoreboardProducts).toHaveLength(3);
+    expect(scoreboardProducts.find((product) => product.productId === firstNewSale.productId))
+      .toMatchObject({
+        productName: newProductName,
+        quantity: 2,
+        salesCents: 4_500,
+        refundCents: 500,
+        netCents: 4_000,
+      });
+    expect(scoreboardProducts.find((product) => product.productId === distinctSale.productId))
+      .toMatchObject({ productName: distinctProductName, quantity: 1, salesCents: 700, netCents: 700 });
+
+    const productFilter = await callSales(
+      `/sales/scoreboard?months=2026-09&productId=${firstNewSale.productId}`,
+    );
+    expect(productFilter.response.status).toBe(200);
+    expect(productFilter.payload.totals).toMatchObject({
       quantity: 2,
+      salesCents: 4_500,
+      refundCents: 500,
+      netCents: 4_000,
+    });
+
+    const customRange = await callSales(
+      "/sales/scoreboard?fromDate=2026-09-13&toDate=2026-09-14",
+    );
+    expect(customRange.response.status).toBe(200);
+    expect(customRange.payload.totals).toMatchObject({
+      quantity: 2,
+      salesCents: 3_950,
+      refundCents: 0,
+      netCents: 3_950,
+    });
+
+    const charts = buildFinancialChartAnalytics(scoreboard.payload);
+    expect(charts.reconcilesByProduct).toBe(true);
+    expect(charts.reconcilesByMonth).toBe(true);
+    expect(charts.byProduct).toHaveLength(3);
+    expect(charts.byProduct.reduce((sum, product) => sum + product.quantity, 0)).toBe(4);
+    expect(charts.byProduct.reduce((sum, product) => sum + product.netCents, 0)).toBe(6_500);
+    expect(charts.salesShareByProduct.reduce((sum, product) => sum + product.salesCents, 0)).toBe(7_000);
+    expect(charts.salesShareByProduct.find((product) => product.key === firstNewSale.productId)?.salesCents)
+      .toBe(4_500);
+    expect((4_500 / 7_000) * 100).toBeCloseTo(64.3, 1);
+
+    const refunds = await callSales("/sales/refunds");
+    const workbook = createSalesWorkbook(
+      salesHistory.payload as Sale[],
+      refunds.payload as SalesRefundRecord[],
+      productsAfterImport.payload as Product[],
+      {
+        selection: { mode: "months", months: ["2026-09"] },
+        productName: newProductName,
+        generatedAt: "28/10/2026, 09:00:00",
+      },
+    );
+    const exportSummary = XLSX.utils.sheet_to_json(
+      workbook.Sheets["Resumo por plano"]!,
+      { header: 1, raw: true },
+    ) as unknown[][];
+    expect(exportSummary.find((row) => row[0] === newProductName)?.slice(1, 5))
+      .toEqual([2, 45, 5, 40]);
+
+    const productToManage = importedProducts.find(
+      (product: { id: string }) => product.id === firstNewSale.productId,
+    );
+    const renamedProductName = `Plano revisado ${unique}`;
+    const rename = await callSales(`/products/${firstNewSale.productId}`, "PATCH", {
+      name: renamedProductName,
+      suggestedPriceCents: 0,
+      modalityId: null,
+      isActive: true,
+      expectedVersion: productToManage.version,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(rename.response.status).toBe(200);
+    const metricsAfterRename = await callSales(
+      `/sales/scoreboard?months=2026-09&productId=${firstNewSale.productId}`,
+    );
+    expect(metricsAfterRename.payload.products[0]).toMatchObject({
+      productName: renamedProductName,
+      quantity: 2,
+      salesCents: 4_500,
+      refundCents: 500,
+      netCents: 4_000,
+    });
+
+    const deactivation = await callSales(`/products/${firstNewSale.productId}`, "PATCH", {
+      name: renamedProductName,
+      suggestedPriceCents: 0,
+      modalityId: null,
+      isActive: false,
+      expectedVersion: rename.payload.version,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(deactivation.response.status).toBe(200);
+    expect((await callSales("/products")).payload.find(
+      (product: { id: string }) => product.id === firstNewSale.productId,
+    )).toMatchObject({ isActive: false });
+    const metricsAfterDeactivation = await callSales(
+      `/sales/scoreboard?months=2026-09&productId=${firstNewSale.productId}`,
+    );
+    expect(metricsAfterDeactivation.payload.totals).toMatchObject({
+      quantity: 2,
+      salesCents: 4_500,
+      refundCents: 500,
+      netCents: 4_000,
+    });
+  });
+
+  it("stores incomplete import rows as non-financial drafts and confirms them only after completion", async () => {
+    const unique = crypto.randomUUID();
+    const fileHash = unique.replace(/-/g, "").repeat(2);
+    const filename = `pendencias-${unique}.xlsx`;
+    const readyProductName = `Venda sem nome ${unique}`;
+    const completedProductName = `Produto completado ${unique}`;
+    const importBody = {
+      fileHash,
+      filename,
+      rows: [{
+        customerName: null,
+        saleDate: "2026-12-10",
+        totalCents: 2_500,
+        productName: readyProductName,
+        notes: "Nome do cliente será verificado",
+        sourceSheet: "Dezembro",
+        sourceRow: 2,
+      }],
+      pendingRows: [
+        {
+          customerName: "Cliente sem data",
+          saleDate: null,
+          saleDateText: "data ausente",
+          totalCents: 3_000,
+          amountText: null,
+          productName: `Produto sem data ${unique}`,
+          notes: null,
+          sourceSheet: "Dezembro",
+          sourceRow: 3,
+        },
+        {
+          customerName: "Cliente sem valor",
+          saleDate: "2026-12-12",
+          saleDateText: null,
+          totalCents: null,
+          amountText: "valor a confirmar",
+          productName: null,
+          notes: "Importado sem valor",
+          sourceSheet: "Dezembro",
+          sourceRow: 4,
+        },
+      ],
+    };
+    const preview = await callSales(`/sales/import/origins?fileHash=${fileHash}`);
+    expect(preview.payload.origins).toEqual([]);
+    const scoreboardBaseline = (await callSales("/sales/scoreboard?months=2026-12")).payload.totals;
+
+    const imported = await callSales("/sales/import", "POST", importBody);
+    expect(imported.response.status, JSON.stringify(imported.payload)).toBe(201);
+    expect(imported.payload).toMatchObject({
+      importedCount: 1,
+      skippedCount: 0,
+      pendingCount: 2,
+      skippedPendingCount: 0,
+      replayed: false,
+    });
+    expect(imported.payload.sales[0]).toMatchObject({
+      customerName: null,
+      totalCents: 2_500,
+    });
+    const readyProduct = (await callSales("/products")).payload.find(
+      (product: { name: string }) => product.name === readyProductName,
+    );
+    expect(readyProduct).toMatchObject({ suggestedPriceCents: 0 });
+    const draftProduct = `Produto sem data ${unique}`;
+    expect((await callSales("/products")).payload.some(
+      (product: { name: string }) => product.name === draftProduct,
+    )).toBe(false);
+
+    const pending = (await callSales("/sales/pending")).payload.filter(
+      (draft: { sourceFileName: string }) => draft.sourceFileName === filename,
+    );
+    expect(pending).toHaveLength(2);
+    expect(pending.find((draft: { sourceRow: number }) => draft.sourceRow === 3)).toMatchObject({
+      status: "pending",
+      missingFields: ["saleDate"],
+      totalCents: 3_000,
+      saleDateText: "data ausente",
+    });
+    expect(pending.find((draft: { sourceRow: number }) => draft.sourceRow === 4)).toMatchObject({
+      status: "pending",
+      missingFields: ["totalCents"],
+      totalCents: null,
+      amountText: "valor a confirmar",
+    });
+
+    const scoreboardBeforeCompletion = await callSales(
+      `/sales/scoreboard?months=2026-12&productId=${readyProduct.id}`,
+    );
+    expect(scoreboardBeforeCompletion.payload.totals).toMatchObject({
+      quantity: 1,
       salesCents: 2_500,
       refundCents: 0,
       netCents: 2_500,
     });
-    const charts = buildFinancialChartAnalytics(scoreboard.payload);
-    expect(charts.reconcilesByProduct).toBe(true);
-    expect(charts.reconcilesByMonth).toBe(true);
+    const totalAfterImport = (await callSales("/sales/scoreboard?months=2026-12")).payload.totals;
+    expect(totalAfterImport.salesCents - scoreboardBaseline.salesCents).toBe(2_500);
+    expect(totalAfterImport.quantity - scoreboardBaseline.quantity).toBe(1);
+    const salesAfterImport = (await callSales("/sales")).payload;
+    expect(salesAfterImport.some((sale: { customerName: string | null }) =>
+      sale.customerName === "Cliente sem data" || sale.customerName === "Cliente sem valor",
+    )).toBe(false);
+    const replay = await callSales("/sales/import", "POST", importBody);
+    expect(replay.response.status).toBe(200);
+    expect(replay.payload).toMatchObject({
+      importedCount: 0,
+      pendingCount: 0,
+      skippedPendingCount: 2,
+      replayed: true,
+    });
+    expect((await callSales("/sales/pending")).payload.filter(
+      (draft: { sourceFileName: string }) => draft.sourceFileName === filename,
+    )).toHaveLength(2);
+
+    const completedDraft = pending.find((draft: { sourceRow: number }) => draft.sourceRow === 3);
+    const completion = await callSales(`/sales/pending/${completedDraft.id}`, "PATCH", {
+      customerName: "Cliente identificado",
+      saleDate: "2026-12-11",
+      saleDateText: null,
+      productName: completedProductName,
+      totalCents: 3_000,
+      amountText: null,
+      notes: "Data confirmada",
+      expectedVersion: completedDraft.version,
+    });
+    expect(completion.response.status).toBe(200);
+    expect(completion.payload).toMatchObject({
+      status: "completed",
+      draft: { status: "completed", missingFields: [] },
+      sale: {
+        saleDate: "2026-12-11",
+        customerName: "Cliente identificado",
+        productName: completedProductName,
+        totalCents: 3_000,
+      },
+    });
+    const completedProduct = (await callSales("/products")).payload.find(
+      (product: { name: string }) => product.name === completedProductName,
+    );
+    expect(completedProduct).toMatchObject({ suggestedPriceCents: 0 });
+    expect((await callSales("/sales/pending")).payload.filter(
+      (draft: { sourceFileName: string }) => draft.sourceFileName === filename,
+    )).toHaveLength(1);
+    const completedScoreboard = await callSales(
+      `/sales/scoreboard?months=2026-12&productId=${completedProduct.id}`,
+    );
+    expect(completedScoreboard.payload.totals).toMatchObject({
+      quantity: 1,
+      salesCents: 3_000,
+      refundCents: 0,
+      netCents: 3_000,
+    });
+    const totalAfterCompletion = (await callSales("/sales/scoreboard?months=2026-12")).payload.totals;
+    expect(totalAfterCompletion.salesCents - scoreboardBaseline.salesCents).toBe(5_500);
+
+    const replayAfterCompletion = await callSales("/sales/import", "POST", importBody);
+    expect(replayAfterCompletion.response.status).toBe(200);
+    expect(replayAfterCompletion.payload).toMatchObject({
+      importedCount: 0,
+      pendingCount: 0,
+      skippedPendingCount: 2,
+      replayed: true,
+    });
+    const totalAfterReplay = (await callSales("/sales/scoreboard?months=2026-12")).payload.totals;
+    expect(totalAfterReplay.salesCents).toBe(totalAfterCompletion.salesCents);
   });
 });

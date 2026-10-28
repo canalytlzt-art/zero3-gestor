@@ -222,7 +222,7 @@ export default function ScoreboardGoals({
           {comparisonMode === 'partial-range' ? (
             <div className="rounded-xl border border-[#e9e0c8] bg-[#fcf8ed] px-3.5 py-3 sm:col-span-1 xl:col-span-3" data-testid="status-scoreboard-goal-partial-range">
               <p className="text-xs font-bold text-[#725d2d]">Comparação mensal não aplicável</p>
-              <p className="mt-1 text-[11px] leading-5 text-[#827248]">O intervalo contém partes de meses. O faturamento filtrado continua sendo exibido, mas a comparação com metas mensais não é automática.</p>
+              <p className="mt-1 text-[11px] leading-5 text-[#827248]">O recorte não representa meses completos. O faturamento filtrado continua sendo exibido, mas a comparação com metas mensais não é automática.</p>
               {!isLoading && !isError && noConfiguredGoals && <p className="mt-1 text-[11px] font-semibold text-[#827248]">Meta não definida para este plano e período.</p>}
             </div>
           ) : isLoading ? (

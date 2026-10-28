@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getIsoWeekday, getWeekdayName, isValidCalendarDate } from './occupancy-calendar';
+import { getIsoWeekday, getIsoWeekStart, getWeekdayName, isValidCalendarDate } from './occupancy-calendar';
 
 test('uses ISO weekdays from calendar dates without timezone conversion', () => {
   assert.equal(getIsoWeekday('2026-10-27'), 2);
@@ -17,6 +17,13 @@ test('keeps dates correct across month, year, leap-year and early-year boundarie
   assert.equal(getIsoWeekday('2025-02-29'), null);
   assert.equal(getIsoWeekday('2026-13-01'), null);
   assert.equal(getIsoWeekday('2026-10'), null);
+});
+
+test('derives ISO week starts from stored calendar dates across month and year boundaries', () => {
+  assert.equal(getIsoWeekStart('2026-10-27'), '2026-10-26');
+  assert.equal(getIsoWeekStart('2026-11-01'), '2026-10-26');
+  assert.equal(getIsoWeekStart('2027-01-01'), '2026-12-28');
+  assert.equal(getIsoWeekStart('2026-02-30'), null);
 });
 
 test('validates Gregorian calendar dates exactly', () => {

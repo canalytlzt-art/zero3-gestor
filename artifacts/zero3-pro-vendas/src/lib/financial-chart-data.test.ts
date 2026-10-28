@@ -13,6 +13,12 @@ const report: SalesScoreboard = {
   months: [
     { month: '2026-10', quantity: 6, salesCents: 40000, refundCents: 27000, netCents: 13000 },
   ],
+  days: [
+    { date: '2026-10-27', weekday: 2, quantity: 6, salesCents: 40000, refundCents: 27000, netCents: 13000 },
+  ],
+  weeks: [
+    { weekStart: '2026-10-26', quantity: 6, salesCents: 40000, refundCents: 27000, netCents: 13000 },
+  ],
 };
 
 test('groups modality totals without dropping unclassified sales', () => {

@@ -1,10 +1,10 @@
 - [Vite React dependency cache](vite-react-cache.md) — after React version changes, inspect and refresh Vite's optimized dependencies if the runtime still reports mismatched versions.
 - [Backup JSON dates](backup-json-dates.md) — generated API validators coerce dates; validate the serialized backup contract before that coercion.
 - [API date and database boundaries](refund-api-boundaries.md) — validate calendar dates from raw JSON and keep routed DB reads and writes on the injected connection.
-- [Importação de planilhas](spreadsheet-import.md) — origem pode ter só cliente, Data de início e valor; CSV com acentos exige decodificação explícita.
-- [Domínio de ocupação](occupancy-domain.md) — a nova regra calcula ocupação por presenças/vagas; registros antigos só com percentual continuam separados.
+- [Importação de planilhas](spreadsheet-import.md) — mantenha pendências fora das métricas e preserve identidade e datas entre Worker D1 e preview Express.
+- [Calendário de ocupação e vendas](occupancy-domain.md) — derive dia da semana e semana ISO das datas civis em leitura, sem regravar os dados históricos.
 - [Scripts TSX inline](tsx-inline-async.md) — `tsx -e` compila como CJS neste workspace; envolva verificações assíncronas em uma IIFE.
-- [Ciclo de vida dos produtos](product-lifecycle.md) — produtos podem ser inativados, nunca apagados permanentemente; vendas, estornos e metas devem permanecer.
+- [Ciclo de vida dos produtos](product-lifecycle.md) — inativar sem apagar histórico; novos cadastros automáticos normalizam nomes e começam sem preço sugerido.
 - [Relatórios de ocupação importáveis](occupancy-report-import-compatibility.md) — mantenha a aba detalhada compatível com a importação e exclua abas auxiliares da leitura de registros.
 - [Seleção do banco por ambiente](database-environment-snapshots.md) — para cópias e migrações, selecione explicitamente o banco de desenvolvimento; não confie no ambiente padrão do processo.
 - [Roteamento do prefixo API no Worker](workers-api-root-routing.md) — `run_worker_first` precisa cobrir `/api` e `/api/*`; a curinga sozinha deixa o caminho exato cair no fallback SPA.

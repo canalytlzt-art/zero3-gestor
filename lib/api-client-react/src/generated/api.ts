@@ -61,6 +61,7 @@ import type {
   SalesImportInput,
   SalesImportOriginsResult,
   SalesImportResult,
+  SalesPendingDraft,
   SalesPeriodBackup,
   SalesPeriodBackupSelection,
   SalesRefund,
@@ -71,6 +72,8 @@ import type {
   SalesScoreboard,
   UpdateProductInput,
   UpdateSaleInput,
+  UpdateSalesPendingDraftInput,
+  UpdateSalesPendingDraftResult,
   UpdateSalesRefundInput,
   VoidSalesRefundInput
 } from './api.schemas';
@@ -1748,6 +1751,172 @@ export const useCreateSale = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getCreateSaleMutationOptions(options));
+    }
+
+export const getGetSalesPendingDraftsUrl = () => {
+
+
+
+
+  return `/api/sales/pending`
+}
+
+/**
+ * @summary List saved financial drafts that still need required data
+ */
+export const getSalesPendingDrafts = async ( options?: Parameters<typeof customFetch>[1]): Promise<SalesPendingDraft[]> => {
+
+  return customFetch<SalesPendingDraft[]>(getGetSalesPendingDraftsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSalesPendingDraftsQueryKey = () => {
+    return [
+    `/api/sales/pending`
+    ] as const;
+    }
+
+
+export const getGetSalesPendingDraftsQueryOptions = <TData = Awaited<ReturnType<typeof getSalesPendingDrafts>>, TError = ErrorType<ApiError>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSalesPendingDrafts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSalesPendingDraftsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSalesPendingDrafts>>> = ({ signal }) => getSalesPendingDrafts({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSalesPendingDrafts>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSalesPendingDraftsQueryResult = NonNullable<Awaited<ReturnType<typeof getSalesPendingDrafts>>>
+export type GetSalesPendingDraftsQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary List saved financial drafts that still need required data
+ */
+
+export function useGetSalesPendingDrafts<TData = Awaited<ReturnType<typeof getSalesPendingDrafts>>, TError = ErrorType<ApiError>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSalesPendingDrafts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSalesPendingDraftsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateSalesPendingDraftUrl = (id: string,) => {
+
+
+
+
+  return `/api/sales/pending/${id}`
+}
+
+/**
+ * @summary Complete required fields and convert a draft into a sale
+ */
+export const updateSalesPendingDraft = async (id: string,
+    updateSalesPendingDraftInput: UpdateSalesPendingDraftInput, options?: Parameters<typeof customFetch>[1]): Promise<UpdateSalesPendingDraftResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<UpdateSalesPendingDraftResult>(getUpdateSalesPendingDraftUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(updateSalesPendingDraftInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateSalesPendingDraftMutationKey = () => ['updateSalesPendingDraft'] as const;
+
+export const getUpdateSalesPendingDraftMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSalesPendingDraft>>, TError,UpdateSalesPendingDraftMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateSalesPendingDraft>>, TError,UpdateSalesPendingDraftMutationVariables, TContext> => {
+
+const mutationKey = getUpdateSalesPendingDraftMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateSalesPendingDraft>>, UpdateSalesPendingDraftMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateSalesPendingDraft(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateSalesPendingDraftMutationResult = NonNullable<Awaited<ReturnType<typeof updateSalesPendingDraft>>>
+    export type UpdateSalesPendingDraftMutationBody = BodyType<UpdateSalesPendingDraftInput>
+    export type UpdateSalesPendingDraftMutationError = ErrorType<ApiError>
+    export type UpdateSalesPendingDraftMutationVariables = {id: string;data: BodyType<UpdateSalesPendingDraftInput>}
+
+    /**
+ * @summary Complete required fields and convert a draft into a sale
+ */
+export const useUpdateSalesPendingDraft = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSalesPendingDraft>>, TError,UpdateSalesPendingDraftMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateSalesPendingDraft>>,
+        TError,
+        UpdateSalesPendingDraftMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateSalesPendingDraftMutationOptions(options));
     }
 
 export const getGetSalesImportOriginsUrl = (params: GetSalesImportOriginsParams,) => {

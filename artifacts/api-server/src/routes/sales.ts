@@ -22,6 +22,7 @@ import {
   GetSalesRefundHistoryResponse,
   GetSalesRefundsResponse,
   GetSalesHistoryResponse,
+  GetSalesPendingDraftsResponse,
   GetSalesGoalsResponse,
   GetSalesResponse,
   GetMonthlySalesBackupQueryParams,
@@ -51,6 +52,9 @@ import {
   UpdateSaleBody,
   UpdateSaleParams,
   UpdateSaleResponse,
+  UpdateSalesPendingDraftBody,
+  UpdateSalesPendingDraftParams,
+  UpdateSalesPendingDraftResponse,
   VoidSalesRefundBody,
   VoidSalesRefundParams,
   VoidSalesRefundResponse,
@@ -108,6 +112,52 @@ type RestoreConflict = {
   reason: string;
   blocking: boolean;
 };
+
+function salesPendingDraftOut(row: typeof salesHistoryTable.$inferSelect) {
+  const data = row.afterData ?? {};
+  const rawSaleDate = data.saleDate;
+  const saleDate = rawSaleDate instanceof Date
+    ? rawSaleDate.toISOString().slice(0, 10)
+    : parseSaleDate(rawSaleDate);
+  const rawTotalCents = data.totalCents;
+  const totalCents = typeof rawTotalCents === "number"
+    && Number.isSafeInteger(rawTotalCents)
+    && rawTotalCents >= 0
+    ? rawTotalCents
+    : null;
+  const rawSourceRow = data.sourceRow;
+  const sourceRow = typeof rawSourceRow === "number" && Number.isInteger(rawSourceRow)
+    ? rawSourceRow
+    : null;
+  const rawVersion = data.version;
+  const version = typeof rawVersion === "number" && Number.isInteger(rawVersion) && rawVersion >= 1
+    ? rawVersion
+    : 1;
+  const missingFields: Array<"saleDate" | "totalCents"> = [];
+  if (!saleDate) missingFields.push("saleDate");
+  if (totalCents === null) missingFields.push("totalCents");
+  return {
+    id: row.entityId,
+    status: row.operation === "completed" ? "completed" as const : "pending" as const,
+    customerName: typeof data.customerName === "string" ? data.customerName : null,
+    saleDate,
+    saleDateText: typeof data.saleDateText === "string" ? data.saleDateText : null,
+    productName: typeof data.productName === "string" ? data.productName : null,
+    totalCents,
+    amountText: typeof data.amountText === "string" ? data.amountText : null,
+    notes: typeof data.notes === "string" ? data.notes : null,
+    sourceFileName: typeof data.sourceFileName === "string" ? data.sourceFileName : null,
+    sourceSheet: typeof data.sourceSheet === "string" ? data.sourceSheet : null,
+    sourceRow,
+    missingFields,
+    linkedSaleId: typeof data.linkedSaleId === "string" ? data.linkedSaleId : null,
+    version,
+    createdAt: row.createdAt,
+    updatedAt: data.updatedAt instanceof Date || typeof data.updatedAt === "string"
+      ? data.updatedAt
+      : row.createdAt,
+  };
+}
 type RestoreCounts = {
   products: number;
   sales: number;
@@ -466,6 +516,7 @@ const salesPeriodBackupSelectionRuntimeSchema = z
     fromDate: z.string().optional(),
     toDate: z.string().optional(),
     productName: z.string().max(120).nullable().optional(),
+    cadastralStatus: z.enum(["all", "needs-review", "complete"]).optional().default("all"),
   })
   .superRefine((selection, context) => {
     if (selection.mode === "months") {
@@ -1388,6 +1439,7 @@ export async function buildSalesPeriodBackup(
     ...(parsedSelection.data.productName
       ? { productName: normalizeProductName(parsedSelection.data.productName) }
       : { productName: null }),
+    cadastralStatus: parsedSelection.data.cadastralStatus ?? "all",
   } as SalesPeriodBackupSelection;
 
   const read = async (tx: DatabaseTransaction): Promise<SalesPeriodBackup> => {
@@ -1415,10 +1467,23 @@ export async function buildSalesPeriodBackup(
     const matchesProduct = (productId: string | null, productName: string) => !productKey
       || (productId !== null && matchingProductIds.has(productId))
       || productNameKey(productName) === productKey;
-    const periodSales = selectedSalesCandidates.filter((sale) => matchesProduct(sale.productId, sale.productName));
+    const saleNeedsReview = (sale: { customerName: string | null; productId: string | null }) =>
+      !sale.customerName?.trim() || !sale.productId;
+    const matchesCadastralStatus = (sale: { customerName: string | null; productId: string | null }) => {
+      if (selection.cadastralStatus === "needs-review") return saleNeedsReview(sale);
+      if (selection.cadastralStatus === "complete") return !saleNeedsReview(sale);
+      return true;
+    };
+    const periodSales = selectedSalesCandidates.filter((sale) =>
+      matchesProduct(sale.productId, sale.productName) && matchesCadastralStatus(sale),
+    );
     const periodRefunds = selectedRefundCandidates.filter((refund) => {
       const sale = candidateSalesById.get(refund.saleId);
-      return Boolean(sale && matchesProduct(sale.productId, sale.productName));
+      return Boolean(
+        sale
+          && matchesProduct(sale.productId, sale.productName)
+          && matchesCadastralStatus(sale),
+      );
     });
 
     const saleIds = [...new Set([
@@ -1504,7 +1569,9 @@ export async function buildSalesPeriodBackup(
       generatedAt: new Date().toISOString(),
       period: periodSelectionLabel(selection),
       selection,
-      partial: selection.mode !== "all" || Boolean(selection.productName),
+      partial: selection.mode !== "all"
+        || Boolean(selection.productName)
+        || selection.cadastralStatus !== "all",
       currency: "BRL" as const,
       businessTimezone: "America/Sao_Paulo" as const,
       counts,
@@ -1830,6 +1897,15 @@ export function createSalesRouter(
               typeof value === "string" ? value.split(",") : [],
             )
           : undefined;
+    const rawWeekdays = req.query.weekdays;
+    const weekdaysInput =
+      typeof rawWeekdays === "string"
+        ? rawWeekdays.split(",")
+        : Array.isArray(rawWeekdays)
+          ? rawWeekdays.flatMap((value) =>
+              typeof value === "string" ? value.split(",") : [],
+            )
+          : undefined;
     const queryDate = (value: unknown) =>
       typeof value === "string" && parseSaleDate(value)
         ? new Date(`${value}T00:00:00.000Z`)
@@ -1838,6 +1914,7 @@ export function createSalesRouter(
       fromDate: queryDate(req.query.fromDate),
       toDate: queryDate(req.query.toDate),
       months: monthsInput,
+      weekdays: weekdaysInput,
       productId: req.query.productId,
       modalityId: req.query.modalityId,
     });
@@ -1849,6 +1926,7 @@ export function createSalesRouter(
     const fromDate = parsed.data.fromDate?.toISOString().slice(0, 10);
     const toDate = parsed.data.toDate?.toISOString().slice(0, 10);
     const selectedMonths = [...new Set(parsed.data.months ?? [])].sort();
+    const selectedWeekdays = [...new Set(parsed.data.weekdays ?? [])];
     if (
       (fromDate && !toDate) ||
       (!fromDate && toDate) ||
@@ -1897,6 +1975,14 @@ export function createSalesRouter(
     if (parsed.data.modalityId) {
       saleFilters.push(eq(productsTable.modalityId, parsed.data.modalityId));
       refundFilters.push(eq(productsTable.modalityId, parsed.data.modalityId));
+    }
+    if (selectedWeekdays.length) {
+      saleFilters.push(
+        inArray(sql<number>`extract(isodow from ${salesTable.saleDate})::int`, selectedWeekdays),
+      );
+      refundFilters.push(
+        inArray(sql<number>`extract(isodow from ${salesRefundsTable.refundDate})::int`, selectedWeekdays),
+      );
     }
 
     const saleMonth = sql<string>`to_char(${salesTable.saleDate}, 'YYYY-MM')`;
@@ -1947,6 +2033,55 @@ export function createSalesRouter(
         refundMonth,
       );
 
+    const saleWeekday = sql<number>`extract(isodow from ${salesTable.saleDate})::int`;
+    const refundWeekday = sql<number>`extract(isodow from ${salesRefundsTable.refundDate})::int`;
+    const saleDay = sql<string>`to_char(${salesTable.saleDate}, 'YYYY-MM-DD')`;
+    const refundDay = sql<string>`to_char(${salesRefundsTable.refundDate}, 'YYYY-MM-DD')`;
+    const saleWeekStart = sql<string>`to_char(date_trunc('week', ${salesTable.saleDate}), 'YYYY-MM-DD')`;
+    const refundWeekStart = sql<string>`to_char(date_trunc('week', ${salesRefundsTable.refundDate}), 'YYYY-MM-DD')`;
+    const dailySaleRows = await database
+      .select({
+        date: saleDay,
+        weekday: saleWeekday,
+        quantity: sql<string>`coalesce(sum(${salesTable.quantity}), 0)::text`,
+        salesCents: sql<string>`coalesce(sum(${salesTable.totalCents}), 0)::text`,
+      })
+      .from(salesTable)
+      .leftJoin(productsTable, eq(productsTable.id, salesTable.productId))
+      .where(and(...saleFilters))
+      .groupBy(salesTable.saleDate, saleWeekday);
+    const dailyRefundRows = await database
+      .select({
+        date: refundDay,
+        weekday: refundWeekday,
+        refundCents: sql<string>`coalesce(sum(${salesRefundsTable.amountCents}), 0)::text`,
+      })
+      .from(salesRefundsTable)
+      .innerJoin(salesTable, eq(salesTable.id, salesRefundsTable.saleId))
+      .leftJoin(productsTable, eq(productsTable.id, salesTable.productId))
+      .where(and(...refundFilters))
+      .groupBy(salesRefundsTable.refundDate, refundWeekday);
+    const weeklySaleRows = await database
+      .select({
+        weekStart: saleWeekStart,
+        quantity: sql<string>`coalesce(sum(${salesTable.quantity}), 0)::text`,
+        salesCents: sql<string>`coalesce(sum(${salesTable.totalCents}), 0)::text`,
+      })
+      .from(salesTable)
+      .leftJoin(productsTable, eq(productsTable.id, salesTable.productId))
+      .where(and(...saleFilters))
+      .groupBy(saleWeekStart);
+    const weeklyRefundRows = await database
+      .select({
+        weekStart: refundWeekStart,
+        refundCents: sql<string>`coalesce(sum(${salesRefundsTable.amountCents}), 0)::text`,
+      })
+      .from(salesRefundsTable)
+      .innerJoin(salesTable, eq(salesTable.id, salesRefundsTable.saleId))
+      .leftJoin(productsTable, eq(productsTable.id, salesTable.productId))
+      .where(and(...refundFilters))
+      .groupBy(refundWeekStart);
+
     type ProductAggregate = {
       productId: string | null;
       productName: string;
@@ -1963,6 +2098,25 @@ export function createSalesRouter(
     };
     const productTotals = new Map<string, ProductAggregate>();
     const monthTotals = new Map<string, MonthAggregate>();
+    type CalendarAggregate = { quantity: bigint; salesCents: bigint; refundCents: bigint };
+    const dayTotals = new Map<string, CalendarAggregate & { weekday: number }>();
+    const weekTotals = new Map<string, CalendarAggregate>();
+    const getDay = (date: string, weekday: number) => {
+      let current = dayTotals.get(date);
+      if (!current) {
+        current = { weekday, quantity: 0n, salesCents: 0n, refundCents: 0n };
+        dayTotals.set(date, current);
+      }
+      return current;
+    };
+    const getWeek = (weekStart: string) => {
+      let current = weekTotals.get(weekStart);
+      if (!current) {
+        current = { quantity: 0n, salesCents: 0n, refundCents: 0n };
+        weekTotals.set(weekStart, current);
+      }
+      return current;
+    };
     const getProduct = (
       productId: string | null,
       productName: string,
@@ -2085,6 +2239,37 @@ export function createSalesRouter(
         ),
       };
     });
+    for (const row of dailySaleRows) {
+      const current = getDay(row.date, Number(row.weekday));
+      current.quantity += BigInt(row.quantity);
+      current.salesCents += BigInt(row.salesCents);
+    }
+    for (const row of dailyRefundRows) {
+      getDay(row.date, Number(row.weekday)).refundCents += BigInt(row.refundCents);
+    }
+    for (const row of weeklySaleRows) {
+      const current = getWeek(row.weekStart);
+      current.quantity += BigInt(row.quantity);
+      current.salesCents += BigInt(row.salesCents);
+    }
+    for (const row of weeklyRefundRows) {
+      getWeek(row.weekStart).refundCents += BigInt(row.refundCents);
+    }
+    const days = [...dayTotals.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, row]) => ({
+      date,
+      weekday: row.weekday,
+      quantity: safeNumber(row.quantity, "daily quantity"),
+      salesCents: safeNumber(row.salesCents, "daily sales"),
+      refundCents: safeNumber(row.refundCents, "daily refunds"),
+      netCents: safeNumber(row.salesCents - row.refundCents, "daily net revenue"),
+    }));
+    const weeks = [...weekTotals.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([weekStart, row]) => ({
+      weekStart,
+      quantity: safeNumber(row.quantity, "weekly quantity"),
+      salesCents: safeNumber(row.salesCents, "weekly sales"),
+      refundCents: safeNumber(row.refundCents, "weekly refunds"),
+      netCents: safeNumber(row.salesCents - row.refundCents, "weekly net revenue"),
+    }));
     const totals = products.reduce(
       (total, row) => ({
         quantity: total.quantity + BigInt(row.quantity),
@@ -2106,6 +2291,8 @@ export function createSalesRouter(
         },
         products,
         months,
+        days,
+        weeks,
       }),
     );
   });
@@ -2248,11 +2435,179 @@ export function createSalesRouter(
     res.json(GetSalesImportOriginsResponse.parse({ origins: [...origins.values()] }));
   });
 
+  router.get("/sales/pending", async (req, res): Promise<void> => {
+    if (!(await requireSalesAccess(req, res))) return;
+    const history = await database
+      .select()
+      .from(salesHistoryTable)
+      .where(eq(salesHistoryTable.entityType, "sales-pending-draft"))
+      .orderBy(desc(salesHistoryTable.createdAt), desc(salesHistoryTable.id));
+    const latest = new Map<string, (typeof history)[number]>();
+    for (const row of history) {
+      if (!latest.has(row.entityId)) latest.set(row.entityId, row);
+    }
+    const pending = [...latest.values()]
+      .filter((row) => row.operation === "pending")
+      .map(salesPendingDraftOut);
+    res.json(GetSalesPendingDraftsResponse.parse(pending));
+  });
+
+  router.patch("/sales/pending/:id", async (req, res): Promise<void> => {
+    if (!(await requireSalesAccess(req, res))) return;
+    const params = UpdateSalesPendingDraftParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "Identificador de pendência inválido." });
+      return;
+    }
+    if (req.body?.saleDate !== null && req.body?.saleDate !== undefined && !parseSaleDate(req.body.saleDate)) {
+      res.status(400).json({ error: "Data da venda inválida." });
+      return;
+    }
+    const parsed = UpdateSalesPendingDraftBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Dados da pendência inválidos." });
+      return;
+    }
+    const input = parsed.data;
+    const saleDate = input.saleDate instanceof Date
+      ? input.saleDate.toISOString().slice(0, 10)
+      : input.saleDate
+        ? parseSaleDate(input.saleDate)
+        : null;
+    const customerName = input.customerName?.trim().replace(/\s+/g, " ") || null;
+    const productName = input.productName?.trim().replace(/\s+/g, " ")
+      ? normalizeProductName(input.productName.trim().replace(/\s+/g, " "))
+      : null;
+    const notes = input.notes?.trim() || null;
+    const actorId = getUserId(req)!;
+
+    const result = await database.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${"sales-draft:" + params.data.id}, 0))`);
+      const [current] = await tx
+        .select()
+        .from(salesHistoryTable)
+        .where(and(
+          eq(salesHistoryTable.entityType, "sales-pending-draft"),
+          eq(salesHistoryTable.entityId, params.data.id),
+        ))
+        .orderBy(desc(salesHistoryTable.createdAt), desc(salesHistoryTable.id))
+        .limit(1);
+      if (!current) return { kind: "not-found" as const };
+      const currentData = current.afterData ?? {};
+      const linkedSaleId = typeof currentData.linkedSaleId === "string"
+        ? currentData.linkedSaleId
+        : null;
+      if (current.operation === "completed" && linkedSaleId) {
+        const [sale] = await tx.select().from(salesTable).where(eq(salesTable.id, linkedSaleId)).limit(1);
+        return { kind: "completed" as const, draft: salesPendingDraftOut(current), sale: sale ?? null };
+      }
+      const currentVersion = typeof currentData.version === "number" ? currentData.version : 1;
+      if (currentVersion !== input.expectedVersion) return { kind: "conflict" as const };
+
+      const nextVersion = currentVersion + 1;
+      const completed = Boolean(saleDate) && input.totalCents !== null;
+      const now = new Date();
+      let sale: typeof salesTable.$inferSelect | null = null;
+      const nextData: Record<string, unknown> = {
+        ...currentData,
+        customerName,
+        saleDate,
+        saleDateText: saleDate ? null : input.saleDateText?.trim() || null,
+        productName,
+        totalCents: input.totalCents,
+        amountText: input.totalCents === null ? input.amountText?.trim() || null : null,
+        notes,
+        status: completed ? "completed" : "pending",
+        version: nextVersion,
+        linkedSaleId: null,
+        updatedAt: now.toISOString(),
+      };
+      if (completed && saleDate && input.totalCents !== null) {
+        const product = productName
+          ? await getOrCreateProduct(tx, productName, 0, actorId)
+          : null;
+        const [createdSale] = await tx
+          .insert(salesTable)
+          .values({
+            productId: product?.id ?? null,
+            saleDate,
+            productName: product?.name ?? UNCATEGORIZED_SALE_LABEL,
+            quantity: 1,
+            unitAmountCents: input.totalCents,
+            totalCents: input.totalCents,
+            customerName,
+            notes,
+            createdBy: actorId,
+            updatedBy: actorId,
+          })
+          .returning();
+        if (!createdSale) throw new Error("Could not complete pending sale");
+        sale = createdSale;
+        nextData.linkedSaleId = createdSale.id;
+        await recordSalesHistory(tx, {
+          entityType: "sale",
+          entityId: createdSale.id,
+          operation: "import",
+          actorId,
+          afterData: {
+            ...createdSale,
+            importBatchId: currentData.importBatchId ?? null,
+            sourceFileHash: currentData.sourceFileHash ?? null,
+            sourceFileName: currentData.sourceFileName ?? null,
+            sourceSheet: currentData.sourceSheet ?? null,
+            sourceRow: currentData.sourceRow ?? null,
+            completedFromPendingDraftId: params.data.id,
+          },
+        });
+      }
+      const operation = completed ? "completed" : "pending";
+      await recordSalesHistory(tx, {
+        entityType: "sales-pending-draft",
+        entityId: params.data.id,
+        operation,
+        actorId,
+        beforeData: currentData,
+        afterData: nextData,
+      });
+      return {
+        kind: completed ? "completed" as const : "pending" as const,
+        draft: salesPendingDraftOut({
+          ...current,
+          operation,
+          afterData: nextData,
+        }),
+        sale,
+      };
+    });
+    if (result.kind === "not-found") {
+      res.status(404).json({ error: "Pendência não encontrada." });
+      return;
+    }
+    if (result.kind === "conflict") {
+      res.status(409).json({ error: "A pendência foi alterada em outra sessão. Atualize a lista e tente novamente." });
+      return;
+    }
+    res.json(UpdateSalesPendingDraftResponse.parse({
+      status: result.kind,
+      draft: result.draft,
+      sale: result.sale,
+    }));
+  });
+
   router.post("/sales/import", async (req, res): Promise<void> => {
     if (!(await requireSalesAccess(req, res))) return;
     if (Array.isArray(req.body?.rows)) {
       const invalidDateRow = req.body.rows.find((row: { saleDate?: unknown }) =>
         parseSaleDate(row?.saleDate) === null,
+      );
+      if (invalidDateRow) {
+        res.status(400).json({ error: `Data da venda inválida na aba ${invalidDateRow.sourceSheet || "Planilha"}, linha ${invalidDateRow.sourceRow || "?"}.` });
+        return;
+      }
+    }
+    if (Array.isArray(req.body?.pendingRows)) {
+      const invalidDateRow = req.body.pendingRows.find((row: { saleDate?: unknown }) =>
+        row?.saleDate !== null && row?.saleDate !== undefined && parseSaleDate(row.saleDate) === null,
       );
       if (invalidDateRow) {
         res.status(400).json({ error: `Data da venda inválida na aba ${invalidDateRow.sourceSheet || "Planilha"}, linha ${invalidDateRow.sourceRow || "?"}.` });
@@ -2269,7 +2624,7 @@ export function createSalesRouter(
       productName: string | null;
       quantity: number;
       unitAmountCents: number;
-      customerName: string;
+      customerName: string | null;
       notes: string | null;
       sourceSheet: string;
       sourceRow: number;
@@ -2284,15 +2639,13 @@ export function createSalesRouter(
       const productName = rawProductName
         ? normalizeProductName(rawProductName)
         : null;
-      const customerName =
-        row.customerName?.trim().replace(/\s+/g, " ") || "";
+      const customerName = row.customerName?.trim().replace(/\s+/g, " ") || null;
       const totalCents = row.totalCents;
       const sourceSheet = row.sourceSheet;
       if (
         !saleDate ||
         (productName !== null && productName.length > 120) ||
-        !customerName ||
-        customerName.length > 120 ||
+        (customerName !== null && customerName.length > 120) ||
         !sourceSheet.trim() ||
         sourceSheet.length > 255
       ) {
@@ -2316,6 +2669,76 @@ export function createSalesRouter(
       });
     }
     if (new Set(normalizedRows.map((row) => `${row.sourceSheet}:${row.sourceRow}`)).size !== normalizedRows.length) {
+      res.status(400).json({ error: "O envio contém a mesma aba/linha mais de uma vez." });
+      return;
+    }
+    let normalizedDraftRows: Array<{
+      id: string;
+      customerName: string | null;
+      saleDate: string | null;
+      saleDateText: string | null;
+      productName: string | null;
+      totalCents: number | null;
+      amountText: string | null;
+      notes: string | null;
+      sourceSheet: string;
+      sourceRow: number;
+    }>;
+    try {
+      normalizedDraftRows = (parsed.data.pendingRows ?? []).map((row) => {
+      const saleDate = row.saleDate instanceof Date
+        ? row.saleDate.toISOString().slice(0, 10)
+        : row.saleDate
+          ? parseSaleDate(row.saleDate)
+          : null;
+      const customerName = row.customerName?.trim().replace(/\s+/g, " ") || null;
+      const productName = row.productName?.trim().replace(/\s+/g, " ")
+        ? normalizeProductName(row.productName.trim().replace(/\s+/g, " "))
+        : null;
+      const notes = row.notes?.trim() || null;
+      if (
+        (row.saleDate !== null && !saleDate) ||
+        (customerName !== null && customerName.length > 1000) ||
+        (productName !== null && productName.length > 500) ||
+        (notes !== null && notes.length > 1000) ||
+        (row.saleDateText !== null && row.saleDateText.length > 200) ||
+        (row.amountText !== null && row.amountText.length > 120) ||
+        !row.sourceSheet.trim() ||
+        row.sourceSheet.length > 255 ||
+        (saleDate !== null && row.totalCents !== null)
+      ) {
+        throw new Error(`Pendência inválida na aba ${row.sourceSheet || "Planilha"}, linha ${row.sourceRow}.`);
+      }
+      if (
+        !saleDate && row.totalCents === null && !customerName && !productName
+        && !notes && !row.saleDateText && !row.amountText
+      ) {
+        throw new Error(`A linha ${row.sourceRow} não contém informações para salvar como pendência.`);
+      }
+      return {
+        id: randomUUID(),
+        customerName,
+        saleDate,
+        saleDateText: row.saleDateText?.trim() || null,
+        productName,
+        totalCents: row.totalCents,
+        amountText: row.amountText?.trim() || null,
+        notes,
+        sourceSheet: row.sourceSheet,
+        sourceRow: row.sourceRow,
+      };
+      });
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Dados de pendência inválidos.",
+      });
+      return;
+    }
+    const sourceKeys = [
+      ...normalizedRows.map((row) => `${row.sourceSheet}:${row.sourceRow}`),
+      ...normalizedDraftRows.map((row) => `${row.sourceSheet}:${row.sourceRow}`),
+    ];
+    if (new Set(sourceKeys).size !== sourceKeys.length) {
       res.status(400).json({ error: "O envio contém a mesma aba/linha mais de uma vez." });
       return;
     }
@@ -2343,13 +2766,14 @@ export function createSalesRouter(
             if (!batch) throw new Error("Could not create import batch");
 
             const importedSales = [];
+            const importedDrafts = [];
             for (const row of normalizedRows) {
               if (origins.has(`${row.sourceSheet}:${row.sourceRow}`)) continue;
               const product = row.productName
                 ? await getOrCreateProduct(
                     tx,
                     row.productName,
-                    row.unitAmountCents,
+                    0,
                     actorId,
                   )
                 : null;
@@ -2386,12 +2810,44 @@ export function createSalesRouter(
               });
               importedSales.push(sale);
             }
+            for (const row of normalizedDraftRows) {
+              if (origins.has(`${row.sourceSheet}:${row.sourceRow}`)) continue;
+              const now = new Date().toISOString();
+              const draftData = {
+                customerName: row.customerName,
+                saleDate: row.saleDate,
+                saleDateText: row.saleDateText,
+                productName: row.productName,
+                totalCents: row.totalCents,
+                amountText: row.amountText,
+                notes: row.notes,
+                sourceFileHash: parsed.data.fileHash,
+                sourceFileName: parsed.data.filename,
+                sourceSheet: row.sourceSheet,
+                sourceRow: row.sourceRow,
+                importBatchId: batch.id,
+                status: "pending",
+                linkedSaleId: null,
+                version: 1,
+                updatedAt: now,
+              };
+              await recordSalesHistory(tx, {
+                entityType: "sales-pending-draft",
+                entityId: row.id,
+                operation: "pending",
+                actorId,
+                afterData: draftData,
+              });
+              importedDrafts.push(row.id);
+            }
             await tx.update(salesImportBatchesTable).set({
-              rowCount: origins.size + importedSales.length, status: "completed", completedAt: new Date(),
+              rowCount: origins.size + importedSales.length + importedDrafts.length,
+              status: "completed",
+              completedAt: new Date(),
             }).where(eq(salesImportBatchesTable.id, batch.id));
             const previousIds = normalizedRows.flatMap((row) => {
               const origin = origins.get(`${row.sourceSheet}:${row.sourceRow}`);
-              return origin ? [origin.saleId] : [];
+              return origin?.saleId ? [origin.saleId] : [];
             });
             const previousSales = previousIds.length
               ? await tx.select().from(salesTable).where(inArray(salesTable.id, previousIds))
@@ -2402,8 +2858,10 @@ export function createSalesRouter(
               batchId: batch.id,
               fileName: parsed.data.filename,
               importedCount: importedSales.length,
-              skippedCount: previousIds.length,
-              replayed: importedSales.length === 0,
+              skippedCount: normalizedRows.length - importedSales.length,
+              pendingCount: importedDrafts.length,
+              skippedPendingCount: normalizedDraftRows.length - importedDrafts.length,
+              replayed: importedSales.length === 0 && importedDrafts.length === 0,
               sales: [...requestedPrevious, ...importedSales],
             };
       });
@@ -3122,7 +3580,7 @@ export function createSalesRouter(
             const product = await getOrCreateProduct(
               tx,
               productName,
-              parsed.data.unitAmountCents,
+              0,
               actorId,
             );
             const [created] = await tx
@@ -3249,7 +3707,7 @@ export function createSalesRouter(
               product = await getOrCreateProduct(
                 tx,
                 productName,
-                parsed.data.unitAmountCents,
+                0,
                 actorId,
               );
             }

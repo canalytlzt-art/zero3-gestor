@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { SalesImportDraftRow } from './salesImportDraftRow';
 import type { SalesImportRow } from './salesImportRow';
 
 export interface SalesImportInput {
@@ -15,9 +16,8 @@ export interface SalesImportInput {
      * @maxLength 255
      */
   filename: string;
-  /**
-     * @minItems 1
-     * @maxItems 500
-     */
+  /** @maxItems 500 */
   rows: SalesImportRow[];
+  /** @maxItems 500 */
+  pendingRows?: SalesImportDraftRow[];
 }

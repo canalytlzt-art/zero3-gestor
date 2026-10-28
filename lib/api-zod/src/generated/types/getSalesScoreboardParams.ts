@@ -13,6 +13,12 @@ toDate?: Date;
  * @items.pattern ^\d{4}-(0[1-9]|1[0-2])$
  */
 months?: string[];
+/**
+ * Dias da semana ISO da movimentação, de segunda (1) a domingo (7)
+ * @items.minimum 1
+ * @items.maximum 7
+ */
+weekdays?: number[];
 productId?: string;
 modalityId?: string;
 };

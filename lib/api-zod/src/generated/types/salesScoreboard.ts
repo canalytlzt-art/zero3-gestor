@@ -5,12 +5,16 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { SalesScoreboardDay } from './salesScoreboardDay';
 import type { SalesScoreboardMonth } from './salesScoreboardMonth';
 import type { SalesScoreboardProduct } from './salesScoreboardProduct';
 import type { SalesScoreboardTotals } from './salesScoreboardTotals';
+import type { SalesScoreboardWeek } from './salesScoreboardWeek';
 
 export interface SalesScoreboard {
   totals: SalesScoreboardTotals;
   products: SalesScoreboardProduct[];
   months: SalesScoreboardMonth[];
+  days: SalesScoreboardDay[];
+  weeks: SalesScoreboardWeek[];
 }

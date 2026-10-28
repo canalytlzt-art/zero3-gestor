@@ -14,10 +14,10 @@ export interface SalesImportRow {
      */
   productName?: string | null;
   /**
-     * @minLength 1
      * @maxLength 120
+     * @nullable
      */
-  customerName: string;
+  customerName: string | null;
   /**
      * @maxLength 1000
      * @nullable

@@ -67,6 +67,7 @@ export function buildScoreboardQueryParams({
   dateFrom,
   dateTo,
   filterProduct,
+  weekdays = [],
 }: {
   periodMode: ScoreboardPeriodMode;
   currentMonthKey: string;
@@ -77,17 +78,20 @@ export function buildScoreboardQueryParams({
   dateFrom: string;
   dateTo: string;
   filterProduct: string;
+  weekdays?: number[];
 }): {
   months?: string[];
   fromDate?: string;
   toDate?: string;
   productId?: string;
+  weekdays?: number[];
 } {
   const params: {
     months?: string[];
     fromDate?: string;
     toDate?: string;
     productId?: string;
+    weekdays?: number[];
   } = {};
 
   if (periodMode === 'current') params.months = [currentMonthKey];
@@ -102,6 +106,7 @@ export function buildScoreboardQueryParams({
     params.toDate = dateTo;
   }
   if (filterProduct) params.productId = filterProduct;
+  if (weekdays.length) params.weekdays = [...new Set(weekdays)].sort((a, b) => a - b);
   return params;
 }
 

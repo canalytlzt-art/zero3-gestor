@@ -11,6 +11,7 @@ import {
   getGetSaleHistoryQueryKey,
   getGetSalesHistoryQueryKey,
   getGetSalesGoalsQueryKey,
+  getGetSalesPendingDraftsQueryKey,
   getGetSalesQueryKey,
   getGetSalesRefundCandidatesQueryKey,
   getGetSalesRefundsQueryKey,
@@ -28,23 +29,28 @@ import {
   useGetSales,
   useGetSalesHistory,
   useGetSalesGoals,
+  useGetSalesPendingDrafts,
   useGetSalesRefundCandidates,
   useGetSalesRefunds,
   useImportSales,
   useRestoreMonthlySalesBackup,
   useUpdateProduct,
+  useUpdateSalesPendingDraft,
   useUpdateSale,
 } from '@workspace/api-client-react';
-import type { CreateProductInput, MonthlySalesBackupInput, Product, Sale, SaleInput, SalesPeriodBackup, SalesPeriodBackupSelection, SalesRefundRecord, SalesRestorePreview, SalesRestoreResult, UpdateProductInput } from '@workspace/api-client-react';
+import type { CreateProductInput, MonthlySalesBackupInput, Product, Sale, SaleInput, SalesPendingDraft, SalesPeriodBackup, SalesPeriodBackupSelection, SalesRefundRecord, SalesRestorePreview, SalesRestoreResult, UpdateProductInput, UpdateSalesPendingDraftInput, UpdateSalesPendingDraftResult } from '@workspace/api-client-react';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { PurpleSelect } from '@/components/ui/purple-select';
 import { SuggestionInput } from '@/components/ui/suggestion-input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { downloadSalesPeriodBackup, parseMonthlySalesBackup } from '@/lib/sales-export';
-import { downloadSalesCsv, downloadSalesWorkbook, summarizeSalesReport, type SalesExportSelection } from '@/lib/sales-workbook';
-import { formatCents, formatMonthKey, getSaoPauloMonthKey, normalizeProductName, productNameKey } from '@/lib/sales-utils';
+import { countSalesPendingDrafts, countSalesWithVerificationIssues, downloadSalesCsv, downloadSalesWorkbook, getSaleVerificationIssues, summarizeSalesReport, type ExportFilters, type SalesExportSelection } from '@/lib/sales-workbook';
+import { formatCents, formatMonthKey, getSaoPauloMonthKey, monthsForYearQuarter, normalizeProductName, productNameKey, type ScoreboardPeriodMode } from '@/lib/sales-utils';
+import { getIsoWeekday, getWeekdayName, getWeekdayNameForIsoDay } from '@/lib/occupancy-calendar';
 import { mapSalesImportRow, parseImportDate, parseSalesSpreadsheet, type SalesImportField, type SalesImportSheet } from '@/lib/sales-import';
+import { findPossibleSaleDuplicates, saleDuplicateFieldLabels } from '@/lib/sales-duplicates';
+import type { SaleDuplicateField, SaleDuplicateRecord } from '@/lib/sales-duplicates';
 import { ImportSourceDetails } from './import-source-details';
 
 const MAX_BACKUP_FILE_BYTES = 10 * 1024 * 1024;
@@ -232,6 +238,14 @@ export default function SalesManagement() {
   const { data: historySales, isLoading: isHistoryLoading, isError: isHistoryError, refetch: refetchHistory } = useGetSalesHistory({
     query: { queryKey: getGetSalesHistoryQueryKey(), refetchOnMount: 'always' },
   });
+  const {
+    data: pendingDrafts,
+    isLoading: isPendingDraftsLoading,
+    isError: isPendingDraftsError,
+    refetch: refetchPendingDrafts,
+  } = useGetSalesPendingDrafts({
+    query: { queryKey: getGetSalesPendingDraftsQueryKey(), refetchOnMount: 'always' },
+  });
   const { data: productRecords, isLoading: isProductsLoading, isError: isProductsError, refetch: refetchProducts } = useGetProducts({
     query: { queryKey: getGetProductsQueryKey(), refetchOnMount: 'always' },
   });
@@ -254,6 +268,7 @@ export default function SalesManagement() {
   const createProduct = useCreateProduct();
   const updateProduct = useUpdateProduct();
   const importSales = useImportSales();
+  const updatePendingDraft = useUpdateSalesPendingDraft();
   const restoreBackup = useRestoreMonthlySalesBackup();
   const {
     data: refunds,
@@ -280,14 +295,23 @@ export default function SalesManagement() {
   const [refundReason, setRefundReason] = useState('');
   const [refundError, setRefundError] = useState('');
   const [historySale, setHistorySale] = useState<Sale | null>(null);
+  const [editingPendingDraft, setEditingPendingDraft] = useState<SalesPendingDraft | null>(null);
   const [cancellationReason, setCancellationReason] = useState('');
   const [cancellationError, setCancellationError] = useState('');
   const [cancellationConflict, setCancellationConflict] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [filterProduct, setFilterProduct] = useState('');
+  const [historyPeriodMode, setHistoryPeriodMode] = useState<ScoreboardPeriodMode>('all');
+  const [historyMonth, setHistoryMonth] = useState(getSaoPauloMonthKey());
+  const [historyMonths, setHistoryMonths] = useState<string[]>([getSaoPauloMonthKey()]);
+  const [historyMonthToAdd, setHistoryMonthToAdd] = useState(getSaoPauloMonthKey());
+  const [historyYear, setHistoryYear] = useState(getSaoPauloMonthKey().slice(0, 4));
+  const [historyQuarter, setHistoryQuarter] = useState(String(Math.ceil(Number(getSaoPauloMonthKey().slice(5, 7)) / 3)));
+  const [historyWeekdays, setHistoryWeekdays] = useState<number[]>([]);
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'cancelled'>('all');
+  const [filterCadastroStatus, setFilterCadastroStatus] = useState<'all' | 'needs-review' | 'complete'>('all');
   const [productsOpen, setProductsOpen] = useState(false);
   const [productSearch, setProductSearch] = useState('');
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -304,14 +328,18 @@ export default function SalesManagement() {
     mode: 'months',
     months: [getSaoPauloMonthKey()],
     productName: null,
+    cadastralStatus: 'all',
   });
   const [periodMonthDraft, setPeriodMonthDraft] = useState(getSaoPauloMonthKey());
+  const [periodQuarterYear, setPeriodQuarterYear] = useState(getSaoPauloMonthKey().slice(0, 4));
+  const [periodQuarter, setPeriodQuarter] = useState(() => String(Math.ceil(Number(getSaoPauloMonthKey().slice(5, 7)) / 3)));
   const [periodDialogMode, setPeriodDialogMode] = useState<'report' | 'backup'>('report');
   const [periodBackupPreview, setPeriodBackupPreview] = useState<SalesPeriodBackup | null>(null);
   const [periodReportSnapshot, setPeriodReportSnapshot] = useState<{
     sales: Sale[];
     refunds: SalesRefundRecord[];
     products: Product[];
+    pendingDrafts: SalesPendingDraft[];
     refreshedAt: string;
   } | null>(null);
   const [selectionStorageUser, setSelectionStorageUser] = useState('');
@@ -330,7 +358,7 @@ export default function SalesManagement() {
   const exportMenuRef = useRef<HTMLDetailsElement>(null);
   const busy = createSale.isPending || updateSale.isPending || cancelSale.isPending
     || createProduct.isPending || updateProduct.isPending || importSales.isPending
-    || createSalesRefund.isPending;
+    || createSalesRefund.isPending || updatePendingDraft.isPending;
   const operationLock = useRef(false);
   const pendingSaleKey = useRef<{ fingerprint: string; key: string } | null>(null);
   const pendingProductKey = useRef<{ fingerprint: string; key: string } | null>(null);
@@ -386,16 +414,26 @@ export default function SalesManagement() {
   const reportSales = periodReportSnapshot?.sales ?? historySales ?? [];
   const reportRefunds = periodReportSnapshot?.refunds ?? refunds ?? [];
   const reportProducts = periodReportSnapshot?.products ?? products;
+  const reportPendingDrafts = periodReportSnapshot?.pendingDrafts ?? pendingDrafts ?? [];
+  const periodExportFilters: ExportFilters = {
+    selection: toWorkbookSelection(periodSelection),
+    productName: periodSelection.productName ?? '',
+    generatedAt: periodReportSnapshot?.refreshedAt ?? '',
+    cadastralStatus: periodSelection.cadastralStatus ?? 'all',
+    pendingDrafts: reportPendingDrafts,
+  };
   const periodReportSummary = useMemo(() => summarizeSalesReport(
     reportSales,
     reportRefunds,
     reportProducts,
-    {
-      selection: toWorkbookSelection(periodSelection),
-      productName: periodSelection.productName ?? '',
-      generatedAt: periodReportSnapshot?.refreshedAt ?? '',
-    },
-  ), [reportSales, reportRefunds, reportProducts, periodSelection, periodReportSnapshot?.refreshedAt]);
+    periodExportFilters,
+  ), [reportSales, reportRefunds, reportProducts, periodSelection, periodReportSnapshot?.refreshedAt, reportPendingDrafts]);
+  const periodReportVerificationCount = useMemo(() => countSalesWithVerificationIssues(
+    reportSales,
+    reportProducts,
+    periodExportFilters,
+  ), [reportSales, reportProducts, periodSelection, periodReportSnapshot?.refreshedAt]);
+  const periodReportPendingCount = countSalesPendingDrafts(periodExportFilters);
   const validPeriodSelection = periodSelection.mode === 'all'
     || (periodSelection.mode === 'months' && Boolean(periodSelection.months?.length)
       && periodSelection.months?.every((month) => /^\d{4}-(0[1-9]|1[0-2])$/.test(month)))
@@ -403,11 +441,43 @@ export default function SalesManagement() {
       && isValidCalendarDate(periodSelection.toDate ?? '')
       && (periodSelection.fromDate ?? '') <= (periodSelection.toDate ?? ''));
 
+  const historyMonthFilter = useMemo(() => {
+    switch (historyPeriodMode) {
+      case 'current': return [getSaoPauloMonthKey()];
+      case 'single': return historyMonth ? [historyMonth] : [];
+      case 'multiple': return [...new Set(historyMonths)].sort();
+      case 'quarter': return monthsForYearQuarter(historyYear, historyQuarter);
+      case 'year': return monthsForYearQuarter(historyYear);
+      default: return null;
+    }
+  }, [historyPeriodMode, historyMonth, historyMonths, historyYear, historyQuarter]);
+  const invalidHistoryRange = historyPeriodMode === 'range' && (!fromDate || !toDate || fromDate > toDate);
+  const invalidHistoryYear = (historyPeriodMode === 'year' || historyPeriodMode === 'quarter')
+    && monthsForYearQuarter(historyYear, historyPeriodMode === 'quarter' ? historyQuarter : undefined).length === 0;
   const filteredSales = useMemo(
-    () => filterSalesForExport(historySales ?? [], fromDate, toDate, filterProduct, products)
-      .filter((sale) => filterStatus === 'all' || sale.status === filterStatus),
-    [historySales, fromDate, toDate, filterProduct, filterStatus, products],
+    () => invalidHistoryRange || invalidHistoryYear ? [] : filterSalesForExport(historySales ?? [], historyPeriodMode === 'range' ? fromDate : '', historyPeriodMode === 'range' ? toDate : '', filterProduct, products)
+      .filter((sale) => !historyMonthFilter || historyMonthFilter.includes(sale.saleDate.slice(0, 7)))
+      .filter((sale) => !historyWeekdays.length || historyWeekdays.includes(getIsoWeekday(sale.saleDate) ?? 0))
+      .filter((sale) => filterStatus === 'all' || sale.status === filterStatus)
+      .filter((sale) => filterCadastroStatus === 'all'
+        || (filterCadastroStatus === 'needs-review'
+          ? getSaleVerificationIssues(sale).length > 0
+          : getSaleVerificationIssues(sale).length === 0)),
+    [historySales, invalidHistoryRange, invalidHistoryYear, historyPeriodMode, historyMonthFilter, historyWeekdays, fromDate, toDate, filterProduct, filterStatus, filterCadastroStatus, products],
   );
+  const visiblePendingDrafts = useMemo(() => (pendingDrafts ?? [])
+    .filter((draft) => filterCadastroStatus !== 'complete')
+    .filter((draft) => {
+      const date = draft.saleDate?.slice(0, 10);
+      if (!date) return true;
+      if (historyPeriodMode === 'range') {
+        return !invalidHistoryRange && date >= fromDate && date <= toDate;
+      }
+      return !historyMonthFilter || historyMonthFilter.includes(date.slice(0, 7));
+    })
+    .filter((draft) => !filterProduct || !draft.productName
+      || productNameKey(draft.productName) === productNameKey(filterProduct)),
+  [pendingDrafts, filterCadastroStatus, historyPeriodMode, invalidHistoryRange, fromDate, toDate, historyMonthFilter, filterProduct]);
   const visibleProducts = useMemo(() => products.filter((product) => product.name.toLocaleLowerCase('pt-BR').includes(productSearch.trim().toLocaleLowerCase('pt-BR'))), [products, productSearch]);
   const activeRefundTotalsBySale = useMemo(() => {
     const totals = new Map<string, bigint>();
@@ -436,9 +506,38 @@ export default function SalesManagement() {
       sheetSelected: sheet.selected,
     })),
   ), [importWorkspace]);
+  const importDuplicateNotices = useMemo(() => {
+    const candidates = importedLines.filter((line) => line.kind !== 'auxiliary' && !line.alreadyImported);
+    const noticesByKey = new Map<string, Array<{ label: string; fields: SaleDuplicateField[] }>>();
+    const candidateForLine = (line: typeof candidates[number]) => ({
+      customerName: line.preview.customerName || null,
+      saleDate: isValidCalendarDate(line.preview.saleDate) ? line.preview.saleDate : null,
+      productName: line.preview.productName,
+      totalCents: line.preview.totalCents,
+    });
+
+    for (const line of candidates) {
+      const candidate = candidateForLine(line);
+      const existingMatches = findPossibleSaleDuplicates(candidate, historySales ?? []).map(({ record, fields }) => ({
+        label: record.duplicateLabel ?? 'Venda já registrada',
+        fields,
+      }));
+      const spreadsheetMatches = findPossibleSaleDuplicates(
+        candidate,
+        candidates.filter((other) => other.key !== line.key).map((other): SaleDuplicateRecord => ({
+          ...candidateForLine(other),
+          duplicateLabel: `Planilha: ${other.sourceSheet}, linha ${other.sourceRow}`,
+        })),
+      ).map(({ record, fields }) => ({ label: record.duplicateLabel ?? 'Outra linha da planilha', fields }));
+      if (existingMatches.length || spreadsheetMatches.length) {
+        noticesByKey.set(line.key, [...existingMatches, ...spreadsheetMatches]);
+      }
+    }
+    return noticesByKey;
+  }, [importedLines, historySales]);
   const selectedImportLines = useMemo(() => {
     const selectedSheets = new Set((importWorkspace?.sheets ?? []).filter((sheet) => sheet.selected).map((sheet) => sheet.name));
-    return importedLines.filter((line) => line.kind === 'ready' && !line.alreadyImported
+    return importedLines.filter((line) => line.kind !== 'auxiliary' && !line.alreadyImported
       && selectedSheets.has(line.sourceSheet) && !skippedImportRows.has(line.key));
   }, [importWorkspace, importedLines, skippedImportRows]);
   const validImportRows = useMemo(() => selectedImportLines.flatMap((line) => {
@@ -452,10 +551,25 @@ export default function SalesManagement() {
       saleDate: line.value.saleDate,
       totalCents: line.value.totalCents,
       productName: canonical?.name ?? normalizedName ?? null,
+      notes: line.value.notes,
       sourceSheet: line.value.sourceSheet,
       sourceRow: line.value.sourceRow,
     }];
   }), [selectedImportLines, products]);
+  const pendingImportRows = useMemo(() => selectedImportLines.flatMap((line) => {
+    if (!line.draftValue) return [];
+    return [{
+      customerName: line.draftValue.customerName,
+      saleDate: line.draftValue.saleDate,
+      saleDateText: line.draftValue.saleDateText,
+      productName: line.draftValue.productName,
+      totalCents: line.draftValue.totalCents,
+      amountText: line.draftValue.amountText,
+      notes: line.draftValue.notes,
+      sourceSheet: line.draftValue.sourceSheet,
+      sourceRow: line.draftValue.sourceRow,
+    }];
+  }), [selectedImportLines]);
   const pendingImportCount = importedLines.filter((line) => line.kind === 'pending' && !line.alreadyImported).length;
   const alreadyImportedCount = importedLines.filter((line) => line.alreadyImported).length;
   const readyImportCount = importedLines.filter((line) => line.kind === 'ready' && !line.alreadyImported).length;
@@ -479,7 +593,27 @@ export default function SalesManagement() {
       queryClient.invalidateQueries({ queryKey: getGetProductsQueryKey() }),
       queryClient.invalidateQueries({ queryKey: getGetSalesGoalsQueryKey() }),
       queryClient.invalidateQueries({ queryKey: getGetSalesScoreboardQueryKey() }),
+      queryClient.invalidateQueries({ queryKey: getGetSalesPendingDraftsQueryKey() }),
     ]);
+  }
+
+  async function savePendingDraft(id: string, data: UpdateSalesPendingDraftInput): Promise<UpdateSalesPendingDraftResult> {
+    if (operationLock.current) throw new Error('Aguarde a operação atual terminar.');
+    operationLock.current = true;
+    try {
+      const result = await updatePendingDraft.mutateAsync({ id, data });
+      await invalidateSalesRelated();
+      setFeedback({
+        type: 'success',
+        message: result.status === 'completed'
+          ? 'Pendência completada e venda registrada no faturamento.'
+          : 'Pendência atualizada. Ela continua fora do faturamento até ser completada.',
+      });
+      setEditingPendingDraft(null);
+      return result;
+    } finally {
+      operationLock.current = false;
+    }
   }
 
   async function openRefundDialog() {
@@ -688,7 +822,8 @@ export default function SalesManagement() {
   }
 
   async function commitImport() {
-    if (!importWorkspace || importMappingIncomplete || !validImportRows.length || importTotalTooLarge
+    if (!importWorkspace || importMappingIncomplete
+      || (!validImportRows.length && !pendingImportRows.length) || importTotalTooLarge
       || importOverLimit || importSales.isPending || operationLock.current) return;
     const workspace = importWorkspace;
     operationLock.current = true;
@@ -700,6 +835,7 @@ export default function SalesManagement() {
           fileHash: workspace.fileHash,
           filename: workspace.filename,
           rows: validImportRows,
+          pendingRows: pendingImportRows,
         },
       });
       const committedKeys = selectedImportLines.map((line) => line.key);
@@ -707,9 +843,9 @@ export default function SalesManagement() {
         ...current, importedKeys: [...new Set([...current.importedKeys, ...committedKeys])],
       } : current);
       await invalidateSalesRelated();
-      setImportFeedback(result.replayed || result.importedCount === 0
-        ? `As linhas selecionadas já estavam importadas. Nenhuma venda duplicada foi criada.`
-        : `${result.importedCount} ${result.importedCount === 1 ? 'venda importada' : 'vendas importadas'}; ${result.skippedCount} já existentes. ${pendingImportCount} pendência(s) continuam disponíveis para consulta.`);
+      setImportFeedback(result.replayed
+        ? 'As linhas selecionadas já estavam salvas. Nenhuma venda ou pendência duplicada foi criada.'
+        : `${result.importedCount} venda(s) confirmada(s) e ${result.pendingCount} pendência(s) salva(s). ${result.skippedCount + result.skippedPendingCount} linha(s) já existentes.`);
     } catch (error) {
       setImportError(errorMessage(error));
     } finally {
@@ -722,24 +858,29 @@ export default function SalesManagement() {
   }
 
   function updatePeriodSelection(next: SalesPeriodBackupSelection) {
-    setPeriodSelection(next);
+    setPeriodSelection({
+      ...next,
+      cadastralStatus: next.cadastralStatus ?? periodSelection.cadastralStatus ?? 'all',
+    });
     setPeriodBackupPreview(null);
     setBackupError('');
   }
 
   async function refreshPeriodReportData() {
-    const [salesResult, refundResult, productResult] = await Promise.all([
+    const [salesResult, refundResult, productResult, pendingResult] = await Promise.all([
       refetchHistory(),
       refetchRefunds(),
       refetchProducts(),
+      refetchPendingDrafts(),
     ]);
-    if (salesResult.isError || !salesResult.data || refundResult.isError || !refundResult.data || productResult.isError || !productResult.data) {
-      throw new Error('Não foi possível atualizar vendas, estornos e produtos para a prévia.');
+    if (salesResult.isError || !salesResult.data || refundResult.isError || !refundResult.data || productResult.isError || !productResult.data || pendingResult.isError || !pendingResult.data) {
+      throw new Error('Não foi possível atualizar vendas, estornos, produtos e pendências para a prévia.');
     }
     const snapshot = {
       sales: salesResult.data,
       refunds: refundResult.data,
       products: productResult.data,
+      pendingDrafts: pendingResult.data,
       refreshedAt: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
     };
     setPeriodReportSnapshot(snapshot);
@@ -771,14 +912,16 @@ export default function SalesManagement() {
         selection: toWorkbookSelection(periodSelection),
         productName: periodSelection.productName ?? '',
         generatedAt: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+        cadastralStatus: periodSelection.cadastralStatus ?? 'all',
+        pendingDrafts: snapshot.pendingDrafts,
       };
       const dateSuffix = new Date().toISOString().slice(0, 10);
       if (format === 'xlsx') {
         downloadSalesWorkbook(snapshot.sales, snapshot.refunds, snapshot.products, filters, `zero3-pro-relatorio-financeiro-${dateSuffix}.xlsx`);
-        setExportFeedback('Relatório Excel exportado com os dados do período, estornos e resumo conciliado.');
+        setExportFeedback('Relatório Excel exportado. Pendências ficam identificadas à parte e não entram nos totais financeiros.');
       } else {
         downloadSalesCsv(snapshot.sales, snapshot.refunds, snapshot.products, filters, `zero3-pro-relatorio-financeiro-${dateSuffix}.csv`);
-        setExportFeedback('CSV exportado com as movimentações válidas do período selecionado.');
+        setExportFeedback('CSV exportado. Rascunhos ficam identificados e não entram nos totais financeiros.');
       }
     } catch (error) {
       setExportError(errorMessage(error));
@@ -874,9 +1017,25 @@ export default function SalesManagement() {
     defaultValues: { saleDate: todayLocal(), productName: '', quantity: '1', unitAmount: '', customerName: '', notes: '' },
   });
   const quantityInput = form.watch('quantity') || '';
+  const customerInput = form.watch('customerName') || '';
+  const saleDateInput = form.watch('saleDate') || '';
+  const productInput = form.watch('productName') || '';
+  const unitAmountInput = form.watch('unitAmount') || '';
   const quantity = /^\d+$/.test(quantityInput) ? BigInt(quantityInput) : 0n;
-  const unitCents = parseBrlCents(form.watch('unitAmount') || '') ?? 0;
+  const parsedUnitCents = parseBrlCents(unitAmountInput);
+  const unitCents = parsedUnitCents ?? 0;
   const total = quantity * BigInt(unitCents);
+  const duplicateTotalCents = parsedUnitCents !== null && total <= BigInt(Number.MAX_SAFE_INTEGER)
+    ? Number(total)
+    : null;
+  const manualDuplicateMatches = useMemo(() => findPossibleSaleDuplicates({
+    customerName: customerInput,
+    saleDate: saleDateInput,
+    productName: productInput,
+    totalCents: duplicateTotalCents,
+  }, historySales ?? [], { excludeId: editing?.id }), [
+    customerInput, saleDateInput, productInput, duplicateTotalCents, historySales, editing?.id,
+  ]);
 
   function resetForm() {
     pendingSaleKey.current = null;
@@ -1043,6 +1202,7 @@ export default function SalesManagement() {
                     const matched = activeProducts.find((product) => productNameKey(product.name) === productNameKey(value));
                     if (matched) form.setValue('unitAmount', formatCentsInput(matched.suggestedPriceCents), { shouldValidate: true });
                   }} />
+                  <p className="mt-1 px-1 text-[10px] leading-4 text-[#817b89]">Um nome novo será cadastrado em Produtos ao confirmar a venda.</p>
                 </div>
                 <Field name="quantity" label="Quantidade" type="number" min="1" step="1" inputMode="numeric" placeholder="1" testId="input-sale-quantity" />
                 <Field name="unitAmount" label="Valor unitário" type="text" inputMode="decimal" placeholder="0,00" testId="input-sale-unit-amount" />
@@ -1054,6 +1214,17 @@ export default function SalesManagement() {
                 <div className="flex items-center justify-between gap-3"><span className="text-[11px] font-bold uppercase tracking-[.1em] text-[#81798b]">Total da venda</span><span className="font-[family-name:var(--app-font-serif)] text-[25px] font-extrabold tracking-[-.05em] text-[#423354]" data-testid="text-sale-total">{formatCents(total)}</span></div>
                 <p className="mt-1 text-[10px] text-[#938c9b]">Quantidade × valor unitário</p>
               </div>
+              {manualDuplicateMatches.length > 0 && <div role="status" aria-live="polite" className="rounded-xl border border-[#f1dfb8] bg-[#fff9eb] px-3.5 py-3 text-[11px] leading-4 text-[#775624]" data-testid="status-manual-possible-duplicate">
+                <p className="font-bold">⚠ Possível venda duplicada</p>
+                <ul className="mt-1 space-y-1">
+                  {manualDuplicateMatches.slice(0, 3).map(({ record, fields }, index) => (
+                    <li key={record.id ?? `${record.duplicateLabel ?? 'sale'}-${index}`}>
+                      Coincidem: {fields.map((field) => saleDuplicateFieldLabels[field]).join(', ')}{record.saleDate ? ` · ${formatDate(record.saleDate)}` : ''}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1 font-medium">Aviso informativo: você pode registrar a venda normalmente.</p>
+              </div>}
               <FormField name="notes" render={({ field }) => (
                 <FormItem className="space-y-1.5">
                   <FormLabel className="text-[11px] font-bold text-[#665f70]">Observações <span className="font-medium text-[#9e98a5]">· opcional</span></FormLabel>
@@ -1088,12 +1259,28 @@ export default function SalesManagement() {
           <div className="mb-4 rounded-[17px] bg-[#f8f7f9] p-3.5">
             <div className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[.1em] text-[#81798b]"><Filter size={12} /> Filtrar lançamentos</div>
             <div className="grid grid-cols-2 gap-2.5">
-              <label className="min-w-0 text-[10px] font-semibold text-[#817b89]">De
-                <input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} data-testid="filter-sale-from" className="mt-1 h-10 w-full min-w-0 rounded-lg border border-[#e7e2ea] bg-white px-2.5 text-xs text-[#443d50] outline-none focus:border-[#9477bf]" />
+              <label className="col-span-2 min-w-0 text-[10px] font-semibold text-[#817b89]">Período
+                <select value={historyPeriodMode} onChange={(event) => setHistoryPeriodMode(event.target.value as ScoreboardPeriodMode)} data-testid="select-history-period-mode" className="mt-1 h-10 w-full rounded-lg border border-[#e7e2ea] bg-white px-2.5 text-xs text-[#443d50] outline-none focus:border-[#9477bf]">
+                  <option value="current">Mês atual</option><option value="single">Mês específico</option><option value="multiple">Vários meses</option><option value="quarter">Trimestre</option><option value="year">Ano</option><option value="range">Intervalo personalizado</option><option value="all">Todo o histórico</option>
+                </select>
               </label>
-              <label className="min-w-0 text-[10px] font-semibold text-[#817b89]">Até
-                <input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} data-testid="filter-sale-to" className="mt-1 h-10 w-full min-w-0 rounded-lg border border-[#e7e2ea] bg-white px-2.5 text-xs text-[#443d50] outline-none focus:border-[#9477bf]" />
-              </label>
+              {historyPeriodMode === 'current' && <p className="col-span-2 self-center text-xs font-semibold capitalize text-[#5f5967]" data-testid="text-history-current-month">{formatMonthKey(getSaoPauloMonthKey())}</p>}
+              {historyPeriodMode === 'single' && <label className="col-span-2 min-w-0 text-[10px] font-semibold text-[#817b89]">Mês
+                <input type="month" value={historyMonth} onChange={(event) => setHistoryMonth(event.target.value)} data-testid="input-history-month" className="mt-1 h-10 w-full rounded-lg border border-[#e7e2ea] bg-white px-2.5 text-xs text-[#443d50] outline-none focus:border-[#9477bf]" />
+              </label>}
+              {historyPeriodMode === 'multiple' && <div className="col-span-2 min-w-0">
+                <label className="text-[10px] font-semibold text-[#817b89]">Adicionar mês</label>
+                <div className="flex gap-2"><input type="month" value={historyMonthToAdd} onChange={(event) => setHistoryMonthToAdd(event.target.value)} data-testid="input-history-month-add" className="mt-1 h-10 min-w-0 flex-1 rounded-lg border border-[#e7e2ea] bg-white px-2.5 text-xs text-[#443d50] outline-none focus:border-[#9477bf]" /><button type="button" onClick={() => setHistoryMonths((items) => [...new Set([...items, historyMonthToAdd])].sort())} disabled={!historyMonthToAdd || historyMonths.includes(historyMonthToAdd)} className="mt-1 h-10 shrink-0 rounded-lg bg-[#7656b8] px-3 text-[10px] font-bold text-white disabled:opacity-50" data-testid="button-history-month-add">Adicionar</button></div>
+                <div className="mt-2 flex flex-wrap gap-1.5" data-testid="list-history-months">{historyMonths.map((month) => <span key={month} className="inline-flex items-center gap-1 rounded-full bg-[#eee8f7] py-1 pl-2.5 pr-1 text-[10px] font-semibold text-[#5d4a78]">{formatMonthKey(month)}<button type="button" onClick={() => setHistoryMonths((items) => items.filter((item) => item !== month))} aria-label={`Remover ${formatMonthKey(month)}`} className="grid h-5 w-5 place-items-center rounded-full hover:bg-white">×</button></span>)}</div>
+              </div>}
+              {(historyPeriodMode === 'quarter' || historyPeriodMode === 'year') && <div className={`col-span-2 grid gap-2 ${historyPeriodMode === 'quarter' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                <label className="text-[10px] font-semibold text-[#817b89]">Ano<input type="number" min="1000" max="9999" value={historyYear} onChange={(event) => setHistoryYear(event.target.value)} data-testid="input-history-year" className="mt-1 h-10 w-full rounded-lg border border-[#e7e2ea] bg-white px-2.5 text-xs text-[#443d50] outline-none focus:border-[#9477bf]" /></label>
+                {historyPeriodMode === 'quarter' && <label className="text-[10px] font-semibold text-[#817b89]">Trimestre<select value={historyQuarter} onChange={(event) => setHistoryQuarter(event.target.value)} data-testid="select-history-quarter" className="mt-1 h-10 w-full rounded-lg border border-[#e7e2ea] bg-white px-2.5 text-xs text-[#443d50] outline-none focus:border-[#9477bf]"><option value="1">1º trimestre</option><option value="2">2º trimestre</option><option value="3">3º trimestre</option><option value="4">4º trimestre</option></select></label>}
+              </div>}
+              {historyPeriodMode === 'range' && <>
+                <label className="min-w-0 text-[10px] font-semibold text-[#817b89]">Data inicial<input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} data-testid="filter-sale-from" className="mt-1 h-10 w-full min-w-0 rounded-lg border border-[#e7e2ea] bg-white px-2.5 text-xs text-[#443d50] outline-none focus:border-[#9477bf]" /></label>
+                <label className="min-w-0 text-[10px] font-semibold text-[#817b89]">Data final<input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} data-testid="filter-sale-to" className="mt-1 h-10 w-full min-w-0 rounded-lg border border-[#e7e2ea] bg-white px-2.5 text-xs text-[#443d50] outline-none focus:border-[#9477bf]" /></label>
+              </>}
               <label className="col-span-2 min-w-0 text-[10px] font-semibold text-[#817b89]">Plano ou produto
                 <PurpleSelect
                   value={filterProduct ? `product:${encodeURIComponent(filterProduct)}` : 'all-products'}
@@ -1113,8 +1300,59 @@ export default function SalesManagement() {
                   <option value="cancelled">Canceladas</option>
                 </select>
               </label>
+              <label className="col-span-2 min-w-0 text-[10px] font-semibold text-[#817b89]">Situação cadastral
+                <select value={filterCadastroStatus} onChange={(event) => setFilterCadastroStatus(event.target.value as typeof filterCadastroStatus)} data-testid="filter-sale-cadastro-status" className="mt-1 h-10 w-full rounded-lg border border-[#e7e2ea] bg-white px-2.5 text-xs text-[#443d50] outline-none focus:border-[#9477bf]">
+                  <option value="all">Todas as informações</option>
+                  <option value="needs-review">Pendentes de verificação</option>
+                  <option value="complete">Conferidas</option>
+                </select>
+              </label>
+              <fieldset className="col-span-2 border-t border-[#e8e4eb] pt-2">
+                <legend className="text-[10px] font-semibold text-[#817b89]">Dia da semana da venda</legend>
+                <div className="mt-1.5 flex flex-wrap gap-1.5" data-testid="filters-history-weekdays">{[1, 2, 3, 4, 5, 6, 7].map((weekday) => {
+                  const selected = historyWeekdays.includes(weekday);
+                  return <label key={weekday} className={`inline-flex cursor-pointer items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold ${selected ? 'border-[#7656b8] bg-[#eee8f7] text-[#5d4a78]' : 'border-[#e7e2ea] bg-white text-[#746c7e]'}`}><input type="checkbox" checked={selected} onChange={() => setHistoryWeekdays((items) => selected ? items.filter((item) => item !== weekday) : [...items, weekday].sort())} className="accent-[#7656b8]" data-testid={`filter-history-weekday-${weekday}`} />{getWeekdayNameForIsoDay(weekday)}</label>;
+                })}</div>
+              </fieldset>
+              <button type="button" onClick={() => { setHistoryPeriodMode('all'); setFromDate(''); setToDate(''); setHistoryWeekdays([]); setFilterProduct(''); setFilterStatus('all'); setFilterCadastroStatus('all'); }} className="col-span-2 justify-self-start rounded-lg px-2 py-1.5 text-[10px] font-semibold text-[#766d83] hover:bg-white" data-testid="button-clear-history-filters">Limpar filtros</button>
             </div>
+            {invalidHistoryRange && <p className="mt-2 text-[10px] font-semibold text-[#a24f45]" role="alert" data-testid="status-history-date-range">{!fromDate || !toDate ? 'Informe as datas inicial e final.' : 'A data inicial deve ser anterior ou igual à data final.'}</p>}
+            {invalidHistoryYear && <p className="mt-2 text-[10px] font-semibold text-[#a24f45]" role="alert" data-testid="status-history-year">Informe um ano válido entre 1000 e 9999.</p>}
           </div>
+          <section className="mb-4 rounded-2xl border border-[#ead8b6] bg-[#fffaf0] p-3.5" data-testid="panel-sales-pending-drafts" aria-label="Pendências de vendas">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-extrabold text-[#6f5422]">Pendências de verificação</p>
+                <p className="mt-1 text-[10px] leading-4 text-[#826c43]">
+                  {visiblePendingDrafts.length} rascunho(s) sem data ou valor suficiente. Não entram no Scoreboard até serem completados.
+                </p>
+                <p className="mt-1 text-[9px] leading-4 text-[#8a744f]">Rascunhos sem data permanecem visíveis mesmo com filtro de período, pois não podem ser atribuídos a um mês.</p>
+              </div>
+              <button type="button" onClick={() => void refetchPendingDrafts()} disabled={isPendingDraftsLoading} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[#e8d6b1] bg-white px-3 text-[10px] font-bold text-[#755b2b] disabled:opacity-50" data-testid="button-refresh-sales-pending"><RefreshCw size={12} /> Atualizar</button>
+            </div>
+            {isPendingDraftsLoading
+              ? <p className="mt-3 text-[10px] text-[#826c43]" role="status">Carregando pendências…</p>
+              : isPendingDraftsError
+                ? <p className="mt-3 text-[10px] font-semibold text-[#9c483f]" role="alert">Não foi possível carregar as pendências. Tente atualizar.</p>
+                : visiblePendingDrafts.length
+                  ? <div className="mt-3 space-y-2">
+                    {visiblePendingDrafts.map((draft) => <article key={draft.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#f0e3cc] bg-white px-3 py-2.5" data-testid={`row-sales-pending-${draft.id}`}>
+                      <div className="min-w-0">
+                        <p className="break-words text-xs font-bold text-[#4c3e26]">{draft.customerName || 'Cliente não informado'} · {draft.productName || 'Produto não informado'}</p>
+                        <p className="mt-1 text-[10px] text-[#817b89]">
+                          {draft.sourceSheet ? `${draft.sourceSheet} · linha ${draft.sourceRow}` : 'Lançamento manual'}
+                          {' · '}{draft.saleDate?.slice(0, 10) || draft.saleDateText || 'Data ausente'}
+                          {' · '}{draft.totalCents !== null ? formatCents(draft.totalCents) : draft.amountText || 'Valor ausente'}
+                        </p>
+                        <p className="mt-1 text-[9px] font-semibold text-[#9b6a26]">
+                          Falta: {draft.missingFields.map((field) => field === 'saleDate' ? 'data da venda' : 'valor').join(' e ') || 'corrigir informações opcionais'}
+                        </p>
+                      </div>
+                      <button type="button" onClick={() => setEditingPendingDraft(draft)} disabled={busy} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-[#7656b8] px-3 text-[10px] font-bold text-white hover:bg-[#6848a9] disabled:opacity-50" data-testid={`button-edit-sales-pending-${draft.id}`}><Edit3 size={12} /> Completar</button>
+                    </article>)}
+                  </div>
+                  : <p className="mt-3 text-[10px] text-[#826c43]" data-testid="status-sales-pending-empty">{filterCadastroStatus === 'complete' ? 'O filtro cadastral mostra somente registros conferidos.' : 'Nenhuma pendência financeira para completar neste filtro.'}</p>}
+          </section>
           {isHistoryLoading ? <div className="space-y-3" aria-label="Carregando histórico" data-testid="status-sales-loading"><div className="skeleton h-16 rounded-2xl" /><div className="skeleton h-16 rounded-2xl" /><div className="skeleton h-16 rounded-2xl" /></div>
             : isHistoryError ? <div className="grid min-h-[220px] place-items-center rounded-2xl border border-dashed border-[#e6e1ea] bg-[#fbfafc] p-6 text-center" data-testid="status-sales-error"><div><CircleHelp className="mx-auto text-[#a6584b]" size={23} /><p className="mt-3 font-bold">Não foi possível carregar</p><p className="mt-1 text-sm text-[#827b8b]">Confira sua conexão e tente novamente.</p><button onClick={() => void refetchHistory()} className="mt-4 inline-flex items-center gap-2 rounded-full border border-[#ded8e5] bg-white px-4 py-2 text-xs font-bold text-[#5c506f] hover:bg-[#f8f6fa]" data-testid="button-retry-sales"><RefreshCw size={13} /> Tentar novamente</button></div></div>
             : filteredSales.length ? <div className="space-y-2" data-testid="list-sales">
@@ -1186,6 +1424,21 @@ export default function SalesManagement() {
             </div>
 
             {periodSelection.mode === 'months' && <div className="space-y-2">
+              <div className="grid grid-cols-[1fr_1fr_auto] items-end gap-2 rounded-xl border border-[#e9e2f1] bg-[#faf8fd] p-2.5">
+                <label className="min-w-0 text-[10px] font-bold uppercase tracking-[.1em] text-[#817b89]">Ano
+                  <input type="number" min="1000" max="9999" value={periodQuarterYear} onChange={(event) => setPeriodQuarterYear(event.target.value)} className="mt-1 h-9 w-full rounded-lg border border-[#e7e2ea] bg-white px-2 text-xs normal-case tracking-normal text-[#342d43]" data-testid="input-report-quarter-year" />
+                </label>
+                <label className="min-w-0 text-[10px] font-bold uppercase tracking-[.1em] text-[#817b89]">Trimestre
+                  <select value={periodQuarter} onChange={(event) => setPeriodQuarter(event.target.value)} className="mt-1 h-9 w-full rounded-lg border border-[#e7e2ea] bg-white px-2 text-xs normal-case tracking-normal text-[#342d43]" data-testid="select-report-quarter">
+                    <option value="1">1º trimestre</option><option value="2">2º trimestre</option><option value="3">3º trimestre</option><option value="4">4º trimestre</option>
+                  </select>
+                </label>
+                <button type="button" onClick={() => {
+                  const firstMonth = (Number(periodQuarter) - 1) * 3 + 1;
+                  const months = [0, 1, 2].map((offset) => `${periodQuarterYear}-${String(firstMonth + offset).padStart(2, '0')}`);
+                  updatePeriodSelection({ mode: 'months', months, productName: periodSelection.productName ?? null, cadastralStatus: periodSelection.cadastralStatus ?? 'all' });
+                }} disabled={!/^\d{4}$/.test(periodQuarterYear) || Number(periodQuarterYear) < 1000 || Number(periodQuarterYear) > 9999} className="h-9 rounded-lg bg-[#7656b8] px-3 text-[10px] font-bold text-white disabled:opacity-50" data-testid="button-apply-report-quarter">Aplicar</button>
+              </div>
               <div className="flex gap-2">
                 <label className="min-w-0 flex-1 text-[10px] font-bold uppercase tracking-[.1em] text-[#817b89]">Adicionar mês
                   <input type="month" value={periodMonthDraft} onChange={(event) => setPeriodMonthDraft(event.target.value)} data-testid="input-report-month" className="mt-1 h-10 w-full rounded-xl border border-[#e7e2ea] bg-[#fcfbfd] px-3 text-sm font-medium normal-case tracking-normal text-[#342d43] outline-none focus:border-[#9477bf]" />
@@ -1220,6 +1473,14 @@ export default function SalesManagement() {
                 {productNames.map((name) => <option key={productNameKey(name)} value={name}>{name}</option>)}
               </select>
             </label>
+            <label className="block text-[10px] font-bold uppercase tracking-[.1em] text-[#817b89]">Situação cadastral
+              <select value={periodSelection.cadastralStatus ?? 'all'} onChange={(event) => updatePeriodSelection({ ...periodSelection, cadastralStatus: event.target.value as 'all' | 'needs-review' | 'complete' })} data-testid="select-report-cadastro-status" className="mt-1 h-10 w-full rounded-xl border border-[#e7e2ea] bg-[#fcfbfd] px-3 text-sm font-medium normal-case tracking-normal text-[#342d43] outline-none focus:border-[#7656b8] focus:ring-2 focus:ring-[#7656b8]/10">
+                <option value="all">Todas as informações</option>
+                <option value="needs-review">Pendentes de verificação</option>
+                <option value="complete">Conferidas</option>
+              </select>
+            </label>
+            <p className="rounded-xl bg-[#f8f6f9] px-3 py-2 text-[10px] leading-4 text-[#716a79]">Rascunhos aparecem separados e ficam fora dos totais financeiros. Sem data válida, só podem ser atribuídos a “Todo o histórico”. Backups preservam as vendas e dependências do filtro escolhido.</p>
 
             {periodDialogMode === 'report' ? <div className="space-y-3">
               <div className="rounded-xl border border-[#e8e2ed] bg-white p-3.5" data-testid="panel-period-report-preview">
@@ -1235,7 +1496,7 @@ export default function SalesManagement() {
                     <p className="mt-1 text-xs font-extrabold tabular-nums text-[#40374e]" data-testid={`text-period-preview-${label.toLowerCase()}`}>{value}</p>
                   </div>)}
                 </div>
-                <p className="mt-2 text-[10px] text-[#827b8b]">{periodReportSummary.salesCount} vendas válidas · {periodReportSummary.refundsCount} estornos válidos{periodReportSnapshot ? ` · atualizado ${periodReportSnapshot.refreshedAt}` : ''}</p>
+                <p className="mt-2 text-[10px] text-[#827b8b]">{periodReportSummary.salesCount} vendas válidas · {periodReportSummary.refundsCount} estornos válidos · {periodReportVerificationCount} venda(s) com pendência cadastral · {periodReportPendingCount} rascunho(s) financeiros{periodReportSnapshot ? ` · atualizado ${periodReportSnapshot.refreshedAt}` : ''}</p>
               </div>
               {isExporting && <p className="text-[10px] text-[#827b8b]" role="status">Atualizando a prévia para exportar…</p>}
             </div> : <div className="space-y-3">
@@ -1447,18 +1708,19 @@ export default function SalesManagement() {
                 <p className="mt-3 text-[10px] font-semibold text-[#655579]">Bloco {blockIndex + 1} · {block.headerRow ? `cabeçalho na linha ${block.headerRow}` : 'sem cabeçalho; confirme as colunas'}</p>
                 <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                   {([
-                    { field: 'customerName', label: 'Nome do cliente', required: true },
-                    { field: 'saleDate', label: 'Data de início', required: true },
-                    { field: 'totalAmount', label: 'Valor da venda', required: true },
-                    { field: 'productName', label: 'Plano/produto', required: false },
-                  ] as Array<{ field: SalesImportField; label: string; required: boolean }>).map(({ field, label, required }) => {
+                    { field: 'customerName', label: 'Nome do cliente · opcional' },
+                    { field: 'saleDate', label: 'Data da venda · essencial' },
+                    { field: 'totalAmount', label: 'Valor da venda · essencial' },
+                    { field: 'productName', label: 'Plano/produto · opcional' },
+                    { field: 'notes', label: 'Observações · opcional' },
+                  ] as Array<{ field: SalesImportField; label: string }>).map(({ field, label }) => {
                     const selectedColumn = (blockIndex === 0 ? sheet.mapping : block.mapping)[field];
                     const rawSample = selectedColumn === null ? '' : sheet.rows.find((row) =>
                       row.blockIndex === blockIndex && String(row.cells[selectedColumn] ?? '').trim(),
                     )?.cells[selectedColumn] ?? '';
                     const parsedDateSample = field === 'saleDate' ? parseImportDate(rawSample, sheet.date1904) : null;
                     const sample = parsedDateSample ? formatDate(parsedDateSample) : String(rawSample).trim();
-                    return <label key={field} className="min-w-0 text-[10px] font-bold text-[#665f70]">{label}{required ? ' *' : ''}
+                    return <label key={field} className="min-w-0 text-[10px] font-bold text-[#665f70]">{label}
                       <select
                         value={selectedColumn === null ? '' : String(selectedColumn)}
                         onChange={(event) => {
@@ -1479,7 +1741,7 @@ export default function SalesManagement() {
                         data-testid={`select-import-map-${sheetIndex}-${blockIndex}-${field}`}
                         className="mt-1 h-9 w-full rounded-lg border border-[#e7e2ea] bg-white px-2 text-xs font-medium text-[#443d50] outline-none focus:border-[#9477bf]"
                       >
-                        <option value="">{required ? 'Selecione/confirme a coluna' : 'Não categorizar'}</option>
+                        <option value="">{field === 'saleDate' || field === 'totalAmount' ? 'Não identificada — salvar pendente' : 'Não mapear'}</option>
                         {block.columns.map((column) => <option key={column.index} value={column.index}>{column.label}</option>)}
                       </select>
                       {sample && <span className="mt-1 block truncate font-normal text-[#8a8491]" title={sample}>Exemplo: {sample}</span>}
@@ -1499,7 +1761,7 @@ export default function SalesManagement() {
               </section>)}
             </div>
             {importMappingIncomplete && <p className="rounded-xl bg-[#fff5e8] px-3.5 py-2.5 text-xs font-semibold text-[#805824]" role="alert" data-testid="status-import-mapping-required">Selecione ao menos uma aba.</p>}
-            {pendingImportCount > 0 && <p className="rounded-xl bg-[#fff5e8] px-3.5 py-2.5 text-xs text-[#805824]" role="status" data-testid="status-import-invalid-rows">{pendingImportCount} pendência(s) não selecionada(s). Você pode importar os registros prontos em uma confirmação; as pendências continuam nesta lista e não serão gravadas.</p>}
+            {pendingImportCount > 0 && <p className="rounded-xl bg-[#fff5e8] px-3.5 py-2.5 text-xs text-[#805824]" role="status" data-testid="status-import-invalid-rows">{pendingImportCount} linha(s) sem data ou valor suficiente para confirmar. Selecione-as para salvar como pendências; elas não entram no faturamento até serem completadas.</p>}
             <label className="flex items-center gap-2 text-xs text-[#655579]"><input type="checkbox" checked={importPendingOnly} onChange={(event) => setImportPendingOnly(event.target.checked)} data-testid="checkbox-import-pending-only" /> Consultar somente pendentes ({pendingImportCount})</label>
             {importOverLimit && <p className="rounded-xl bg-[#fff5e8] px-3.5 py-2.5 text-xs font-semibold text-[#805824]" role="alert" data-testid="status-import-limit">O limite é de 500 linhas por importação. Desmarque abas/linhas ou divida o arquivo.</p>}
             {importTotalTooLarge && <p className="rounded-xl bg-[#fff0ed] px-3.5 py-2.5 text-xs font-semibold text-[#9c483f]" role="alert">O total ultrapassa o limite de precisão do sistema. Reduza a seleção antes de importar.</p>}
@@ -1511,9 +1773,10 @@ export default function SalesManagement() {
                     .filter((line) => !importPendingOnly || (line.kind === 'pending' && !line.alreadyImported)).map((line) => {
                     const excluded = skippedImportRows.has(line.key);
                     const idSuffix = `${encodeURIComponent(line.sourceSheet)}-${line.sourceRow}`;
+                    const duplicateNotices = importDuplicateNotices.get(line.key) ?? [];
                     return <tr key={line.key} className={line.value ? 'bg-white' : 'bg-[#fffaf9]'} data-testid={`row-import-${idSuffix}`}>
                       <td className="px-3 py-2.5">
-                        <input type="checkbox" disabled={line.kind !== 'ready' || line.alreadyImported || busy} checked={line.kind === 'ready' && !line.alreadyImported && line.sheetSelected && !excluded} onChange={(event) => setSkippedImportRows((current) => {
+                        <input type="checkbox" disabled={line.kind === 'auxiliary' || line.alreadyImported || busy} checked={line.kind !== 'auxiliary' && !line.alreadyImported && line.sheetSelected && !excluded} onChange={(event) => setSkippedImportRows((current) => {
                           const next = new Set(current);
                           if (event.target.checked) next.delete(line.key);
                           else next.add(line.key);
@@ -1526,14 +1789,23 @@ export default function SalesManagement() {
                       <td className="px-3 py-2.5 text-[#4b4356]">{line.preview.productName ?? 'Não categorizado'}</td>
                       <td className="px-3 py-2.5 tabular-nums text-[#4b4356]">{line.preview.totalCents !== null ? formatCents(line.preview.totalCents) : line.preview.amountText || '—'}</td>
                       <td className="px-3 py-2.5">
-                        {line.alreadyImported ? <span className="text-[10px] font-semibold text-[#655579]">Já importado — não será duplicado</span> : line.kind === 'pending'
-                          ? <span className="text-[10px] font-semibold text-[#9c483f]">Pendente: {line.reason}</span> : !line.sheetSelected
+                        {line.alreadyImported ? <span className="text-[10px] font-semibold text-[#655579]">Já salva — não será duplicada</span> : line.kind === 'pending'
+                          ? <span className="text-[10px] font-semibold text-[#9c483f]">{excluded ? 'Pendente não selecionada' : 'Será salva como pendência: '}{line.reason}</span> : !line.sheetSelected
                           ? <span className="text-[10px] text-[#817b89]">Aba fora da seleção</span>
                           : excluded
                             ? <span className="text-[10px] font-semibold text-[#817b89]">Linha desmarcada</span>
                             : <span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-bold ${line.value ? 'bg-[#eff6e5] text-[#55772c]' : 'bg-[#fff0ed] text-[#9c483f]'}`} data-testid={`status-import-row-${idSuffix}`}>
-                               {line.value ? 'Pronta para importar' : line.reason}
+                               {line.needsVerification ? 'Informações pendentes de verificação' : 'Pronta para importar'}
                             </span>}
+                        {duplicateNotices.length > 0 && <div role="status" aria-live="polite" className="mt-1.5 rounded-lg border border-[#f1dfb8] bg-[#fff9eb] px-2 py-1.5 text-[9px] leading-3.5 text-[#775624]" data-testid={`status-import-possible-duplicate-${idSuffix}`}>
+                          <strong className="block">⚠ Possível venda duplicada</strong>
+                          <ul className="mt-0.5 space-y-0.5">
+                            {duplicateNotices.slice(0, 2).map((notice, index) => (
+                              <li key={`${notice.label}-${index}`}>Coincidem: {notice.fields.map((field) => saleDuplicateFieldLabels[field]).join(', ')} · {notice.label}</li>
+                            ))}
+                          </ul>
+                          {duplicateNotices.length > 2 && <span className="mt-0.5 block">+ {duplicateNotices.length - 2} correspondência(s)</span>}
+                        </div>}
                         <ImportSourceDetails source={line.source} />
                       </td>
                   </tr>;
@@ -1542,13 +1814,13 @@ export default function SalesManagement() {
               </table>
             </div>
             <div className="rounded-xl border border-[#e9e0c8] bg-[#fcf8ed] px-3.5 py-3 text-[10px] leading-5 text-[#725d2d]">
-              {selectedImportLines.length} registros prontos selecionados · {importTotalLabel}. {pendingImportCount} pendências permanecem fora da importação, sem descartar seu conteúdo. A origem persistente (arquivo + aba + linha) permite reprocessar as linhas restantes sem repetir as anteriores. Nenhuma gravação ocorre até confirmar.
+              {selectedImportLines.length} linha(s) selecionada(s) · {validImportRows.length} venda(s) confirmada(s) ({importTotalLabel}) · {pendingImportRows.length} pendência(s). Só vendas com data e valor válidos entram nos indicadores; os rascunhos serão salvos sem afetar o faturamento após confirmar.
             </div>
           </>}
           <DialogFooter className="gap-2">
             <button type="button" onClick={() => { setImportOpen(false); setImportWorkspace(null); setImportError(''); }} disabled={importSales.isPending} className="h-10 rounded-xl border border-[#e3dfe7] px-4 text-sm font-bold text-[#716a79] hover:bg-[#f8f6fa] disabled:opacity-50" data-testid="button-cancel-import">Cancelar</button>
-            {importWorkspace && <button type="button" onClick={() => void commitImport()} disabled={!validImportRows.length || importTotalTooLarge || importOverLimit || importMappingIncomplete || busy} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#7656b8] px-4 text-sm font-bold text-white hover:bg-[#6848a9] disabled:opacity-55" data-testid="button-confirm-import">
-              {importSales.isPending ? 'Importando…' : <><Check size={14} /> Confirmar importação</>}
+            {importWorkspace && <button type="button" onClick={() => void commitImport()} disabled={(!validImportRows.length && !pendingImportRows.length) || importTotalTooLarge || importOverLimit || importMappingIncomplete || busy} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#7656b8] px-4 text-sm font-bold text-white hover:bg-[#6848a9] disabled:opacity-55" data-testid="button-confirm-import">
+              {importSales.isPending ? 'Importando…' : <><Check size={14} /> Confirmar vendas e pendências</>}
             </button>}
           </DialogFooter>
         </DialogContent>
@@ -1624,18 +1896,27 @@ export default function SalesManagement() {
         </DialogContent>
       </Dialog>
       {historySale && <SaleHistoryDialog sale={historySale} onClose={() => setHistorySale(null)} />}
+      {editingPendingDraft && <SalesPendingDraftDialog
+        draft={editingPendingDraft}
+        busy={updatePendingDraft.isPending}
+        onClose={() => { if (!updatePendingDraft.isPending) setEditingPendingDraft(null); }}
+        onSave={savePendingDraft}
+      />}
     </>
   );
 }
 
 function SaleRow({ sale, onEdit, onHistory, onCancel, busy }: { sale: Sale; onEdit: () => void; onHistory: () => void; onCancel: () => void; busy: boolean }) {
   const cancelled = sale.status === 'cancelled';
+  const verificationIssues = getSaleVerificationIssues(sale);
+  const needsVerification = verificationIssues.length > 0;
   const labelClass = 'mb-1 block text-[9px] font-bold uppercase tracking-[.09em] text-[#91899a]';
   return <article className={`min-w-0 rounded-2xl border px-3 py-3 transition sm:px-4 ${cancelled ? 'border-[#ede8e9] bg-[#fcfafa]' : 'border-[#f0edf2] hover:border-[#e5dfeb] hover:bg-[#fdfcfe]'}`} data-testid={`row-sale-${sale.id}`}>
     <div className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
       <div className="min-w-0">
         <span className={labelClass}>Data</span>
         <span className="block text-[11px] font-medium text-[#6f6879]" data-testid={`text-sale-date-${sale.id}`}>{formatDate(sale.saleDate, { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+        <span className="mt-0.5 block text-[9px] capitalize text-[#91899a]" data-testid={`text-sale-weekday-${sale.id}`}>{getWeekdayName(sale.saleDate, 'short')}</span>
       </div>
       <div className="min-w-0">
         <span className={labelClass}>Tipo</span>
@@ -1662,6 +1943,7 @@ function SaleRow({ sale, onEdit, onHistory, onCancel, busy }: { sale: Sale; onEd
         <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold ${cancelled ? 'bg-[#f2ecec] text-[#796565]' : 'bg-[#eff6e5] text-[#55772c]'}`} data-testid={`status-sale-${sale.id}`}>{cancelled ? 'Cancelada' : 'Ativa'}</span>
       </div>
     </div>
+    {needsVerification && <p className="mt-3 inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-lg bg-[#fff5e8] px-2.5 py-1.5 text-[10px] font-semibold text-[#805824]" role="status" data-testid={`status-sale-review-${sale.id}`}><CircleHelp size={12} /> Informações pendentes de verificação: {verificationIssues.join(' e ')}{!cancelled && ' · use Editar para completar.'}</p>}
     {(sale.notes || (cancelled && sale.cancellationReason)) && <div className="mt-3 space-y-1 border-t border-[#efebf0] pt-2.5">
       {sale.notes && <p className="break-words [overflow-wrap:anywhere] text-[10px] leading-4 text-[#81798b]"><span className="font-bold">Observação:</span> {sale.notes}</p>}
       {cancelled && sale.cancellationReason && <p className="break-words [overflow-wrap:anywhere] text-[10px] leading-4 text-[#9a625b]" data-testid={`text-sale-cancellation-reason-${sale.id}`}><span className="font-bold">Motivo:</span> {sale.cancellationReason}</p>}
@@ -1722,6 +2004,96 @@ function SaleHistoryDialog({ sale, onClose }: { sale: Sale; onClose: () => void 
             })}
           </ol> : <p className="rounded-xl border border-dashed border-[#ded7e7] px-3.5 py-4 text-center text-xs text-[#817b89]" data-testid="status-sale-history-empty">Nenhuma alteração registrada.</p>}
       <DialogFooter><button type="button" onClick={onClose} className="h-10 rounded-xl border border-[#e3dfe7] px-4 text-sm font-bold text-[#716a79] hover:bg-[#f8f6fa]" data-testid="button-close-sale-history">Fechar</button></DialogFooter>
+    </DialogContent>
+  </Dialog>;
+}
+
+function SalesPendingDraftDialog({
+  draft,
+  busy,
+  onClose,
+  onSave,
+}: {
+  draft: SalesPendingDraft;
+  busy: boolean;
+  onClose: () => void;
+  onSave: (id: string, data: UpdateSalesPendingDraftInput) => Promise<UpdateSalesPendingDraftResult>;
+}) {
+  const [customerName, setCustomerName] = useState(draft.customerName ?? '');
+  const [saleDate, setSaleDate] = useState(draft.saleDate?.slice(0, 10) ?? '');
+  const [productName, setProductName] = useState(draft.productName ?? '');
+  const [amount, setAmount] = useState(draft.totalCents === null
+    ? draft.amountText ?? ''
+    : `${Math.floor(draft.totalCents / 100)},${String(draft.totalCents % 100).padStart(2, '0')}`);
+  const [notes, setNotes] = useState(draft.notes ?? '');
+  const [error, setError] = useState('');
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError('');
+    if (saleDate && !isValidCalendarDate(saleDate)) {
+      setError('Informe uma data válida ou deixe a data pendente.');
+      return;
+    }
+    const cents = amount.trim() ? parseBrlCents(amount) : null;
+    try {
+      await onSave(draft.id, {
+        customerName: customerName.trim() || null,
+        saleDate: saleDate || null,
+        saleDateText: saleDate ? null : draft.saleDateText,
+        productName: productName.trim() || null,
+        totalCents: cents,
+        amountText: cents === null ? amount.trim() || null : null,
+        notes: notes.trim() || null,
+        expectedVersion: draft.version,
+      });
+    } catch (saveError) {
+      setError(errorMessage(saveError));
+    }
+  }
+
+  const labelClass = 'block text-[10px] font-bold uppercase tracking-[.08em] text-[#817b89]';
+  const fieldClass = 'mt-1 h-10 w-full rounded-xl border border-[#e7e2ea] bg-white px-3 text-sm text-[#342d43] outline-none focus:border-[#9477bf]';
+  return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
+    <DialogContent className="max-h-[90dvh] max-w-lg overflow-y-auto border-[#e7e1e9] bg-[#fffefc] p-5 sm:rounded-[24px] md:p-6">
+      <DialogHeader className="text-left">
+        <DialogTitle className="text-lg font-extrabold tracking-[-.035em] text-[#332d40]">Completar pendência de venda</DialogTitle>
+        <DialogDescription className="text-xs leading-5 text-[#827b8b]">
+          A venda só será confirmada quando houver data e valor válidos. Enquanto isso, o rascunho não afeta o faturamento.
+        </DialogDescription>
+      </DialogHeader>
+      <form onSubmit={(event) => void submit(event)} className="space-y-3">
+        {(draft.sourceFileName || draft.sourceSheet) && <p className="rounded-xl bg-[#f8f6fa] px-3 py-2 text-[10px] text-[#716a79]">
+          Origem: {draft.sourceFileName || 'Planilha'}{draft.sourceSheet ? ` · ${draft.sourceSheet} · linha ${draft.sourceRow}` : ''}
+        </p>}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className={labelClass}>Nome do cliente · opcional
+            <input value={customerName} maxLength={120} onChange={(event) => setCustomerName(event.target.value)} className={fieldClass} data-testid="input-pending-customer" />
+          </label>
+          <label className={labelClass}>Data da venda · essencial
+            <input type="date" value={saleDate} onChange={(event) => setSaleDate(event.target.value)} className={fieldClass} data-testid="input-pending-date" />
+            {!saleDate && draft.saleDateText && <span className="mt-1 block text-[9px] font-normal normal-case tracking-normal text-[#9b6a26]">Texto original: {draft.saleDateText}</span>}
+          </label>
+          <label className={labelClass}>Plano/produto · opcional
+            <input value={productName} maxLength={120} onChange={(event) => setProductName(event.target.value)} className={fieldClass} data-testid="input-pending-product" />
+          </label>
+          <label className={labelClass}>Valor total · essencial
+            <input value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" maxLength={120} placeholder="0,00" className={fieldClass} data-testid="input-pending-amount" />
+            {draft.totalCents === null && draft.amountText && <span className="mt-1 block text-[9px] font-normal normal-case tracking-normal text-[#9b6a26]">Valor original: {draft.amountText}</span>}
+          </label>
+        </div>
+        <label className={labelClass}>Observações · opcional
+          <textarea value={notes} maxLength={1000} onChange={(event) => setNotes(event.target.value)} rows={3} className="mt-1 w-full resize-y rounded-xl border border-[#e7e2ea] bg-white px-3 py-2.5 text-sm text-[#342d43] outline-none focus:border-[#9477bf]" data-testid="input-pending-notes" />
+        </label>
+        {amount.trim() && parseBrlCents(amount) === null && <p className="rounded-lg bg-[#fff5e8] px-3 py-2 text-[10px] font-semibold text-[#805824]" role="status">O valor ainda não é válido; será mantido como pendência e não entrará no faturamento.</p>}
+        {error && <p className="rounded-lg bg-[#fff0ed] px-3 py-2 text-xs font-semibold text-[#9c483f]" role="alert" data-testid="status-pending-draft-error">{error}</p>}
+        <DialogFooter className="gap-2">
+          <button type="button" onClick={onClose} disabled={busy} className="h-10 rounded-xl border border-[#e3dfe7] px-4 text-sm font-bold text-[#716a79] disabled:opacity-50" data-testid="button-cancel-pending-draft">Cancelar</button>
+          <button type="submit" disabled={busy} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#7656b8] px-4 text-sm font-bold text-white disabled:opacity-50" data-testid="button-save-pending-draft">
+            {busy ? 'Salvando…' : 'Salvar pendência'}
+          </button>
+        </DialogFooter>
+      </form>
     </DialogContent>
   </Dialog>;
 }

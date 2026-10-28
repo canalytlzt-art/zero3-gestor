@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import type { Product, Sale, SalesRefundRecord } from '@workspace/api-client-react';
+import type { Product, Sale, SalesPendingDraft, SalesRefundRecord } from '@workspace/api-client-react';
 import { productNameKey } from './sales-utils';
 import { protectSpreadsheetCsvText, protectWorksheetForCsv } from './spreadsheet-csv-safety';
 
@@ -14,6 +14,8 @@ export type ExportFilters = {
   selection: SalesExportSelection;
   productName: string;
   generatedAt: string;
+  cadastralStatus?: 'all' | 'needs-review' | 'complete';
+  pendingDrafts?: SalesPendingDraft[];
 };
 
 export type SalesReportSummary = {
@@ -100,6 +102,33 @@ function selected(date: string, productId: string | null, name: string, filters:
     && (!filters.productName || (productId !== null && productIds.has(productId)) || productNameKey(name) === productNameKey(filters.productName));
 }
 
+export function getSaleVerificationIssues(sale: Pick<Sale, 'customerName' | 'productId'>): string[] {
+  const issues: string[] = [];
+  if (!sale.customerName?.trim()) issues.push('cliente não informado');
+  if (!sale.productId) issues.push('produto não vinculado');
+  return issues;
+}
+
+function saleMatchesCadastralStatus(sale: Pick<Sale, 'customerName' | 'productId'>, status: ExportFilters['cadastralStatus']) {
+  if (!status || status === 'all') return true;
+  const needsReview = getSaleVerificationIssues(sale).length > 0;
+  return status === 'needs-review' ? needsReview : !needsReview;
+}
+
+export function selectSalesPendingDrafts(filters: ExportFilters): SalesPendingDraft[] {
+  if (filters.cadastralStatus === 'complete') return [];
+  return (filters.pendingDrafts ?? []).filter((draft) => {
+    const date = draft.saleDate?.slice(0, 10);
+    const dateMatches = date
+      ? dateMatchesSelection(date, filters.selection)
+      : filters.selection.mode === 'all';
+    const productMatches = !filters.productName
+      || !draft.productName
+      || productNameKey(draft.productName) === productNameKey(filters.productName);
+    return dateMatches && productMatches;
+  });
+}
+
 function productTotalsKey(productId: string | null) {
   return productId ?? '__uncategorized__';
 }
@@ -118,9 +147,15 @@ function prepareSalesReport(
       .filter((sale) => sale.productId !== null && productNameKey(sale.productName) === productNameKey(filters.productName))
       .map(({ productId }) => productId as string),
   ]);
-  const activeSales = sales.filter((sale) => sale.status === 'active' && selected(sale.saleDate, sale.productId, sale.productName, filters, selectedProductIds));
+  const activeSales = sales.filter((sale) => sale.status === 'active'
+    && saleMatchesCadastralStatus(sale, filters.cadastralStatus)
+    && selected(sale.saleDate, sale.productId, sale.productName, filters, selectedProductIds));
   const activeRefunds = refunds.filter((refund) => refund.status === 'active'
     && refund.saleStatus === 'active'
+    && saleMatchesCadastralStatus(salesById.get(refund.saleId) ?? {
+      customerName: null,
+      productId: refund.productId,
+    }, filters.cadastralStatus)
     && selected(refund.refundDate, refund.productId, refund.productName, filters, selectedProductIds));
   const summary: SalesReportSummary = {
     salesCount: activeSales.length,
@@ -131,7 +166,21 @@ function prepareSalesReport(
     netCents: 0n,
   };
   summary.netCents = summary.salesCents - summary.refundsCents;
-  return { currentNames, salesById, activeSales, activeRefunds, summary };
+  return {
+    currentNames,
+    salesById,
+    activeSales,
+    activeRefunds,
+    summary,
+    pendingDrafts: selectSalesPendingDrafts(filters),
+    salesNeedingReview: sales.filter((sale) => sale.status === 'active'
+      && getSaleVerificationIssues(sale).length > 0
+      && selected(sale.saleDate, sale.productId, sale.productName, filters, selectedProductIds)),
+  };
+}
+
+export function countSalesPendingDrafts(filters: ExportFilters): number {
+  return selectSalesPendingDrafts(filters).length;
 }
 
 function selectedMonths(filters: ExportFilters, sales: Sale[], refunds: SalesRefundRecord[]) {
@@ -153,17 +202,35 @@ export function summarizeSalesReport(
   return prepareSalesReport(sales, refunds, products, filters).summary;
 }
 
+export function countSalesWithVerificationIssues(
+  sales: Sale[],
+  products: Product[],
+  filters: ExportFilters,
+): number {
+  const productIds = new Set([
+    ...products
+      .filter((product) => productNameKey(product.name) === productNameKey(filters.productName))
+      .map(({ id }) => id),
+    ...sales
+      .filter((sale) => sale.productId !== null && productNameKey(sale.productName) === productNameKey(filters.productName))
+      .map(({ productId }) => productId as string),
+  ]);
+  return sales.filter((sale) => sale.status === 'active'
+    && getSaleVerificationIssues(sale).length > 0
+    && selected(sale.saleDate, sale.productId, sale.productName, filters, productIds)).length;
+}
+
 export function createSalesWorkbook(
   sales: Sale[],
   refunds: SalesRefundRecord[],
   products: Product[],
   filters: ExportFilters,
 ): XLSX.WorkBook {
-  const { currentNames, salesById, activeSales, activeRefunds, summary: reportSummary } = prepareSalesReport(sales, refunds, products, filters);
+  const { currentNames, salesById, activeSales, activeRefunds, summary: reportSummary, pendingDrafts, salesNeedingReview } = prepareSalesReport(sales, refunds, products, filters);
 
   const workbook = XLSX.utils.book_new();
   const launchRows: (string | number | null)[][] = [
-    ['Tipo', 'ID interno', 'Data da movimentação', 'Venda original', 'Data da venda original', 'ID do produto', 'Nome atual', 'Nome na venda', 'Quantidade', 'Valor unitário (R$)', 'Vendas (R$)', 'Estornos (R$)', 'Impacto após estornos (R$)', 'Observação/motivo', 'Nome'],
+    ['Tipo', 'ID interno', 'Data da movimentação', 'Venda original', 'Data da venda original', 'ID do produto', 'Nome atual', 'Nome na venda', 'Quantidade', 'Valor unitário (R$)', 'Vendas (R$)', 'Estornos (R$)', 'Impacto após estornos (R$)', 'Observação/motivo', 'Nome', 'Verificação cadastral'],
     ...activeSales.map((sale) => [
       'Venda',
       sale.id,
@@ -180,6 +247,7 @@ export function createSalesWorkbook(
       moneyForWorkbook(BigInt(sale.totalCents)),
       sale.notes ?? '',
       sale.customerName ?? '',
+      getSaleVerificationIssues(sale).join('; ') || 'Conferido',
     ]),
     ...activeRefunds.map((refund) => [
       'Estorno',
@@ -197,6 +265,28 @@ export function createSalesWorkbook(
       moneyForWorkbook(-BigInt(refund.amountCents)),
       refund.reason,
       salesById.get(refund.saleId)?.customerName ?? '',
+      getSaleVerificationIssues(salesById.get(refund.saleId) ?? {
+        customerName: null,
+        productId: refund.productId,
+      }).join('; ') || 'Conferido',
+    ]),
+    ...pendingDrafts.map((draft) => [
+      'Rascunho financeiro',
+      draft.id,
+      draft.saleDate?.split('-').reverse().join('/') ?? draft.saleDateText ?? '',
+      '',
+      '',
+      '',
+      draft.productName ?? '',
+      draft.productName ?? '',
+      null,
+      null,
+      null,
+      null,
+      null,
+      draft.notes ?? draft.amountText ?? '',
+      draft.customerName ?? '',
+      `Pendente: ${draft.missingFields.map((field) => field === 'saleDate' ? 'data' : 'valor').join(', ') || 'conferência'}`,
     ]),
   ];
   launchRows.splice(1, launchRows.length - 1, ...launchRows.slice(1).sort((a, b) => {
@@ -205,14 +295,38 @@ export function createSalesWorkbook(
     return secondDate.localeCompare(firstDate) || String(a[1]).localeCompare(String(b[1]));
   }));
   const launches = XLSX.utils.aoa_to_sheet(launchRows);
-  launches['!cols'] = [{ wch: 13 }, { wch: 38 }, { wch: 18 }, { wch: 38 }, { wch: 18 }, { wch: 38 }, { wch: 28 }, { wch: 28 }, { wch: 13 }, { wch: 19 }, { wch: 17 }, { wch: 17 }, { wch: 24 }, { wch: 42 }, { wch: 28 }];
-  launches['!autofilter'] = { ref: `A1:O${Math.max(1, launchRows.length)}` };
+  launches['!cols'] = [{ wch: 22 }, { wch: 38 }, { wch: 18 }, { wch: 38 }, { wch: 18 }, { wch: 38 }, { wch: 28 }, { wch: 28 }, { wch: 13 }, { wch: 19 }, { wch: 17 }, { wch: 17 }, { wch: 24 }, { wch: 42 }, { wch: 28 }, { wch: 38 }];
+  launches['!autofilter'] = { ref: `A1:P${Math.max(1, launchRows.length)}` };
   setCurrencyFormat(launches, 9, launchRows.length - 1);
   setCurrencyFormat(launches, 10, launchRows.length - 1);
   setCurrencyFormat(launches, 11, launchRows.length - 1);
   setCurrencyFormat(launches, 12, launchRows.length - 1);
-  setTextCells(launches, launchRows.length, [0, 1, 2, 3, 4, 5, 6, 7, 13, 14]);
+  setTextCells(launches, launchRows.length, [0, 1, 2, 3, 4, 5, 6, 7, 13, 14, 15]);
   XLSX.utils.book_append_sheet(workbook, launches, 'Lançamentos');
+
+  if (pendingDrafts.length) {
+    const pendingRows = [
+      ['ID interno', 'Cliente', 'Data informada', 'Plano/produto', 'Valor informado', 'Informações faltantes', 'Observação', 'Arquivo', 'Aba', 'Linha'],
+      ...pendingDrafts.map((draft) => [
+        draft.id,
+        draft.customerName ?? '',
+        draft.saleDate?.split('-').reverse().join('/') ?? draft.saleDateText ?? '',
+        draft.productName ?? '',
+        draft.totalCents === null ? draft.amountText ?? '' : moneyForWorkbook(BigInt(draft.totalCents)),
+        draft.missingFields.map((field) => field === 'saleDate' ? 'data da venda' : 'valor').join(', ') || 'revisar informações opcionais',
+        draft.notes ?? '',
+        draft.sourceFileName ?? '',
+        draft.sourceSheet ?? '',
+        draft.sourceRow ?? '',
+      ]),
+    ];
+    const pendingSheet = XLSX.utils.aoa_to_sheet(pendingRows);
+    pendingSheet['!cols'] = [{ wch: 38 }, { wch: 28 }, { wch: 20 }, { wch: 28 }, { wch: 20 }, { wch: 32 }, { wch: 42 }, { wch: 32 }, { wch: 24 }, { wch: 12 }];
+    pendingSheet['!autofilter'] = { ref: `A1:J${Math.max(1, pendingRows.length)}` };
+    setCurrencyFormat(pendingSheet, 4, pendingRows.length - 1);
+    setTextCells(pendingSheet, pendingRows.length, [0, 1, 2, 3, 5, 6, 7, 8]);
+    XLSX.utils.book_append_sheet(workbook, pendingSheet, 'Pendências');
+  }
 
   const byProduct = new Map<string, ProductTotals>();
   const byMonth = new Map<string, MonthTotals>();
@@ -255,6 +369,9 @@ export function createSalesWorkbook(
     ['Resumo do período'],
     ['Período', selectionLabel],
     ['Plano/produto', filters.productName || 'Todos os planos'],
+    ['Filtro cadastral', filters.cadastralStatus === 'needs-review' ? 'Com pendências' : filters.cadastralStatus === 'complete' ? 'Conferidas' : 'Todas'],
+    ['Vendas com pendência cadastral', salesNeedingReview.length],
+    ['Rascunhos financeiros (fora dos totais)', pendingDrafts.length],
     ['Gerado em', filters.generatedAt],
     [],
     ['Indicador', 'Valor'],
@@ -302,7 +419,7 @@ export function createSalesWorkbook(
   for (const row of numericRows) setCurrencyFormat(summary, 1, row, row);
   const summaryHeaderCells = summaryRows.length;
   setTextCells(summary, summaryHeaderCells, [0]);
-  for (const row of [1, 2, 3, 5]) {
+  for (const row of [1, 2, 3, 4, 5, 6]) {
     const cell = summary[XLSX.utils.encode_cell({ r: row, c: 1 })];
     if (cell) {
       cell.t = 's';
@@ -342,6 +459,7 @@ export function createSalesCsv(sales: Sale[], refunds: SalesRefundRecord[], prod
     ['Relatório financeiro Zero3 PRO'],
     ['Período', selectionLabel],
     ['Plano/produto', filters.productName || 'Todos os planos'],
+    ['Situação cadastral', filters.cadastralStatus === 'needs-review' ? 'Com pendências' : filters.cadastralStatus === 'complete' ? 'Conferidas' : 'Todas'],
     ['Gerado em', filters.generatedAt],
     [],
   ].map((row) => row.map((cell) => csvCell(String(cell ?? ''))).join(';')).join('\r\n');

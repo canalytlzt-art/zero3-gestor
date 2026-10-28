@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { SalesPeriodBackupSelectionCadastralStatus } from './salesPeriodBackupSelectionCadastralStatus';
 import type { SalesPeriodBackupSelectionMode } from './salesPeriodBackupSelectionMode';
 
 export interface SalesPeriodBackupSelection {
@@ -23,4 +24,5 @@ export interface SalesPeriodBackupSelection {
      * @nullable
      */
   productName?: string | null;
+  cadastralStatus?: SalesPeriodBackupSelectionCadastralStatus;
 }

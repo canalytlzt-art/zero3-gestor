@@ -27,6 +27,7 @@ import SalesManagement from '@/components/sales-management';
 import ScoreboardGoals from '@/components/scoreboard-goals';
 import OccupancyManagement from '@/components/occupancy-management';
 import { buildScoreboardQueryParams, formatCents, formatMonthKey, getSaoPauloMonthKey, isCompleteCalendarMonthRange, monthKeysBetween, monthsForYearQuarter, productNameKey, type ScoreboardPeriodMode } from '@/lib/sales-utils';
+import { getWeekdayNameForIsoDay } from '@/lib/occupancy-calendar';
 
 const queryClient = new QueryClient();
 const OccupancyChartsPage = lazy(() => import('@/components/occupancy-charts-page'));
@@ -223,6 +224,7 @@ function ScoreboardContent() {
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [selectedQuarter, setSelectedQuarter] = useState(currentQuarter);
   const [filterProduct, setFilterProduct] = useState('');
+  const [weekdays, setWeekdays] = useState<number[]>([]);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const invalidRange = periodMode === 'range' && (!dateFrom || !dateTo || dateFrom > dateTo);
@@ -241,8 +243,9 @@ function ScoreboardContent() {
       dateFrom,
       dateTo,
       filterProduct,
+      weekdays,
     });
-  }, [periodMode, currentMonthKey, selectedMonth, selectedMonths, selectedYear, selectedQuarter, dateFrom, dateTo, filterProduct]);
+  }, [periodMode, currentMonthKey, selectedMonth, selectedMonths, selectedYear, selectedQuarter, dateFrom, dateTo, filterProduct, weekdays]);
   const {
     data: scoreboardData,
     isLoading: isScoreboardLoading,
@@ -284,19 +287,23 @@ function ScoreboardContent() {
         return allMonthKeys;
     }
   }, [periodMode, currentMonthKey, selectedMonth, selectedMonths, selectedYear, selectedQuarter, invalidRange, dateFrom, dateTo, allMonthKeys]);
-  const goalComparisonMode = periodMode === 'range'
-    ? invalidRange
-      ? 'invalid'
-      : isCompleteCalendarMonthRange(dateFrom, dateTo)
-        ? 'complete'
-        : 'partial-range'
-    : periodMonthKeys.length > 0
-      ? 'complete'
-      : 'invalid';
+  const goalComparisonMode = invalidRange || invalidMonthSelection || invalidYearSelection
+    ? 'invalid'
+    : weekdays.length > 0
+      ? 'partial-range'
+      : periodMode === 'range'
+        ? isCompleteCalendarMonthRange(dateFrom, dateTo)
+          ? 'complete'
+          : 'partial-range'
+        : periodMonthKeys.length > 0
+          ? 'complete'
+          : 'invalid';
   const emptyScoreboard = {
     totals: { quantity: 0, salesCents: 0, refundCents: 0, netCents: 0 },
     products: [],
     months: [],
+    days: [],
+    weeks: [],
   };
   const report = invalidRange || invalidMonthSelection || invalidYearSelection ? emptyScoreboard : scoreboardData ?? emptyScoreboard;
   const selectedProductName = filterProduct
@@ -333,6 +340,7 @@ function ScoreboardContent() {
     setDateFrom('');
     setDateTo('');
     setFilterProduct('');
+    setWeekdays([]);
   };
 
   if (isLoading) return <div className="space-y-4"><div className="skeleton h-44 rounded-[26px]" /><div className="skeleton h-52 rounded-[26px]" /></div>;
@@ -448,6 +456,19 @@ function ScoreboardContent() {
         {invalidRange && <p className="mt-3 text-xs font-semibold text-[#a24f45]" role="alert" data-testid="status-scoreboard-date-range">{!dateFrom || !dateTo ? 'Informe as datas inicial e final para consultar o intervalo.' : 'A data inicial deve ser anterior ou igual à data final.'}</p>}
         {invalidMonthSelection && <p className="mt-3 text-xs font-semibold text-[#a24f45]" role="alert" data-testid="status-scoreboard-month">Selecione o mês que deseja consultar.</p>}
         {invalidYearSelection && <p className="mt-3 text-xs font-semibold text-[#a24f45]" role="alert" data-testid="status-scoreboard-year">Informe um ano válido entre 1000 e 9999.</p>}
+        <fieldset className="mt-4 border-t border-[#efebf0] pt-3">
+          <legend className="text-[10px] font-bold uppercase tracking-[.1em] text-[#817b89]">Dia da semana da movimentação</legend>
+          <div className="mt-2 flex flex-wrap gap-1.5" data-testid="filters-scoreboard-weekdays">
+            {[1, 2, 3, 4, 5, 6, 7].map((weekday) => {
+              const selected = weekdays.includes(weekday);
+              return <label key={weekday} className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-bold ${selected ? 'border-[#7656b8] bg-[#eee8f7] text-[#5d4a78]' : 'border-[#e7e2ea] bg-white text-[#746c7e]'}`}>
+                <input type="checkbox" checked={selected} onChange={() => setWeekdays((current) => selected ? current.filter((item) => item !== weekday) : [...current, weekday].sort())} className="accent-[#7656b8]" data-testid={`filter-scoreboard-weekday-${weekday}`} />
+                {getWeekdayNameForIsoDay(weekday)}
+              </label>;
+            })}
+          </div>
+          {weekdays.length > 0 && <p className="mt-2 text-[10px] leading-4 text-[#827b8b]" role="status" data-testid="status-scoreboard-weekday-filter">Vendas são agrupadas pela data da venda; estornos, pela data efetiva do estorno. A meta mensal não é comparada em um recorte de dias da semana.</p>}
+        </fieldset>
       </section>
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Resumo do período">

@@ -15,5 +15,9 @@ export interface SalesImportResult {
   importedCount: number;
   /** @minimum 0 */
   skippedCount: number;
+  /** @minimum 0 */
+  pendingCount: number;
+  /** @minimum 0 */
+  skippedPendingCount: number;
   sales: Sale[];
 }

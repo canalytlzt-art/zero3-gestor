@@ -693,10 +693,22 @@ export interface SalesHistoryEntry {
   createdAt: string;
 }
 
+export type SalesImportedOriginState = typeof SalesImportedOriginState[keyof typeof SalesImportedOriginState];
+
+
+export const SalesImportedOriginState = {
+  sale: 'sale',
+  pending: 'pending',
+} as const;
+
 export interface SalesImportedOrigin {
   sourceSheet: string;
   sourceRow: number;
-  saleId: string;
+  state: SalesImportedOriginState;
+  /** @nullable */
+  saleId: string | null;
+  /** @nullable */
+  draftId: string | null;
 }
 
 export interface SalesImportOriginsResult {
@@ -711,10 +723,10 @@ export interface SalesImportRow {
      */
   productName?: string | null;
   /**
-     * @minLength 1
      * @maxLength 120
+     * @nullable
      */
-  customerName: string;
+  customerName: string | null;
   /**
      * @maxLength 1000
      * @nullable
@@ -734,6 +746,149 @@ export interface SalesImportRow {
   sourceRow: number;
 }
 
+export interface SalesImportDraftRow {
+  /**
+     * @maxLength 1000
+     * @nullable
+     */
+  customerName: string | null;
+  /** @nullable */
+  saleDate: string | null;
+  /**
+     * @maxLength 200
+     * @nullable
+     */
+  saleDateText: string | null;
+  /**
+     * @maxLength 500
+     * @nullable
+     */
+  productName: string | null;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     * @nullable
+     */
+  totalCents: number | null;
+  /**
+     * @maxLength 120
+     * @nullable
+     */
+  amountText: string | null;
+  /**
+     * @maxLength 1000
+     * @nullable
+     */
+  notes: string | null;
+  /**
+     * @minLength 1
+     * @maxLength 255
+     */
+  sourceSheet: string;
+  /** @minimum 1 */
+  sourceRow: number;
+}
+
+export type SalesPendingDraftStatus = typeof SalesPendingDraftStatus[keyof typeof SalesPendingDraftStatus];
+
+
+export const SalesPendingDraftStatus = {
+  pending: 'pending',
+  completed: 'completed',
+} as const;
+
+export type SalesPendingDraftMissingFieldsItem = typeof SalesPendingDraftMissingFieldsItem[keyof typeof SalesPendingDraftMissingFieldsItem];
+
+
+export const SalesPendingDraftMissingFieldsItem = {
+  saleDate: 'saleDate',
+  totalCents: 'totalCents',
+} as const;
+
+export interface SalesPendingDraft {
+  id: string;
+  status: SalesPendingDraftStatus;
+  /** @nullable */
+  customerName: string | null;
+  /** @nullable */
+  saleDate: string | null;
+  /** @nullable */
+  saleDateText: string | null;
+  /** @nullable */
+  productName: string | null;
+  /** @nullable */
+  totalCents: number | null;
+  /** @nullable */
+  amountText: string | null;
+  /** @nullable */
+  notes: string | null;
+  /** @nullable */
+  sourceFileName: string | null;
+  /** @nullable */
+  sourceSheet: string | null;
+  /** @nullable */
+  sourceRow: number | null;
+  missingFields: SalesPendingDraftMissingFieldsItem[];
+  /** @nullable */
+  linkedSaleId: string | null;
+  /** @minimum 1 */
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdateSalesPendingDraftInput {
+  /**
+     * @maxLength 120
+     * @nullable
+     */
+  customerName: string | null;
+  /** @nullable */
+  saleDate: string | null;
+  /**
+     * @maxLength 200
+     * @nullable
+     */
+  saleDateText: string | null;
+  /**
+     * @maxLength 120
+     * @nullable
+     */
+  productName: string | null;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     * @nullable
+     */
+  totalCents: number | null;
+  /**
+     * @maxLength 120
+     * @nullable
+     */
+  amountText: string | null;
+  /**
+     * @maxLength 1000
+     * @nullable
+     */
+  notes: string | null;
+  /** @minimum 1 */
+  expectedVersion: number;
+}
+
+export type UpdateSalesPendingDraftResultStatus = typeof UpdateSalesPendingDraftResultStatus[keyof typeof UpdateSalesPendingDraftResultStatus];
+
+
+export const UpdateSalesPendingDraftResultStatus = {
+  pending: 'pending',
+  completed: 'completed',
+} as const;
+
+export interface UpdateSalesPendingDraftResult {
+  status: UpdateSalesPendingDraftResultStatus;
+  draft: SalesPendingDraft | null;
+  sale: Sale | null;
+}
+
 export interface SalesImportInput {
   /** @pattern ^[a-f0-9]{64}$ */
   fileHash: string;
@@ -742,11 +897,10 @@ export interface SalesImportInput {
      * @maxLength 255
      */
   filename: string;
-  /**
-     * @minItems 1
-     * @maxItems 500
-     */
+  /** @maxItems 500 */
   rows: SalesImportRow[];
+  /** @maxItems 500 */
+  pendingRows?: SalesImportDraftRow[];
 }
 
 export interface SalesImportResult {
@@ -757,6 +911,10 @@ export interface SalesImportResult {
   importedCount: number;
   /** @minimum 0 */
   skippedCount: number;
+  /** @minimum 0 */
+  pendingCount: number;
+  /** @minimum 0 */
+  skippedPendingCount: number;
   sales: Sale[];
 }
 
@@ -880,10 +1038,27 @@ export type SalesScoreboardMonth = SalesScoreboardTotals & {
   month: string;
 };
 
+export type SalesScoreboardDay = SalesScoreboardTotals & {
+  /** @pattern ^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$ */
+  date: string;
+  /**
+     * @minimum 1
+     * @maximum 7
+     */
+  weekday: number;
+};
+
+export type SalesScoreboardWeek = SalesScoreboardTotals & {
+  /** @pattern ^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$ */
+  weekStart: string;
+};
+
 export interface SalesScoreboard {
   totals: SalesScoreboardTotals;
   products: SalesScoreboardProduct[];
   months: SalesScoreboardMonth[];
+  days: SalesScoreboardDay[];
+  weeks: SalesScoreboardWeek[];
 }
 
 export interface CreateSalesRefundInput {
@@ -1102,6 +1277,15 @@ export const SalesPeriodBackupSelectionMode = {
   all: 'all',
 } as const;
 
+export type SalesPeriodBackupSelectionCadastralStatus = typeof SalesPeriodBackupSelectionCadastralStatus[keyof typeof SalesPeriodBackupSelectionCadastralStatus];
+
+
+export const SalesPeriodBackupSelectionCadastralStatus = {
+  all: 'all',
+  'needs-review': 'needs-review',
+  complete: 'complete',
+} as const;
+
 export interface SalesPeriodBackupSelection {
   mode: SalesPeriodBackupSelectionMode;
   /**
@@ -1118,6 +1302,7 @@ export interface SalesPeriodBackupSelection {
      * @nullable
      */
   productName?: string | null;
+  cadastralStatus?: SalesPeriodBackupSelectionCadastralStatus;
 }
 
 export interface SalesBackupFinancialTotals {
@@ -1338,6 +1523,12 @@ toDate?: string;
  * @items.pattern ^\d{4}-(0[1-9]|1[0-2])$
  */
 months?: string[];
+/**
+ * Dias da semana ISO da movimentação, de segunda (1) a domingo (7)
+ * @items.minimum 1
+ * @items.maximum 7
+ */
+weekdays?: number[];
 productId?: string;
 modalityId?: string;
 };

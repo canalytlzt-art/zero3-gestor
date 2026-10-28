@@ -59,6 +59,7 @@ class MemorySalesD1 implements D1Database {
   readonly sales = new Map<string, Row>();
   readonly histories: Row[] = [];
   readonly refunds: Row[] = [];
+  readonly pendingDrafts = new Map<string, Row>();
   readonly batches = new Map<string, string>();
   readonly queries: string[] = [];
 
@@ -90,18 +91,34 @@ class MemorySalesD1 implements D1Database {
     const normalized = query.replace(/\s+/g, " ").trim().toLowerCase();
     let results: Row[];
 
-    if (normalized.startsWith("select entity_id as sale_id")) {
+    if (normalized.startsWith("select source_sheet, source_row, state, sale_id, draft_id from (")) {
       const fileHash = String(values[0]);
-      results = this.histories.flatMap((history) => {
+      const draftOrigins = [...this.pendingDrafts.values()]
+        .filter((draft) => draft.source_file_hash === fileHash)
+        .map((draft) => ({
+          source_sheet: draft.source_sheet,
+          source_row: draft.source_row,
+          state: draft.status === "completed" ? "sale" : "pending",
+          sale_id: draft.linked_sale_id ?? null,
+          draft_id: draft.status === "pending" ? draft.id : null,
+        }));
+      const draftSourceKeys = new Set(draftOrigins.map((draft) => `${draft.source_sheet}:${draft.source_row}`));
+      const saleOrigins = this.histories.flatMap((history) => {
         const afterData = JSON.parse(String(history.after_data)) as Row;
-        return afterData.sourceFileHash === fileHash
+        const key = `${afterData.sourceSheet}:${afterData.sourceRow}`;
+        return afterData.sourceFileHash === fileHash && !draftSourceKeys.has(key)
           ? [{
-              sale_id: history.entity_id,
               source_sheet: afterData.sourceSheet,
               source_row: afterData.sourceRow,
+              state: "sale",
+              sale_id: history.entity_id,
+              draft_id: null,
             }]
           : [];
       });
+      results = [...draftOrigins, ...saleOrigins];
+    } else if (normalized.startsWith("select * from sales_pending_drafts where status='pending'")) {
+      results = [...this.pendingDrafts.values()].filter((draft) => draft.status === "pending");
     } else if (normalized.startsWith("select * from sales where id in")) {
       const ids = new Set(values.map(String));
       results = [...this.sales.values()].filter((sale) => ids.has(String(sale.id)));
@@ -130,6 +147,25 @@ class MemorySalesD1 implements D1Database {
     if (normalized.startsWith("insert into sales_import_batches")) {
       const [id, , fileHash] = values;
       this.batches.set(String(fileHash), String(id));
+    } else if (normalized.startsWith("insert into sales_pending_drafts")) {
+      const [
+        id, customerName, saleDate, saleDateText, productName, totalCents,
+        amountText, notes, fileHash, fileName, sourceSheet, sourceRow,
+        createdBy, updatedBy, createdAt, updatedAt,
+      ] = values;
+      const existing = [...this.pendingDrafts.values()].some((draft) =>
+        draft.source_file_hash === fileHash
+        && draft.source_sheet === sourceSheet
+        && draft.source_row === sourceRow);
+      if (!existing) this.pendingDrafts.set(String(id), {
+        id, status: "pending", customer_name: customerName, sale_date: saleDate,
+        sale_date_text: saleDateText, product_name: productName,
+        total_cents: totalCents, amount_text: amountText, notes,
+        source_file_hash: fileHash, source_file_name: fileName,
+        source_sheet: sourceSheet, source_row: sourceRow, linked_sale_id: null,
+        version: 1, created_by: createdBy, updated_by: updatedBy,
+        created_at: createdAt, updated_at: updatedAt,
+      });
     } else if (normalized.startsWith("insert into sales_history")) {
       const [
         id,
@@ -339,12 +375,52 @@ test("synthetic workbook import reconciles through Worker, Scoreboard, charts, a
     { month: "2026-10", quantity: 2, salesCents: 20_000, refundCents: 0, netCents: 20_000 },
     { month: "2026-11", quantity: 1, salesCents: 7_505, refundCents: 2_000, netCents: 5_505 },
   ]);
+  assert.deepEqual(scoreboard.days, [
+    { date: "2026-10-31", weekday: 6, quantity: 2, salesCents: 20_000, refundCents: 0, netCents: 20_000 },
+    { date: "2026-11-01", weekday: 7, quantity: 1, salesCents: 7_505, refundCents: 0, netCents: 7_505 },
+    { date: "2026-11-05", weekday: 4, quantity: 0, salesCents: 0, refundCents: 2_000, netCents: -2_000 },
+  ]);
+  assert.deepEqual(scoreboard.weeks, [
+    { weekStart: "2026-10-26", quantity: 3, salesCents: 27_505, refundCents: 0, netCents: 27_505 },
+    { weekStart: "2026-11-02", quantity: 0, salesCents: 0, refundCents: 2_000, netCents: -2_000 },
+  ]);
 
   const charts = buildFinancialChartAnalytics(scoreboard);
   assert.equal(charts.reconcilesByProduct, true);
   assert.equal(charts.reconcilesByMonth, true);
+  assert.equal(charts.days.reduce((sum, row) => sum + row.quantity, 0), scoreboard.totals.quantity);
+  assert.equal(charts.weeks.reduce((sum, row) => sum + row.netCents, 0), scoreboard.totals.netCents);
   assert.equal(charts.byProduct[0]?.quantity, 3);
   assert.equal(charts.byProduct[0]?.netCents, 25_505);
+
+  const weekdayResponse = await requestWorkerSales(
+    database,
+    "/sales/scoreboard?months=2026-10&weekdays=6",
+  );
+  assert.equal(weekdayResponse.status, 200);
+  const saturdayScoreboard = await weekdayResponse.json() as SalesScoreboard;
+  assert.deepEqual(saturdayScoreboard.totals, {
+    quantity: 2,
+    salesCents: 20_000,
+    refundCents: 0,
+    netCents: 20_000,
+  });
+  assert.deepEqual(saturdayScoreboard.days.map(({ date, weekday }) => ({ date, weekday })), [
+    { date: "2026-10-31", weekday: 6 },
+  ]);
+
+  const thursdayRefundResponse = await requestWorkerSales(
+    database,
+    "/sales/scoreboard?fromDate=2026-10-31&toDate=2026-11-05&weekdays=4",
+  );
+  assert.equal(thursdayRefundResponse.status, 200);
+  const thursdayScoreboard = await thursdayRefundResponse.json() as SalesScoreboard;
+  assert.deepEqual(thursdayScoreboard.totals, {
+    quantity: 0,
+    salesCents: 0,
+    refundCents: 2_000,
+    netCents: -2_000,
+  });
 
   const refund = {
     id: "synthetic-refund-1",
