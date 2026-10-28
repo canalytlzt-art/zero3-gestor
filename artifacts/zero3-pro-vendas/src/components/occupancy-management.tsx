@@ -361,11 +361,11 @@ export default function OccupancyManagement() {
     <div className="space-y-5" data-testid="occupancy-page">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="eyebrow text-[9px] font-bold text-[#8a8491]">aulas concluídas</p>
-          <p className="mt-1 max-w-[560px] text-sm text-[#77717f]">Registre presenças e capacidade total. A ocupação é calculada automaticamente, inclusive quando as presenças ultrapassam as vagas.</p>
+          <p className="eyebrow text-[9px] font-bold text-[#8a8491]">check-ins registrados</p>
+          <p className="mt-1 max-w-[560px] text-sm text-[#77717f]">Registre as presenças das aulas e a capacidade total. A taxa de ocupação é calculada automaticamente, inclusive quando as presenças ultrapassam as vagas.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => setImportOpen(true)} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#d7f500] px-4 text-sm font-extrabold text-[#262b15] transition hover:bg-[#c9e600]" data-testid="button-import-occupancy"><Upload size={15} /> Importar ocupação</button>
+          <button type="button" onClick={() => setImportOpen(true)} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#d7f500] px-4 text-sm font-extrabold text-[#262b15] transition hover:bg-[#c9e600]" data-testid="button-import-occupancy"><Upload size={15} /> Importar check-ins</button>
           <button type="button" onClick={() => setModalitiesOpen(true)} className="inline-flex h-11 items-center gap-2 rounded-xl border border-[#ded7e7] bg-white px-4 text-sm font-bold text-[#5d4a78] transition hover:bg-[#f7f4fa]" data-testid="button-manage-modalities"><Layers size={15} /> Modalidades</button>
           <button type="button" onClick={refreshBase} disabled={isRefreshing} aria-busy={isRefreshing} className="inline-flex h-11 items-center gap-2 rounded-xl border border-[#ded7e7] bg-white px-4 text-sm font-bold text-[#5d4a78] transition hover:bg-[#f7f4fa] disabled:cursor-wait disabled:opacity-65" data-testid="button-refresh-occupancy"><RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} /> {isRefreshing ? 'Atualizando…' : 'Atualizar base'}</button>
           <OccupancyReportsDialog modalities={modalities} allRecords={filterOptions} onRestored={invalidateAll} />
@@ -377,8 +377,8 @@ export default function OccupancyManagement() {
         <form id="occupancy-entry-form" onSubmit={(e) => void submit(e)} noValidate className="rounded-[24px] border border-[#e7e1e9] bg-[#fffefc] p-4 shadow-[0_8px_28px_rgba(47,39,62,.035)] sm:p-6 xl:sticky xl:top-[96px]" data-testid="form-occupancy" aria-labelledby="occupancy-form-heading">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="eyebrow text-[9px] font-bold text-[#8a8491]">{editing ? 'editando registro' : 'nova aula'}</p>
-              <h2 id="occupancy-form-heading" className="mt-1 text-xl font-extrabold tracking-[-.04em] text-[#171522]">{editing ? (editing.legacy ? 'Corrigir registro legado' : 'Corrigir dados da aula') : 'Registrar aula'}</h2>
+              <p className="eyebrow text-[9px] font-bold text-[#8a8491]">{editing ? 'editando check-in' : 'novo check-in'}</p>
+              <h2 id="occupancy-form-heading" className="mt-1 text-xl font-extrabold tracking-[-.04em] text-[#171522]">{editing ? (editing.legacy ? 'Corrigir check-in legado' : 'Corrigir check-in da aula') : 'Registrar check-in / aula'}</h2>
               {editing && <p className="mt-1 text-xs text-[#77717f]" data-testid="text-occupancy-editing">{editing.label}</p>}
             </div>
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[#eee8f7] text-[#7656b8]"><Gauge size={18} /></span>
@@ -432,7 +432,7 @@ export default function OccupancyManagement() {
                 </p>
               </div>
               <div className="rounded-xl bg-[#f3eff8] px-3.5 py-3 sm:col-span-2" aria-live="polite" data-testid="text-occupancy-calculated">
-                <span className="text-[10px] font-bold uppercase tracking-[.08em] text-[#817b89]">Ocupação calculada</span>
+                <span className="text-[10px] font-bold uppercase tracking-[.08em] text-[#817b89]">Taxa de ocupação</span>
                 <span className="ml-2 text-sm font-extrabold tabular-nums text-[#5d4a78]">{calculatedPercentage === null ? 'Informe presenças e vagas' : formatCalculatedPct(calculatedPercentage)}</span>
               </div>
             </div>}
@@ -476,7 +476,7 @@ export default function OccupancyManagement() {
 
           <div className="mt-5 flex flex-wrap gap-2">
             <button type="submit" disabled={isSaving} aria-busy={isSaving} className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-[#d7f500] px-4 text-sm font-extrabold text-[#262b15] transition hover:bg-[#c9e600] disabled:cursor-wait disabled:opacity-60" data-testid="button-submit-occupancy">
-              {isSaving ? 'Salvando…' : editing ? 'Salvar correção' : <><Plus size={16} /> Registrar aula</>}
+              {isSaving ? 'Salvando…' : editing ? 'Salvar correção' : <><Plus size={16} /> Registrar check-in</>}
             </button>
             {(editing || touched) && <button type="button" onClick={resetForm} disabled={isSaving} className="h-11 rounded-xl border border-[#ded7e7] bg-white px-4 text-sm font-bold text-[#5d4a78] hover:bg-[#f7f4fa]" data-testid="button-cancel-occupancy-edit">{editing ? 'Cancelar edição' : 'Limpar'}</button>}
           </div>
@@ -486,8 +486,8 @@ export default function OccupancyManagement() {
         <section className="overflow-hidden rounded-[24px] border border-[#e7e1e9] bg-[#fffefc]" aria-labelledby="occupancy-history-heading" data-testid="section-occupancy-history">
           <div className="border-b border-[#ece7ee] px-4 py-4 sm:px-5">
             <div className="flex items-end justify-between gap-3">
-              <div><p className="eyebrow text-[9px] font-bold text-[#8a8491]">histórico</p><h2 id="occupancy-history-heading" className="mt-1 text-base font-extrabold tracking-[-.035em] text-[#332d40]">Registros de ocupação</h2></div>
-              <span className="text-[10px] font-semibold text-[#8a8491]" data-testid="text-occupancy-count">{records.length} {records.length === 1 ? 'registro' : 'registros'}</span>
+              <div><p className="eyebrow text-[9px] font-bold text-[#8a8491]">histórico</p><h2 id="occupancy-history-heading" className="mt-1 text-base font-extrabold tracking-[-.035em] text-[#332d40]">Histórico de check-ins</h2></div>
+              <span className="text-[10px] font-semibold text-[#8a8491]" data-testid="text-occupancy-count">{records.length} {records.length === 1 ? 'check-in' : 'check-ins'}</span>
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-6" data-testid="filters-occupancy">
               <label className={labelClass}>Período
@@ -610,7 +610,7 @@ export default function OccupancyManagement() {
           {records.length > 0 && <div className="grid gap-2 border-b border-[#f0edf1] bg-[#fbfafb] p-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="summary-occupancy-selection">
             <div className="rounded-xl bg-white px-3 py-2.5"><p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Aulas com presenças e vagas</p><p className="mt-1 text-sm font-extrabold tabular-nums text-[#443d50]" data-testid="text-occupancy-measured-count">{measuredRecords.toLocaleString('pt-BR')}</p></div>
             <div className="rounded-xl bg-white px-3 py-2.5"><p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Presenças / vagas</p><p className="mt-1 text-sm font-extrabold tabular-nums text-[#443d50]" data-testid="text-occupancy-presence-capacity">{totalPresences?.toLocaleString('pt-BR') ?? '—'} / {totalCapacity?.toLocaleString('pt-BR') ?? '—'}</p></div>
-            <div className="rounded-xl bg-white px-3 py-2.5"><p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Ocupação ponderada</p><p className="mt-1 text-sm font-extrabold tabular-nums text-[#5d4a78]" data-testid="text-occupancy-weighted-rate">{weightedOccupancy === null ? 'Sem capacidade registrada' : formatCalculatedPct(weightedOccupancy)}</p></div>
+            <div className="rounded-xl bg-white px-3 py-2.5"><p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Taxa de ocupação ponderada</p><p className="mt-1 text-sm font-extrabold tabular-nums text-[#5d4a78]" data-testid="text-occupancy-weighted-rate">{weightedOccupancy === null ? 'Sem capacidade registrada' : formatCalculatedPct(weightedOccupancy)}</p></div>
             <div className="rounded-xl bg-white px-3 py-2.5"><p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Presenças agregadoras</p><p className="mt-1 text-sm font-extrabold tabular-nums text-[#5d4a78]" data-testid="text-occupancy-aggregator-total">{summaryAnalytics.totals.aggregatorPresences?.toLocaleString('pt-BR') ?? 'Não informado'}</p><p className="mt-0.5 text-[9px] text-[#817b89]">Informado em {summaryAnalytics.totals.aggregatorInformedClassCount} de {summaryAnalytics.totals.measuredClassCount} aulas</p></div>
             {legacyRecords > 0 && <p className="text-[10px] font-medium text-[#817b89] sm:col-span-3" data-testid="text-occupancy-legacy-count">{legacyRecords} registro(s) legado(s) sem presenças/vagas ficam fora do cálculo ponderado.</p>}
             {filterKind === 'all' && filterState.viewMode !== 'daily' && <p className="text-[10px] font-medium text-[#817b89] sm:col-span-3" data-testid="text-occupancy-summary-precedence">No modo mensal ou trimestral, o resumo mensal substitui os detalhes diários da mesma turma e mês para evitar duplicidade.</p>}
@@ -669,7 +669,7 @@ export default function OccupancyManagement() {
       <AlertDialog open={!!toDelete} onOpenChange={(open) => { if (!open && !deleteRecord.isPending) setToDelete(null); }}>
         <AlertDialogContent className="rounded-[22px] border-[#e7e1e9] bg-[#fffefc]" data-testid="dialog-delete-occupancy">
           <AlertDialogHeader>
-            <AlertDialogTitle>Excluir registro de ocupação?</AlertDialogTitle>
+            <AlertDialogTitle>Excluir check-in?</AlertDialogTitle>
             <AlertDialogDescription data-testid="text-delete-occupancy-target">
               {toDelete && <>Você vai excluir o registro {toDelete.kind === 'daily' ? 'diário' : 'mensal'} de <strong>{recordLabel(toDelete)}</strong> com {formatPct(toDelete.percentage)}. Esta ação não pode ser desfeita.</>}
             </AlertDialogDescription>
@@ -793,7 +793,7 @@ function ModalitiesDialog({ open, onOpenChange, modalities, isLoading, isError, 
         ) : isError ? (
           <div className="rounded-xl border border-dashed border-[#ded8e5] p-4 text-center text-xs text-[#827b8b]" data-testid="status-modalities-error">Não foi possível carregar as modalidades. <button type="button" onClick={onRetry} className="font-bold text-[#6846a9] underline" data-testid="button-retry-modalities">Tentar novamente</button></div>
         ) : modalities.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-[#ded8e5] p-4 text-center text-xs text-[#827b8b]" data-testid="status-modalities-empty">Nenhuma modalidade ainda. Cadastre aqui ou digite uma nova ao lançar a ocupação.</p>
+          <p className="rounded-xl border border-dashed border-[#ded8e5] p-4 text-center text-xs text-[#827b8b]" data-testid="status-modalities-empty">Nenhuma modalidade ainda. Cadastre aqui ou digite uma nova ao registrar o check-in.</p>
         ) : (
           <ul className="divide-y divide-[#f0edf1] rounded-xl border border-[#ece7ee]" data-testid="list-modalities">
             {modalities.map((m) => (

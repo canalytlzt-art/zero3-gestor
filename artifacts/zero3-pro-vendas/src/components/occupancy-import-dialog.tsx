@@ -258,7 +258,7 @@ export default function OccupancyImportDialog({ open, onOpenChange, onImported }
         <DialogHeader className="border-b border-[#ece7ee] px-5 py-5 pr-12 sm:px-7">
           <div className="flex items-start gap-3">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[#eee8f7] text-[#7656b8]"><FileSpreadsheet size={18}/></span>
-            <div><p className="text-[9px] font-bold uppercase tracking-[.12em] text-[#8a8491]">Importação · etapa 3 de 6</p><DialogTitle className="mt-1 text-xl font-extrabold tracking-[-.04em]">Importar ocupação</DialogTitle>
+            <div><p className="text-[9px] font-bold uppercase tracking-[.12em] text-[#8a8491]">Importação · etapa 3 de 6</p><DialogTitle className="mt-1 text-xl font-extrabold tracking-[-.04em]">Importar check-ins</DialogTitle>
               <DialogDescription id="occupancy-import-description" className="mt-1 text-xs leading-5 text-[#77717f]">A planilha é lida neste navegador. Os bytes não são enviados nem armazenados.</DialogDescription></div>
           </div>
         </DialogHeader>

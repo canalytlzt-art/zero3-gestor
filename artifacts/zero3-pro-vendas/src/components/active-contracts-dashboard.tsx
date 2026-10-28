@@ -71,7 +71,7 @@ export default function ActiveContractsDashboard({
           <p className="mt-2 text-xs text-[#837b8b]">Saldos mensais informados pela administração, independentes das vendas.</p>
         </div>
         <nav className="flex flex-wrap items-center gap-1 self-start rounded-full bg-[#f5f2f6] p-1 sm:self-auto" aria-label="Painéis de gestão">
-          <button type="button" onClick={onOccupancy} className="rounded-full px-3 py-2 text-xs font-semibold text-[#716879] transition hover:bg-white hover:text-[#65479c]" data-testid="switch-contracts-occupancy">Ocupação</button>
+          <button type="button" onClick={onOccupancy} className="rounded-full px-3 py-2 text-xs font-semibold text-[#716879] transition hover:bg-white hover:text-[#65479c]" data-testid="switch-contracts-occupancy">Check-in</button>
           <button type="button" onClick={onFinancial} className="rounded-full px-3 py-2 text-xs font-semibold text-[#716879] transition hover:bg-white hover:text-[#65479c]" data-testid="switch-contracts-financial">Faturamento</button>
           <span className="rounded-full bg-[#ece6f4] px-3 py-2 text-xs font-bold text-[#65479c]" aria-current="page" data-testid="switch-contracts-active">Contratos ativos</span>
           <button type="button" onClick={onComplete} className="rounded-full px-3 py-2 text-xs font-semibold text-[#716879] transition hover:bg-white hover:text-[#65479c]" data-testid="switch-contracts-complete">Completa</button>

@@ -584,9 +584,9 @@ function Workspace() {
   const initial = name.slice(0, 1).toLocaleUpperCase('pt-BR');
   const tabs = [
     { id: 'sales', label: 'Lançamentos', path: '/', testId: 'tab-lancamentos', eyebrow: 'rotina comercial' },
-    { id: 'occupancy', label: 'Ocupação', path: '/ocupacao', testId: 'tab-ocupacao', eyebrow: 'aulas e modalidades' },
+    { id: 'occupancy', label: 'Check-in', path: '/ocupacao', testId: 'tab-ocupacao', eyebrow: 'aulas e modalidades' },
     { id: 'scoreboard', label: 'Scoreboard', path: '/scoreboard', testId: 'tab-scoreboard', eyebrow: 'visão do time' },
-    { id: 'charts', label: 'Gráficos', path: '/graficos', testId: 'tab-graficos', eyebrow: 'análise de ocupação' },
+    { id: 'charts', label: 'Gráficos', path: '/graficos', testId: 'tab-graficos', eyebrow: 'check-in e ocupação' },
   ] as const;
   const activeTab = tabs.find((item) => item.id === tab) ?? tabs[0];
 
@@ -624,7 +624,7 @@ function Workspace() {
             : tab === 'occupancy'
               ? <OccupancyManagement />
               : tab === 'charts'
-                ? <Suspense fallback={<div className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] px-5 py-8 text-sm font-semibold text-[#766d83]" role="status">Carregando gráficos de ocupação…</div>}><OccupancyChartsPage /></Suspense>
+                ? <Suspense fallback={<div className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] px-5 py-8 text-sm font-semibold text-[#766d83]" role="status">Carregando gráficos de check-in e ocupação…</div>}><OccupancyChartsPage /></Suspense>
                 : <SalesManagement />}
         </div>
       </main>

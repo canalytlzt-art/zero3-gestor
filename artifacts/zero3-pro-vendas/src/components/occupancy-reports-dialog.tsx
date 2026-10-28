@@ -296,7 +296,7 @@ export default function OccupancyReportsDialog({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[92dvh] max-w-3xl overflow-y-auto border-[#e7e1e9] bg-[#fffefc] p-5 sm:rounded-[24px] sm:p-6">
           <DialogHeader>
-            <DialogTitle className="text-xl font-extrabold tracking-[-.04em] text-[#171522]">Relatórios e backup de ocupação</DialogTitle>
+            <DialogTitle className="text-xl font-extrabold tracking-[-.04em] text-[#171522]">Relatórios de check-in e ocupação</DialogTitle>
             <DialogDescription className="text-sm text-[#77717f]">
               Estes filtros não alteram os gráficos. A seleção fica salva apenas para sua conta e não contém dados de vendas.
             </DialogDescription>
@@ -398,7 +398,7 @@ export default function OccupancyReportsDialog({
             <div><span className="block text-[10px] uppercase text-[#817b89]">Registros</span><strong>{recordsQuery.isLoading ? '…' : formatInteger(records.length)}</strong></div>
             <div><span className="block text-[10px] uppercase text-[#817b89]">Aulas medidas</span><strong>{recordsQuery.isLoading ? '…' : formatInteger(measuredRecords.length)}</strong></div>
             <div><span className="block text-[10px] uppercase text-[#817b89]">Presenças / vagas</span><strong>{recordsQuery.isLoading ? '…' : `${formatInteger(presencesTotal)} / ${formatInteger(capacityTotal)}`}</strong></div>
-            <div><span className="block text-[10px] uppercase text-[#817b89]">Ocupação ponderada</span><strong>{recordsQuery.isLoading ? '…' : pct(weightedPercentage)}</strong></div>
+            <div><span className="block text-[10px] uppercase text-[#817b89]">Taxa de ocupação ponderada</span><strong>{recordsQuery.isLoading ? '…' : pct(weightedPercentage)}</strong></div>
           </div>
           {!recordsQuery.isLoading && !recordsQuery.isError && records.length === 0 && !queryProblem && (
             <p className="rounded-xl border border-dashed border-[#d8cde5] px-3 py-2 text-xs text-[#6f6877]" data-testid="occupancy-report-empty">Sem registros para os filtros selecionados; não serão criadas aulas fictícias.</p>
@@ -416,7 +416,7 @@ export default function OccupancyReportsDialog({
 
           <section className="space-y-3 rounded-2xl border border-[#e7e1e9] bg-white p-4" aria-labelledby="occupancy-restore-heading">
             <div>
-              <h3 id="occupancy-restore-heading" className="text-sm font-extrabold text-[#252033]">Restaurar backup de ocupação</h3>
+              <h3 id="occupancy-restore-heading" className="text-sm font-extrabold text-[#252033]">Restaurar backup de check-ins</h3>
               <p className="mt-1 text-xs text-[#77717f]">A prévia detecta IDs repetidos e aulas coincidentes. Nada muda antes da confirmação; dados financeiros não são alterados.</p>
             </div>
             <input ref={fileInput} type="file" accept=".json,application/json" className="hidden" onChange={(event) => void readBackup(event)} data-testid="input-occupancy-backup-file" />
@@ -425,7 +425,7 @@ export default function OccupancyReportsDialog({
             {restoreNotice && <p role="status" className="rounded-xl bg-[#edf8d7] px-3 py-2 text-xs font-semibold text-[#50652a]" data-testid="occupancy-restore-notice">{restoreNotice}</p>}
             {uploadedBackup && restorePreview && (
               <div className="space-y-3 rounded-xl bg-[#f7f4fa] p-3" data-testid="occupancy-restore-preview">
-                <p className="text-xs font-bold text-[#4c3c64]">{uploadedBackup.period}: {uploadedBackup.counts.records} registro(s), {uploadedBackup.counts.modalities} modalidade(s).{uploadedBackup.partial ? ' Backup parcial.' : ' Todo o histórico ativo de ocupação.'}</p>
+                <p className="text-xs font-bold text-[#4c3c64]">{uploadedBackup.period}: {uploadedBackup.counts.records} check-in(s), {uploadedBackup.counts.modalities} modalidade(s).{uploadedBackup.partial ? ' Backup parcial.' : ' Todo o histórico ativo de check-ins.'}</p>
                 <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
                   <span>Novos: <strong>{restorePreview.counts.recordsToInsert}</strong></span>
                   <span>Idênticos: <strong>{restorePreview.counts.recordsIdentical}</strong></span>
@@ -451,7 +451,7 @@ export default function OccupancyReportsDialog({
           <AlertDialog open={confirmRestore} onOpenChange={setConfirmRestore}>
             <AlertDialogContent className="rounded-[22px] border-[#e7e1e9] bg-[#fffefc]">
               <AlertDialogHeader>
-                <AlertDialogTitle>Confirmar restauração da ocupação?</AlertDialogTitle>
+                <AlertDialogTitle>Confirmar restauração dos check-ins?</AlertDialogTitle>
                 <AlertDialogDescription>
                   Serão aplicadas as decisões selecionadas para {restorePreview?.period}. Registros fora do backup e todos os dados financeiros serão mantidos.
                 </AlertDialogDescription>

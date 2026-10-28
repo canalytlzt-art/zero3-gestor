@@ -17,11 +17,11 @@ let testPool: typeof pool;
 let database: typeof db;
 const servers: Server[] = [];
 let base: string;
-async function server(auth: "allowed" | "denied" | "anonymous" = "allowed") {
+async function server(auth: "allowed" | "denied" | "anonymous" = "allowed", serverDatabase: typeof database = database) {
   const app = express();
   app.use(express.json());
   app.use("/api", createOccupancyRouter({
-    database,
+    database: serverDatabase,
     getUserId: () => auth === "anonymous" ? null : "isolated-occupancy-tester",
     isAuthorized: async () => auth === "allowed",
   }));
@@ -47,6 +47,22 @@ before(async () => {
     )
   `);
   base = await server();
+});
+
+test("missing occupancy schema returns a safe 503 instead of an opaque 500", async () => {
+  for (const code of ["42703", "42P01"]) {
+    const failingDatabase = {
+      select: () => {
+        throw Object.assign(new Error("database schema mismatch"), { code });
+      },
+    } as unknown as typeof database;
+    const origin = await server("allowed", failingDatabase);
+    const response = await call<{ error: string; code: string }>("/occupancy", "GET", undefined, origin);
+    assert.equal(response.status, 503);
+    assert.equal(response.body.code, "database_schema_unavailable");
+    assert.match(response.body.error, /migrações pendentes/);
+    assert.doesNotMatch(response.body.error, /aggregator_presences|occupancy_records|42P01|42703/);
+  }
 });
 after(async () => {
   for (const http of servers) await new Promise<void>((resolve) => http.close(() => resolve()));

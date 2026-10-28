@@ -680,7 +680,16 @@ export function createOccupancyRouter(dependencies: Dependencies = {}): IRouter 
     if (cause.code === "23503" || cause.cause?.code === "23503") {
       res.status(409).json({ error: "A modalidade recebeu novos vínculos durante a exclusão. Atualize a lista e tente novamente." }); return;
     }
-    req.log?.error({ code: cause.code ?? cause.cause?.code }, "Falha na operação de ocupação");
+    const databaseCode = cause.code ?? cause.cause?.code;
+    if (databaseCode === "42P01" || databaseCode === "42703") {
+      req.log?.error({ code: databaseCode }, "Schema de ocupação indisponível");
+      res.status(503).json({
+        error: "A estrutura do banco de ocupação está desatualizada. A equipe administrativa precisa aplicar as migrações pendentes.",
+        code: "database_schema_unavailable",
+      });
+      return;
+    }
+    req.log?.error({ code: databaseCode }, "Falha na operação de ocupação");
     res.status(500).json({ error: "Não foi possível concluir a operação de ocupação. Tente novamente." });
   });
   return router;

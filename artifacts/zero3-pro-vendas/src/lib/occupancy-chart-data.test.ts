@@ -78,6 +78,26 @@ test('monthly view prefers each class consolidated value and averages daily-only
   assert.equal(analytics.donut, null);
 });
 
+test('monthly analytics keeps real presences and capacity for the complete dashboard', () => {
+  const analytics = buildOccupancyChartAnalytics([
+    { ...record('oct-measured', 'monthly', '2026-10', 'pilates', 'Pilates', 50), presences: 12, capacity: 20 },
+  ], {
+    viewMode: 'monthly',
+    selectedMonths: ['2026-10'],
+    modalityId: 'pilates',
+  });
+
+  assert.deepEqual(
+    {
+      percentage: analytics.evolution[0]?.percentage,
+      presences: analytics.evolution[0]?.presences,
+      capacity: analytics.evolution[0]?.capacity,
+      source: analytics.evolution[0]?.source,
+    },
+    { percentage: 60, presences: 12, capacity: 20, source: 'weighted' },
+  );
+});
+
 test('partial-month interval ignores monthly records and uses only daily entries', () => {
   const analytics = buildOccupancyChartAnalytics([
     record('monthly', 'monthly', '2026-10', 'pilates', 'Pilates', 95),

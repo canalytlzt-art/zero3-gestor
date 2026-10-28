@@ -262,7 +262,7 @@ function FinancialCharts({ onOccupancy, onContracts, onComplete }: { onOccupancy
           <p className="mt-2 text-xs text-[#837b8b]">Leitura financeira baseada nas vendas e nos estornos registrados.</p>
         </div>
         <div className="flex items-center gap-2 self-start rounded-full bg-[#f5f2f6] p-1 sm:self-auto" aria-label="Área de gráficos">
-          <button type="button" onClick={onOccupancy} className="rounded-full px-4 py-2 text-xs font-semibold text-[#766d83] hover:bg-white" data-testid="switch-graficos-ocupacao">Ocupação</button>
+          <button type="button" onClick={onOccupancy} className="rounded-full px-4 py-2 text-xs font-semibold text-[#766d83] hover:bg-white" data-testid="switch-graficos-ocupacao">Check-in</button>
           <span className="rounded-full bg-[#ece6f4] px-4 py-2 text-xs font-bold text-[#65479c]" aria-current="page" data-testid="switch-graficos-faturamento">Faturamento</span>
           <button type="button" onClick={onContracts} className="rounded-full px-4 py-2 text-xs font-semibold text-[#766d83] hover:bg-white" data-testid="switch-graficos-contratos">Contratos ativos</button>
           <button type="button" onClick={onComplete} className="rounded-full px-4 py-2 text-xs font-semibold text-[#766d83] hover:bg-white" data-testid="switch-graficos-completa">Completa</button>
@@ -480,15 +480,15 @@ export default function OccupancyChartsPage() {
   }
 
   return (
-    <section className="space-y-5" aria-label="Gráficos de ocupação" data-testid="page-occupancy-charts">
+    <section className="space-y-5" aria-label="Gráficos de Check-in e Ocupação" data-testid="page-occupancy-charts">
       <div className="flex flex-col justify-between gap-4 rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:flex-row sm:items-center sm:px-6">
         <div>
           <p className="text-[9px] font-bold uppercase tracking-[.14em] text-[#8a8491]">zero3 pro <span className="mx-1 text-[#b2abb8]">/</span> gráficos</p>
-          <h1 className="mt-1 font-[family-name:var(--app-font-serif)] text-3xl font-extrabold leading-none tracking-[-.07em] text-[#342d40] sm:text-[2.6rem]">Ocupação<span className="ml-1 text-[#a9d75a]">.</span></h1>
+          <h1 className="mt-1 font-[family-name:var(--app-font-serif)] text-3xl font-extrabold leading-none tracking-[-.07em] text-[#342d40] sm:text-[2.6rem]">Check-in e Ocupação<span className="ml-1 text-[#a9d75a]">.</span></h1>
           <p className="mt-2 text-xs text-[#837b8b]">Percentuais registrados por período, turma e modalidade.</p>
         </div>
         <div className="flex items-center gap-2 self-start rounded-full bg-[#f5f2f6] p-1 sm:self-auto" aria-label="Área de gráficos">
-          <span className="rounded-full bg-[#ece6f4] px-4 py-2 text-xs font-bold text-[#65479c]" aria-current="page" data-testid="switch-graficos-ocupacao">Ocupação</span>
+          <span className="rounded-full bg-[#ece6f4] px-4 py-2 text-xs font-bold text-[#65479c]" aria-current="page" data-testid="switch-graficos-ocupacao">Check-in</span>
           <button type="button" onClick={() => setActiveTab('financial')} className="flex items-center gap-2 rounded-full px-3 py-2 text-xs font-semibold text-[#716879] transition hover:bg-white hover:text-[#65479c]" aria-label="Abrir gráficos de faturamento" data-testid="switch-graficos-faturamento">
             Faturamento
           </button>
@@ -621,7 +621,7 @@ export default function OccupancyChartsPage() {
             <p className="mt-1 text-[10px] text-[#837b8b]">Capacidade total das aulas medidas</p>
           </article>
           <article className="rounded-[20px] border border-[#e0d7ed] bg-[#f8f5fb] p-4 shadow-[0_10px_28px_-28px_rgba(55,40,72,.3)]" data-testid="metric-occupancy-rate">
-            <p className="text-[9px] font-bold uppercase tracking-[.12em] text-[#806aa0]">Ocupação calculada</p>
+            <p className="text-[9px] font-bold uppercase tracking-[.12em] text-[#806aa0]">Taxa de ocupação</p>
             <p className="mt-2 font-[family-name:var(--app-font-serif)] text-2xl font-extrabold tabular-nums tracking-[-.05em] text-[#65479c]">{formatPercent(analytics.totals.percentage)}</p>
             <p className="mt-1 text-[10px] text-[#837b8b]">{analytics.totals.percentage == null ? 'Sem base de presenças e vagas' : `${formatCount(analytics.totals.presences)} de ${formatCount(analytics.totals.capacity)} presenças/vagas`}</p>
           </article>
@@ -753,7 +753,7 @@ export default function OccupancyChartsPage() {
               <div className="mt-3 overflow-x-auto rounded-xl border border-[#eee9f1]" data-testid="table-occupancy-weekday-details">
                 <table className="w-full min-w-[440px] text-left text-[10px]">
                   <thead className="bg-[#faf8fb] text-[9px] uppercase tracking-[.08em] text-[#837b8b]">
-                    <tr><th className="px-3 py-2">Dia</th><th className="px-3 py-2 text-right">Aulas</th><th className="px-3 py-2 text-right">Presenças</th><th className="px-3 py-2 text-right">Vagas</th><th className="px-3 py-2 text-right">Ocupação</th></tr>
+                    <tr><th className="px-3 py-2">Dia</th><th className="px-3 py-2 text-right">Aulas</th><th className="px-3 py-2 text-right">Presenças</th><th className="px-3 py-2 text-right">Vagas</th><th className="px-3 py-2 text-right">Taxa de ocupação</th></tr>
                   </thead>
                   <tbody className="divide-y divide-[#f0edf1]">
                     {analytics.byWeekday.map((group) => <tr key={group.key} data-testid={`row-occupancy-weekday-${group.key}`}>
