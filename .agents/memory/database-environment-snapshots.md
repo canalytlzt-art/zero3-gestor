@@ -15,6 +15,12 @@ Para verificar uma cópia D1 local com Wrangler, use `--local` e passe explicita
 
 **How to apply:** Reutilize o diretório de persistência validado em `d1 migrations list`, `d1 execute` e `wrangler dev`; não use `--remote` para esse teste.
 
+Com o Wrangler 4.152.0, `d1 migrations apply` rejeita `--yes`; em um shell não interativo, ele confirma usando um fallback registrado no log. Preserve `--local` e um caminho temporário explícito em `--persist-to` e confira a localização do recurso na saída.
+
+**Why:** A opção não suportada interrompeu a verificação antes da execução; sem ela, a migração foi aplicada somente ao D1 local isolado.
+
+**How to apply:** Nesta versão, omita `--yes`; nunca omita `--local` ou o caminho temporário, e interrompa se o Wrangler indicar recurso remoto.
+
 Para testes de runtime Workers, configure explicitamente D1 local no Miniflare e `remoteBindings: false`. Não carregue uma configuração Wrangler de teste enquanto seu `database_id` for igual ao D1 principal: nomes lógicos distintos não isolam o recurso remoto.
 
 **Why:** Um teste pode parecer isolado pelo nome do Worker/banco e ainda apontar para o mesmo banco produtivo pelo ID.

@@ -899,7 +899,7 @@ test("persists import drafts without counting them, then converts each once afte
 });
 
 const originalImportFile = new URL("../../../../attached_assets/0_Clientes_Individuais_1792690299275.xlsx", import.meta.url);
-test("partial original-file imports resume across concurrent requests and reconcile all 77 sales", {
+test("partial original-file imports resume across concurrent requests and reconcile all 78 sales", {
   skip: !existsSync(originalImportFile),
 }, async () => {
   const bytes = readFileSync(originalImportFile);
@@ -919,7 +919,7 @@ test("partial original-file imports resume across concurrent requests and reconc
     const result = mapSalesImportRow(sheet, source);
     return result.value ? [result.value] : [];
   }));
-  assert.equal(rows.length, 77);
+  assert.equal(rows.length, 78);
   const totalCents = rows.reduce((sum, row) => sum + row.totalCents, 0);
   type ImportResult = { importedCount: number; skippedCount: number; replayed: boolean; sales: Array<{ id: string }> };
   await withSalesApi(getTestDatabase(), async (baseUrl) => {
@@ -940,24 +940,24 @@ test("partial original-file imports resume across concurrent requests and reconc
     ));
     assert.deepEqual(concurrent.map((response) => response.status).sort(), [200, 201]);
     const results = await Promise.all(concurrent.map((response) => response.json() as Promise<ImportResult>));
-    assert.deepEqual(results.map((result) => result.importedCount).sort((a, b) => a - b), [0, 39]);
-    const completed = results.find((result) => result.importedCount === 39)!;
+    assert.deepEqual(results.map((result) => result.importedCount).sort((a, b) => a - b), [0, 40]);
+    const completed = results.find((result) => result.importedCount === 40)!;
     assert.equal(completed.skippedCount, 38);
-    assert.equal(new Set(completed.sales.map((sale) => sale.id)).size, 77);
+    assert.equal(new Set(completed.sales.map((sale) => sale.id)).size, 78);
     createdSaleIds.push(...completed.sales.map((sale) => sale.id));
     for (const sale of first.sales) assert.ok(completed.sales.some((item) => item.id === sale.id));
     const finalInspect = await apiRequest(baseUrl, `/sales/import/origins?fileHash=${fileHash}`);
-    assert.equal(((await finalInspect.json()) as { origins: unknown[] }).origins.length, 77);
+    assert.equal(((await finalInspect.json()) as { origins: unknown[] }).origins.length, 78);
     const dates = rows.map((row) => row.saleDate).sort();
     const reportResponse = await apiRequest(baseUrl, `/sales/scoreboard?fromDate=${dates[0]}&toDate=${dates.at(-1)}`);
     assert.equal(reportResponse.status, 200);
     const report = await reportResponse.json() as { totals: { quantity: number; salesCents: number; netCents: number } };
-    assert.equal(report.totals.quantity, 77);
+    assert.equal(report.totals.quantity, 78);
     assert.equal(report.totals.salesCents, totalCents);
     assert.equal(report.totals.netCents, totalCents);
-    assert.equal(totalCents, 5444800);
+    assert.equal(totalCents, 5564500);
     const batch = await testPool!.query("SELECT row_count FROM sales_import_batches WHERE file_hash = $1", [fileHash]);
-    assert.equal(batch.rows[0].row_count, 77);
+    assert.equal(batch.rows[0].row_count, 78);
   });
 });
 
