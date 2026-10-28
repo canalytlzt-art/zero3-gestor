@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArchiveRestore, CalendarDays, Check, ChevronDown, CircleHelp, ClipboardList, Download, Edit3, FileSpreadsheet, Filter, History, PackagePlus, Plus, Power, RefreshCw, RotateCcw, Save, Search, Upload, X } from 'lucide-react';
+import { ArchiveRestore, CalendarDays, Check, ChevronDown, CircleHelp, ClipboardList, Download, Edit3, FileSpreadsheet, Filter, History, PackagePlus, Plus, Power, RefreshCw, RotateCcw, Save, Search, Upload, UsersRound, X } from 'lucide-react';
 import {
   getGetProductsQueryKey,
   getGetOccupancyModalitiesQueryKey,
@@ -52,6 +52,7 @@ import { mapSalesImportRow, parseImportDate, parseSalesSpreadsheet, type SalesIm
 import { findPossibleSaleDuplicates, saleDuplicateFieldLabels } from '@/lib/sales-duplicates';
 import type { SaleDuplicateField, SaleDuplicateRecord } from '@/lib/sales-duplicates';
 import { ImportSourceDetails } from './import-source-details';
+import ActiveContractsDialog from './active-contracts-dialog';
 
 const MAX_BACKUP_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_IMPORT_ROWS = 500;
@@ -230,6 +231,7 @@ function Field({ label, name, type = 'text', placeholder, testId, onValueChange,
 }
 
 export default function SalesManagement() {
+  const [activeContractsOpen, setActiveContractsOpen] = useState(false);
   const { user } = useUser();
   const queryClient = useQueryClient();
   const { data: sales, isLoading, isFetching, isError, refetch: refetchSales } = useGetSales({
@@ -1136,12 +1138,14 @@ export default function SalesManagement() {
 
   return (
     <>
+      <ActiveContractsDialog open={activeContractsOpen} onOpenChange={setActiveContractsOpen} />
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" data-testid="sales-actions">
         <div>
           <p className="eyebrow text-[9px] font-bold text-[#8b8494]">rotina comercial</p>
           <p className="mt-1 text-sm text-[#77717f]">Registre, revise e acompanhe cada venda da equipe.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => setActiveContractsOpen(true)} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-[#ded7e7] bg-white px-4 text-sm font-bold text-[#5d4a78] transition hover:bg-[#f7f4fa]" data-testid="button-active-contracts"><UsersRound size={15} /> Contratos ativos</button>
           <button type="button" onClick={openProductManager} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-[#ded7e7] bg-white px-4 text-sm font-bold text-[#5d4a78] transition hover:bg-[#f7f4fa]" data-testid="button-manage-products"><Search size={15} /> Produtos</button>
           <button type="button" onClick={() => { resetForm(); document.getElementById('sale-entry-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); document.querySelector<HTMLInputElement>('[data-testid="input-sale-date"]')?.focus(); }} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#d7f500] px-4 text-sm font-extrabold text-[#262b15] transition hover:bg-[#c9e600] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6d28d9] focus-visible:ring-offset-2" data-testid="button-new-sale"><Plus size={16} /> Nova venda</button>
           <button type="button" onClick={() => void openRefundDialog()} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-[#e9d9d5] bg-[#fffaf8] px-4 text-sm font-bold text-[#8e554e] transition hover:bg-[#fff0ed]" data-testid="button-new-cancellation"><RotateCcw size={15} /> Novo estorno</button>

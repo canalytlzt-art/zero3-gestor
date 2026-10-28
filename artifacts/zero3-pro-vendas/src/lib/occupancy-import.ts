@@ -18,6 +18,7 @@ export type OccupancyImportEntry = {
   reportedPercentage: number | null;
   presences: number | null;
   capacity: number | null;
+  aggregatorPresences: number | null;
   startTime: string | null;
   endTime: string | null;
   className: string | null;
@@ -53,6 +54,7 @@ type Block = {
   presenceCapacityColumn?: number;
   presencesColumn?: number;
   capacityColumn?: number;
+  aggregatorColumn?: number;
   classColumn?: number;
   yearColumn?: number;
   forceMonthly?: boolean;
@@ -186,7 +188,7 @@ function parseMonthHeading(value: unknown, yearHint?: number): Period | null {
   return null;
 }
 
-function fieldForHeader(value: unknown): "period" | "month" | "modality" | "percentage" | "class" | "year" | "time" | "startTime" | "endTime" | "presenceCapacity" | "presences" | "capacity" | null {
+function fieldForHeader(value: unknown): "period" | "month" | "modality" | "percentage" | "class" | "year" | "time" | "startTime" | "endTime" | "presenceCapacity" | "presences" | "capacity" | "aggregatorPresences" | null {
   const header = normalize(value).replace(/%/g, " ").replace(/\s+/g, " ").trim();
   if (/^(data|dia|data da aula|data da atividade|data aula)$/.test(header)) return "period";
   if (/^(mes|mes ano|mes ano competencia|competencia|mes competencia|month|year month|mes e ano)$/.test(header)) return "month";
@@ -194,6 +196,7 @@ function fieldForHeader(value: unknown): "period" | "month" | "modality" | "perc
   if (/^(ocupacao|ocupacao percentual|percentual ocupacao|percentual|percentual de ocupacao|taxa ocupacao|occupancy|occupancy rate|percent|taxa)$/.test(header)) return "percentage";
   if (/^(presencas vagas|presencas capacidade|presenca vagas|presenca capacidade|presencas por vagas|presencas\/vagas|presencas-vagas)$/.test(header)) return "presenceCapacity";
   if (/^(presencas|presenca|participantes|frequencia)$/.test(header)) return "presences";
+  if (/^(agregadores|agregador|presencas agregadores|presencas de agregadores|alunos agregadores|alunos de plataformas|check in agregadores|aggregators)$/.test(header)) return "aggregatorPresences";
   if (/^(vagas|vagas totais|capacidade|capacidade total|lotacao total)$/.test(header)) return "capacity";
   if (/^(horario inicial|hora inicial|hora de inicio|horario de inicio|inicio|hora inicio|start time)$/.test(header)) return "startTime";
   if (/^(horario final|hora final|hora de fim|horario de fim|fim|hora fim|end time)$/.test(header)) return "endTime";
@@ -257,6 +260,7 @@ function createBlock(source: SourceSheet, rowIndex: number, globalYears: number[
   const presenceCapacityColumn = one("presenceCapacity");
   const presencesColumn = one("presences");
   const capacityColumn = one("capacity");
+  const aggregatorColumn = one("aggregatorPresences");
   const classColumn = one("class");
   const yearColumn = one("year");
   const periodInputColumn = periodColumn ?? monthColumn;
@@ -271,7 +275,7 @@ function createBlock(source: SourceSheet, rowIndex: number, globalYears: number[
       || (timeColumn !== undefined && (startTimeColumn !== undefined || endTimeColumn !== undefined));
     return {
       headerRow: rowIndex, kind: "records", periodColumn: periodInputColumn, modalityColumn, percentageColumn,
-      timeColumn, startTimeColumn, endTimeColumn, presenceCapacityColumn, presencesColumn, capacityColumn,
+      timeColumn, startTimeColumn, endTimeColumn, presenceCapacityColumn, presencesColumn, capacityColumn, aggregatorColumn,
       classColumn, yearColumn, forceMonthly: periodColumn === undefined || monthColumn !== undefined,
       ambiguousPeriod: otherAmbiguity,
       scaleKey: `${source.name}::${rowIndex + 1}::${columnName(percentageColumn ?? presenceCapacityColumn ?? presencesColumn ?? 0)}`,
@@ -525,7 +529,7 @@ export async function parseOccupancySpreadsheet(bytes: ArrayBuffer, filename: st
       index, sourceSheet: source.name, sourceCell: cells[0]?.address ?? cellAddress(source, rowIndex, 0),
       sourceCells: Object.fromEntries(cells.slice(0, 4).map((cell, position) => [position === 0 ? "period" : `field${position}`, cell.address])),
       kind: null, period: null, modalityName: null, percentage: null, reportedPercentage: null,
-      presences: null, capacity: null, startTime: null, endTime: null, className: null, status: "pending", reason,
+      presences: null, capacity: null, aggregatorPresences: null, startTime: null, endTime: null, className: null, status: "pending", reason,
     });
   };
 
@@ -547,6 +551,7 @@ export async function parseOccupancySpreadsheet(bytes: ArrayBuffer, filename: st
       presenceCapacityCell?: Cell;
       presencesCell?: Cell;
       capacityCell?: Cell;
+      aggregatorCell?: Cell;
     },
   ) => {
     index += 1;
@@ -567,6 +572,9 @@ export async function parseOccupancySpreadsheet(bytes: ArrayBuffer, filename: st
     }
     if (measurementCells?.presencesCell) sourceCells.presences = measurementCells.presencesCell.address;
     if (measurementCells?.capacityCell) sourceCells.capacity = measurementCells.capacityCell.address;
+    if (measurementCells?.aggregatorCell && !isBlank(measurementCells.aggregatorCell.value)) {
+      sourceCells.aggregatorPresences = measurementCells.aggregatorCell.address;
+    }
     if (classCell && !isBlank(classCell.value)) sourceCells.class = classCell.address;
     const periodHint = periodCell ? rowYearHint(source, rowIndex, periodCell.column, block.yearColumn) : undefined;
     const yearHint = periodHint ?? yearHintOverride ?? (knownYears.length === 1 ? knownYears[0] : undefined) ?? options.missingYear;
@@ -583,6 +591,7 @@ export async function parseOccupancySpreadsheet(bytes: ArrayBuffer, filename: st
     const pctResult = finalizePercentage(percentageCell, options.scaleDecisions?.[block.scaleKey] ?? block.inferredScale, hasMeasurementColumns);
     let presences: number | null = null;
     let capacity: number | null = null;
+    let aggregatorPresences: number | null = null;
     const countErrors: string[] = [];
     if (hasMeasurementColumns) {
       if (measurementCells?.presenceCapacityCell) {
@@ -597,6 +606,17 @@ export async function parseOccupancySpreadsheet(bytes: ArrayBuffer, filename: st
         capacity = parsedCapacity.value;
         if (parsedPresences.error) countErrors.push(parsedPresences.error);
         if (parsedCapacity.error) countErrors.push(parsedCapacity.error);
+      }
+    }
+    if (measurementCells?.aggregatorCell && !isBlank(measurementCells.aggregatorCell.value)) {
+      const parsedAggregators = parseCountCell(measurementCells.aggregatorCell, "Agregadores", true);
+      aggregatorPresences = parsedAggregators.value;
+      if (parsedAggregators.error) countErrors.push(parsedAggregators.error);
+      if (!hasMeasurementColumns || presences === null) {
+        countErrors.push("Informe presenças e capacidade para cadastrar agregadores.");
+      }
+      if (aggregatorPresences !== null && presences !== null && aggregatorPresences > presences) {
+        countErrors.push("Agregadores não pode ultrapassar o total de presenças.");
       }
     }
     const timeResult = measurementCells?.timeCell
@@ -614,8 +634,8 @@ export async function parseOccupancySpreadsheet(bytes: ArrayBuffer, filename: st
     if (periodError) errors.push(periodError);
     if (modalityError) errors.push(modalityError);
     if (pctResult.error) errors.push(pctResult.error);
+    errors.push(...countErrors);
     if (hasMeasurementColumns) {
-      errors.push(...countErrors);
       if (timeResult.error) errors.push(timeResult.error);
       if (endTimeResult?.error) errors.push(endTimeResult.error);
       if (resolved?.kind !== "daily") errors.push("Aulas com presenças e vagas precisam de uma data diária, não apenas de mês/ano.");
@@ -647,7 +667,7 @@ export async function parseOccupancySpreadsheet(bytes: ArrayBuffer, filename: st
     const missing = errors.length > 0 || !resolved?.value || !rawModality || !validSource;
     const sparseData = [periodCell, modalityCell, percentageCell, measurementCells?.timeCell,
       measurementCells?.startTimeCell, measurementCells?.endTimeCell, measurementCells?.presenceCapacityCell,
-      measurementCells?.presencesCell, measurementCells?.capacityCell]
+      measurementCells?.presencesCell, measurementCells?.capacityCell, measurementCells?.aggregatorCell]
       .filter((cell) => cell && !isBlank(cell.value)).length;
     const status = missing ? "pending" : "ready";
     entries.push({
@@ -660,7 +680,7 @@ export async function parseOccupancySpreadsheet(bytes: ArrayBuffer, filename: st
       modalityName: rawModality || null,
       percentage: computedPercentage ?? pctResult.value,
       reportedPercentage: computedPercentage === null ? null : pctResult.value,
-      presences, capacity, startTime, endTime,
+      presences, capacity, aggregatorPresences, startTime, endTime,
       className: classCell && !isBlank(classCell.value) ? String(classCell.value).trim().replace(/\s+/g, " ") : null,
       status: !validSource && sparseData === 0 ? "ignored" : status,
       reason: !validSource && sparseData === 0 ? "Linha sem dados de ocupação." : errors.join(" ") || "Pronto para conferência.",
@@ -737,13 +757,14 @@ export async function parseOccupancySpreadsheet(bytes: ArrayBuffer, filename: st
         const presenceCapacityCell = block.presenceCapacityColumn === undefined ? undefined : cells.get(block.presenceCapacityColumn);
         const presencesCell = block.presencesColumn === undefined ? undefined : cells.get(block.presencesColumn);
         const capacityCell = block.capacityColumn === undefined ? undefined : cells.get(block.capacityColumn);
+        const aggregatorCell = block.aggregatorColumn === undefined ? undefined : cells.get(block.aggregatorColumn);
         if ([periodCell, modalityCell, percentageCell, classCell, timeCell, startTimeCell, endTimeCell,
-          presenceCapacityCell, presencesCell, capacityCell].every((cell) => !cell || isBlank(cell.value))) continue;
+          presenceCapacityCell, presencesCell, capacityCell, aggregatorCell].every((cell) => !cell || isBlank(cell.value))) continue;
         const rowYear = block.yearColumn === undefined ? undefined : asYear(cells.get(block.yearColumn)?.value);
         if (rowYear) globalYears.add(rowYear);
         append(source, block, rowIndex, periodCell, modalityCell, percentageCell, classCell, block.forceMonthly,
           rowYear ? [rowYear] : knownYears, undefined,
-          { timeCell, startTimeCell, endTimeCell, presenceCapacityCell, presencesCell, capacityCell });
+          { timeCell, startTimeCell, endTimeCell, presenceCapacityCell, presencesCell, capacityCell, aggregatorCell });
       } else if (block.kind === "modality-months") {
         const modalityCell = cells.get(block.modalityColumn!);
         if (!modalityCell || isBlank(modalityCell.value)) { ignoredCount += 1; continue; }

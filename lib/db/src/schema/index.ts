@@ -27,3 +27,5 @@ export * from "./sales-import-batches";
 export * from "./occupancy-modalities";
 export * from "./occupancy-records";
 export * from "./occupancy-history";
+export * from "./occupancy-monthly-goals";
+export * from "./active-contracts-monthly";

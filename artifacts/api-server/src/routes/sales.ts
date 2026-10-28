@@ -24,6 +24,7 @@ import {
   GetSalesHistoryResponse,
   GetSalesPendingDraftsResponse,
   GetSalesGoalsResponse,
+  GetActiveContractsResponse,
   GetSalesResponse,
   GetMonthlySalesBackupQueryParams,
   GetMonthlySalesBackupResponse,
@@ -49,6 +50,9 @@ import {
   UpdateSalesRefundResponse,
   UpsertSalesGoalBody,
   UpsertSalesGoalResponse,
+  UpsertActiveContractsMonthBody,
+  UpsertActiveContractsMonthParams,
+  UpsertActiveContractsMonthResponse,
   UpdateSaleBody,
   UpdateSaleParams,
   UpdateSaleResponse,
@@ -61,6 +65,7 @@ import {
 } from "@workspace/api-zod";
 import {
   db,
+  activeContractsMonthlyTable,
   occupancyModalitiesTable,
   productsTable,
   salesGoalsTable,
@@ -2891,6 +2896,67 @@ export function createSalesRouter(
       .orderBy(desc(salesGoalsTable.month), asc(salesGoalsTable.scopeKey));
 
     res.json(GetSalesGoalsResponse.parse(goals));
+  });
+
+  router.get("/sales/active-contracts", async (req, res): Promise<void> => {
+    if (!(await requireSalesAccess(req, res))) return;
+
+    const records = await database
+      .select()
+      .from(activeContractsMonthlyTable)
+      .orderBy(asc(activeContractsMonthlyTable.month));
+    res.json(GetActiveContractsResponse.parse(records.map((record) => ({
+      ...record,
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+    }))));
+  });
+
+  router.put("/sales/active-contracts/:month", async (req, res): Promise<void> => {
+    if (!(await requireSalesAccess(req, res))) return;
+
+    const parsedParams = UpsertActiveContractsMonthParams.safeParse(req.params);
+    const parsedBody = UpsertActiveContractsMonthBody.safeParse(req.body);
+    if (!parsedParams.success) {
+      res.status(400).json({ error: parsedParams.error.message });
+      return;
+    }
+    if (!parsedBody.success) {
+      res.status(400).json({ error: parsedBody.error.message });
+      return;
+    }
+
+    const now = new Date();
+    const [record] = await database
+      .insert(activeContractsMonthlyTable)
+      .values({
+        month: parsedParams.data.month,
+        activeCount: parsedBody.data.activeCount,
+        targetCount: parsedBody.data.targetCount,
+        notes: parsedBody.data.notes,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: activeContractsMonthlyTable.month,
+        set: {
+          activeCount: parsedBody.data.activeCount,
+          targetCount: parsedBody.data.targetCount,
+          notes: parsedBody.data.notes,
+          updatedAt: now,
+        },
+      })
+      .returning();
+
+    if (!record) {
+      res.status(500).json({ error: "Could not save the monthly active-contract balance" });
+      return;
+    }
+    res.json(UpsertActiveContractsMonthResponse.parse({
+      ...record,
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+    }));
   });
 
   router.put("/sales-goals", async (req, res): Promise<void> => {

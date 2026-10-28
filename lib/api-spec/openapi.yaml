@@ -76,6 +76,40 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/OccupancyModalityDeletion" }
         default: { $ref: "#/components/responses/OccupancyFailure" }
+  /occupancy/monthly-goals:
+    get:
+      operationId: getOccupancyMonthlyGoals
+      tags: [occupancy]
+      summary: List monthly occupancy and aggregator targets
+      parameters:
+        - { in: query, name: fromMonth, schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' } }
+        - { in: query, name: toMonth, schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' } }
+      responses:
+        "200":
+          description: Monthly targets, including modality-scoped targets
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/OccupancyMonthlyGoal" } }
+        default: { $ref: "#/components/responses/OccupancyFailure" }
+  /occupancy/monthly-goals/{month}:
+    parameters:
+      - { in: path, name: month, required: true, schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' } }
+    put:
+      operationId: upsertOccupancyMonthlyGoal
+      tags: [occupancy]
+      summary: Create or update monthly occupancy and aggregator targets
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OccupancyMonthlyGoalInput" }
+      responses:
+        "200":
+          description: Monthly targets saved for the selected modality scope
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OccupancyMonthlyGoal" }
+        default: { $ref: "#/components/responses/OccupancyFailure" }
   /occupancy:
     get:
       operationId: getOccupancyRecords
@@ -1009,6 +1043,57 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+  /sales/active-contracts:
+    get:
+      operationId: getActiveContracts
+      tags: [sales]
+      summary: List monthly active-contract balances
+      responses:
+        "200":
+          description: Saved monthly contract balances ordered by month
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActiveContractsMonth"
+        default:
+          description: Authentication, validation, or storage error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /sales/active-contracts/{month}:
+    parameters:
+      - name: month
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+    put:
+      operationId: upsertActiveContractsMonth
+      tags: [sales]
+      summary: Create or correct one month's active-contract balance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActiveContractsMonthInput"
+      responses:
+        "200":
+          description: Monthly contract balance saved without changing other months
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActiveContractsMonth"
+        default:
+          description: Authentication, validation, or storage error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /sales/backup:
     get:
       operationId: getMonthlySalesBackup
@@ -1317,6 +1402,26 @@ components:
         modalityId: { type: string, format: uuid }
         deletedRecords: { type: integer, minimum: 0 }
         unlinkedProducts: { type: integer, minimum: 0 }
+    OccupancyMonthlyGoal:
+      type: object
+      required: [month, modalityId, modalityName, aggregatorTargetPresences, occupancyTargetPercentage, notes, createdAt, updatedAt]
+      properties:
+        month: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }
+        modalityId: { type: ["string", "null"], format: uuid }
+        modalityName: { type: ["string", "null"] }
+        aggregatorTargetPresences: { type: ["integer", "null"], minimum: 0, maximum: 2147483647 }
+        occupancyTargetPercentage: { type: ["number", "null"], minimum: 0 }
+        notes: { type: ["string", "null"], maxLength: 1000 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    OccupancyMonthlyGoalInput:
+      type: object
+      required: [modalityId, aggregatorTargetPresences, occupancyTargetPercentage, notes]
+      properties:
+        modalityId: { type: ["string", "null"], format: uuid }
+        aggregatorTargetPresences: { type: ["integer", "null"], minimum: 0, maximum: 2147483647 }
+        occupancyTargetPercentage: { type: ["number", "null"], minimum: 0 }
+        notes: { type: ["string", "null"], maxLength: 1000 }
     OccupancyRecord:
       type: object
       required: [id, kind, period, month, modalityId, modalityName, percentage, reportedPercentage, presences, capacity, startTime, endTime, className, notes, sourceFileHash, sourceSheet, sourceCell, sourceCells, version, createdAt, updatedAt]
@@ -1331,6 +1436,7 @@ components:
         reportedPercentage: { type: ["number", "null"], minimum: 0 }
         presences: { type: ["integer", "null"], minimum: 0, maximum: 2147483647 }
         capacity: { type: ["integer", "null"], minimum: 1, maximum: 2147483647 }
+        aggregatorPresences: { type: ["integer", "null"], minimum: 0, maximum: 2147483647, description: Presenças de alunos agregadores incluídas no total; null significa não informado. }
         startTime: { type: ["string", "null"], pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
         endTime: { type: ["string", "null"], pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
         className: { type: [string, "null"] }
@@ -1358,6 +1464,7 @@ components:
         reportedPercentage: { type: number, minimum: 0 }
         presences: { type: integer, minimum: 0, maximum: 2147483647 }
         capacity: { type: integer, minimum: 1, maximum: 2147483647 }
+        aggregatorPresences: { type: ["integer", "null"], minimum: 0, maximum: 2147483647, description: Presenças de agregadores; opcional para preservar registros sem informação. }
         startTime: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
         endTime: { type: ["string", "null"], pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
         className: { type: [string, "null"], maxLength: 120 }
@@ -1377,7 +1484,7 @@ components:
     OccupancyImportSourceCells:
       type: object
       minProperties: 2
-      maxProperties: 8
+      maxProperties: 9
       additionalProperties:
         type: string
         pattern: '^[A-Z]{1,4}[1-9][0-9]*$'
@@ -1755,6 +1862,45 @@ components:
         - productName
         - targetCents
         - idempotencyKey
+    ActiveContractsMonth:
+      type: object
+      properties:
+        month:
+          type: string
+          pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+        activeCount:
+          type: integer
+          minimum: 0
+          maximum: 2147483647
+        targetCount:
+          type: ["integer", "null"]
+          minimum: 0
+          maximum: 2147483647
+        notes:
+          type: ["string", "null"]
+          maxLength: 1000
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [month, activeCount, targetCount, notes, createdAt, updatedAt]
+    ActiveContractsMonthInput:
+      type: object
+      properties:
+        activeCount:
+          type: integer
+          minimum: 0
+          maximum: 2147483647
+        targetCount:
+          type: ["integer", "null"]
+          minimum: 0
+          maximum: 2147483647
+        notes:
+          type: ["string", "null"]
+          maxLength: 1000
+      required: [activeCount, targetCount, notes]
     Product:
       type: object
       properties:

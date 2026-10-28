@@ -11,6 +11,8 @@ import {
   CreateOccupancyBackupBody,
   CreateOccupancyBackupResponse,
   GetOccupancyModalitiesResponse,
+  GetOccupancyMonthlyGoalsQueryParams,
+  GetOccupancyMonthlyGoalsResponse,
   GetOccupancyRecordsQueryParams,
   GetOccupancyRecordsResponse,
   PreviewOccupancyImportBody,
@@ -19,6 +21,9 @@ import {
   PreviewOccupancyBackupRestoreResponse,
   RestoreOccupancyBackupBody,
   RestoreOccupancyBackupResponse,
+  UpsertOccupancyMonthlyGoalBody,
+  UpsertOccupancyMonthlyGoalParams,
+  UpsertOccupancyMonthlyGoalResponse,
   UpdateOccupancyModalityBody,
   UpdateOccupancyModalityParams,
   UpdateOccupancyRecordBody,
@@ -86,6 +91,9 @@ function recordOut(row: Row) {
         : Number(row.reported_percentage),
     presences: row.presences === null ? null : Number(row.presences),
     capacity: row.capacity === null ? null : Number(row.capacity),
+    aggregatorPresences: row.aggregator_presences === null || row.aggregator_presences === undefined
+      ? null
+      : Number(row.aggregator_presences),
     startTime: row.start_time ? String(row.start_time).slice(0, 5) : null,
     endTime: row.end_time ? String(row.end_time).slice(0, 5) : null,
     className: row.class_name === null ? null : String(row.class_name),
@@ -108,6 +116,7 @@ function validateImportOrigin(entry: {
   reportedPercentage?: number | null;
   presences?: number;
   capacity?: number;
+  aggregatorPresences?: number | null;
   startTime?: string;
 }) {
   const cells = entry.sourceCells;
@@ -115,6 +124,7 @@ function validateImportOrigin(entry: {
   const sourceValid = measured
     ? Boolean(cells.presences && cells.capacity && cells.startTime) &&
       cells.presences === entry.sourceCell &&
+      (entry.aggregatorPresences == null || Boolean(cells.aggregatorPresences)) &&
       (entry.reportedPercentage === undefined || Boolean(cells.percentage))
     : entry.percentage !== undefined &&
       Boolean(cells.percentage) &&
@@ -122,7 +132,7 @@ function validateImportOrigin(entry: {
   if (
     !entry.sourceSheet.trim() ||
     Object.keys(cells).length < 2 ||
-    Object.keys(cells).length > 8 ||
+    Object.keys(cells).length > 9 ||
     !cells.period ||
     !cells.modality ||
     !sourceValid
@@ -151,6 +161,7 @@ function sameImportedRecord(
     Number(existing.percentage) === Number(values.percentage) &&
     existing.presences === values.presences &&
     existing.capacity === values.capacity &&
+    existing.aggregatorPresences === values.aggregatorPresences &&
     existing.startTime === (values.startTime?.slice(0, 5) ?? null) &&
     existing.endTime === (values.endTime?.slice(0, 5) ?? null) &&
     existing.reportedPercentage ===
@@ -252,6 +263,7 @@ function recordValues(input: {
   reportedPercentage?: number;
   presences?: number;
   capacity?: number;
+  aggregatorPresences?: number | null;
   startTime?: string;
   endTime?: string | null;
   className?: string | null;
@@ -265,7 +277,8 @@ function recordValues(input: {
     input.presences !== undefined ||
     input.capacity !== undefined ||
     input.startTime !== undefined ||
-    input.endTime != null;
+    input.endTime != null ||
+    (input.aggregatorPresences !== undefined && input.aggregatorPresences !== null);
   let percentage: number;
   let reportedPercentage: number | null = null;
   if (measured) {
@@ -284,6 +297,11 @@ function recordValues(input: {
         "Informe data, horário inicial, presenças e capacidade válidos.",
       );
     }
+    if (input.aggregatorPresences !== undefined && input.aggregatorPresences !== null
+      && (!Number.isSafeInteger(input.aggregatorPresences) || input.aggregatorPresences < 0
+        || input.aggregatorPresences > Number(input.presences))) {
+      throw new ApiFailure(400, "Agregadores deve ser um número inteiro entre zero e o total de presenças.");
+    }
     percentage = Number(((Number(input.presences) / Number(input.capacity)) * 100).toFixed(6));
     const reported = input.reportedPercentage ?? input.percentage;
     if (reported !== undefined) {
@@ -293,6 +311,9 @@ function recordValues(input: {
       reportedPercentage = reported;
     }
   } else {
+    if (input.aggregatorPresences !== undefined && input.aggregatorPresences !== null) {
+      throw new ApiFailure(400, "Informe presenças e capacidade para cadastrar agregadores.");
+    }
     if (input.percentage === undefined || !Number.isFinite(input.percentage) || input.percentage < 0) {
       throw new ApiFailure(400, "Informe presenças/capacidade ou um percentual válido.");
     }
@@ -307,6 +328,7 @@ function recordValues(input: {
     reportedPercentage: reportedPercentage === null ? null : String(reportedPercentage),
     presences: measured ? input.presences! : null,
     capacity: measured ? input.capacity! : null,
+    aggregatorPresences: measured ? input.aggregatorPresences ?? null : null,
     startTime: measured ? `${input.startTime}:00` : null,
     endTime: measured && input.endTime ? `${input.endTime}:00` : null,
     className,
@@ -464,6 +486,98 @@ async function modalityRoutes(
         unlinkedProducts: products.length,
       }),
     );
+  }
+  return null;
+}
+
+function monthlyGoalOut(row: Row) {
+  return {
+    month: String(row.month),
+    modalityId: row.modality_id == null ? null : String(row.modality_id),
+    modalityName: row.modality_name == null ? null : String(row.modality_name),
+    aggregatorTargetPresences: row.aggregator_target_presences == null ? null : Number(row.aggregator_target_presences),
+    occupancyTargetPercentage: row.occupancy_target_percentage == null ? null : Number(row.occupancy_target_percentage),
+    notes: row.notes == null ? null : String(row.notes),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+async function monthlyGoalRoutes(
+  request: Request,
+  env: WorkerEnv,
+  path: string,
+): Promise<Response | null> {
+  if (path === "/occupancy/monthly-goals" && request.method === "GET") {
+    const url = new URL(request.url);
+    const input = parse(GetOccupancyMonthlyGoalsQueryParams, Object.fromEntries(url.searchParams));
+    if (input.fromMonth && !validMonth(input.fromMonth) || input.toMonth && !validMonth(input.toMonth)) {
+      throw new ApiFailure(400, "Selecione meses válidos.");
+    }
+    if (input.fromMonth && input.toMonth && input.fromMonth > input.toMonth) {
+      throw new ApiFailure(400, "O mês inicial deve ser anterior ou igual ao mês final.");
+    }
+    const filters: string[] = [];
+    const values: string[] = [];
+    if (input.fromMonth) { filters.push("month >= ?"); values.push(input.fromMonth); }
+    if (input.toMonth) { filters.push("month <= ?"); values.push(input.toMonth); }
+    const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
+    const rows = await all(
+      env.DB.prepare(
+        `SELECT month, modality_id, modality_name, aggregator_target_presences,
+                occupancy_target_percentage, notes, created_at, updated_at
+         FROM occupancy_monthly_goals ${where}
+         ORDER BY month ASC, scope_key ASC`,
+      ).bind(...values),
+    );
+    return json(GetOccupancyMonthlyGoalsResponse.parse(rows.map(monthlyGoalOut)));
+  }
+
+  const rawMonth = /^\/occupancy\/monthly-goals\/([^/]+)$/.exec(path)?.[1];
+  if (rawMonth && request.method === "PUT") {
+    const { month } = parse(UpsertOccupancyMonthlyGoalParams, { month: rawMonth });
+    const input = parse(UpsertOccupancyMonthlyGoalBody, await readJson(request));
+    if (input.aggregatorTargetPresences === null && input.occupancyTargetPercentage === null) {
+      throw new ApiFailure(400, "Informe ao menos uma meta mensal.");
+    }
+    let modalityName: string | null = null;
+    if (input.modalityId) {
+      const modality = await env.DB
+        .prepare("SELECT name FROM occupancy_modalities WHERE id=?")
+        .bind(input.modalityId)
+        .first<{ name: string }>();
+      if (!modality) throw new ApiFailure(404, "Modalidade não encontrada.");
+      modalityName = cleanText(modality.name);
+    }
+    const scopeKey = input.modalityId ?? "all";
+    const now = nowIso();
+    const row = await env.DB.prepare(
+      `INSERT INTO occupancy_monthly_goals (
+         month, scope_key, modality_id, modality_name, aggregator_target_presences,
+         occupancy_target_percentage, notes, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(month, scope_key) DO UPDATE SET
+         modality_id=excluded.modality_id,
+         modality_name=excluded.modality_name,
+         aggregator_target_presences=excluded.aggregator_target_presences,
+         occupancy_target_percentage=excluded.occupancy_target_percentage,
+         notes=excluded.notes,
+         updated_at=excluded.updated_at
+       RETURNING month, modality_id, modality_name, aggregator_target_presences,
+                 occupancy_target_percentage, notes, created_at, updated_at`,
+    ).bind(
+      month,
+      scopeKey,
+      input.modalityId,
+      modalityName,
+      input.aggregatorTargetPresences,
+      input.occupancyTargetPercentage,
+      input.notes?.trim() || null,
+      now,
+      now,
+    ).first<Row>();
+    if (!row) throw new ApiFailure(500, "Não foi possível salvar a meta mensal.");
+    return json(UpsertOccupancyMonthlyGoalResponse.parse(monthlyGoalOut(row)));
   }
   return null;
 }
@@ -786,7 +900,7 @@ async function commitOccupancyImport(
       const result = await env.DB.batch([
         env.DB.prepare(
           `UPDATE occupancy_records SET modality_id=?, kind=?, date=?, month=?, percentage=?,
-             reported_percentage=?, presences=?, capacity=?, start_time=?, end_time=?, class_name=?,
+             reported_percentage=?, presences=?, capacity=?, aggregator_presences=?, start_time=?, end_time=?, class_name=?,
              scope_key=?, notes=?, source_file_hash=?, source_sheet=?, source_cell=?, source_cells=?,
              version=version+1, updated_by=?, updated_at=?
            WHERE id=? AND version=? AND deleted_at IS NULL`,
@@ -799,6 +913,7 @@ async function commitOccupancyImport(
           values.reportedPercentage,
           values.presences,
           values.capacity,
+          values.aggregatorPresences,
           values.startTime,
           values.endTime,
           values.className,
@@ -890,10 +1005,10 @@ async function commitOccupancyImport(
         env.DB.prepare(
           `INSERT INTO occupancy_records
             (id, modality_id, kind, date, month, percentage, reported_percentage, presences,
-             capacity, start_time, end_time, class_name, scope_key, notes, source_file_hash,
+             capacity, aggregator_presences, start_time, end_time, class_name, scope_key, notes, source_file_hash,
              source_sheet, source_cell, source_cells, version, created_by, updated_by,
              created_at, updated_at, deleted_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, NULL)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, NULL)`,
         ).bind(
           id,
           modality.id,
@@ -904,6 +1019,7 @@ async function commitOccupancyImport(
           values.reportedPercentage,
           values.presences,
           values.capacity,
+          values.aggregatorPresences,
           values.startTime,
           values.endTime,
           values.className,
@@ -1222,6 +1338,7 @@ type BackupOccupancy = {
   reportedPercentage: number | null;
   presences: number | null;
   capacity: number | null;
+  aggregatorPresences?: number | null;
   startTime: string | null;
   endTime: string | null;
   className: string | null;
@@ -1247,6 +1364,7 @@ function backupRecordFromRow(row: BackupOccupancy, scopeKey: string): Row {
     reported_percentage: row.reportedPercentage === null ? null : String(row.reportedPercentage),
     presences: row.presences,
     capacity: row.capacity,
+    aggregatorPresences: row.aggregatorPresences ?? null,
     start_time: row.startTime ? `${row.startTime}:00` : null,
     end_time: row.endTime ? `${row.endTime}:00` : null,
     class_name: row.className,
@@ -1272,6 +1390,7 @@ function backupRecordMatches(existing: Row, backup: BackupOccupancy, backupScope
     current.reportedPercentage === backup.reportedPercentage &&
     current.presences === backup.presences &&
     current.capacity === backup.capacity &&
+    current.aggregatorPresences === (backup.aggregatorPresences ?? null) &&
     current.startTime === backup.startTime &&
     current.endTime === backup.endTime &&
     keyOf(current.className ?? "") === keyOf(backup.className ?? "") &&
@@ -1514,7 +1633,7 @@ async function restoreOccupancyBackup(
       const result = await env.DB.batch([
         env.DB.prepare(
           `UPDATE occupancy_records SET modality_id=?, kind=?, date=?, month=?, percentage=?,
-             reported_percentage=?, presences=?, capacity=?, start_time=?, end_time=?, class_name=?,
+             reported_percentage=?, presences=?, capacity=?, aggregator_presences=?, start_time=?, end_time=?, class_name=?,
              scope_key=?, notes=?, source_file_hash=?, source_sheet=?, source_cell=?, source_cells=?,
              version=version+1, updated_by=?, updated_at=?
            WHERE id=? AND deleted_at IS NULL`,
@@ -1527,6 +1646,7 @@ async function restoreOccupancyBackup(
           record.reportedPercentage === null ? null : String(record.reportedPercentage),
           record.presences,
           record.capacity,
+          record.aggregatorPresences ?? null,
           record.startTime ? `${record.startTime}:00` : null,
           record.endTime ? `${record.endTime}:00` : null,
           record.className,
@@ -1565,10 +1685,10 @@ async function restoreOccupancyBackup(
         env.DB.prepare(
           `INSERT INTO occupancy_records
             (id, modality_id, kind, date, month, percentage, reported_percentage, presences,
-             capacity, start_time, end_time, class_name, scope_key, notes, source_file_hash,
+             capacity, aggregator_presences, start_time, end_time, class_name, scope_key, notes, source_file_hash,
              source_sheet, source_cell, source_cells, version, created_by, updated_by,
              created_at, updated_at, deleted_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, NULL)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, NULL)`,
         ).bind(
           keepBoth ? crypto.randomUUID() : record.id,
           modalityId,
@@ -1579,6 +1699,7 @@ async function restoreOccupancyBackup(
           record.reportedPercentage === null ? null : String(record.reportedPercentage),
           record.presences,
           record.capacity,
+          record.aggregatorPresences ?? null,
           record.startTime ? `${record.startTime}:00` : null,
           record.endTime ? `${record.endTime}:00` : null,
           record.className,
@@ -1714,10 +1835,10 @@ async function restoreOccupancyBackupAtomic(
       env.DB.prepare(
         `INSERT INTO occupancy_records
           (id, modality_id, kind, date, month, percentage, reported_percentage, presences,
-           capacity, start_time, end_time, class_name, scope_key, notes, source_file_hash,
+           capacity, aggregator_presences, start_time, end_time, class_name, scope_key, notes, source_file_hash,
            source_sheet, source_cell, source_cells, version, created_by, updated_by,
            created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, NULL)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, NULL)`,
       ).bind(
         record.id,
         modalityId,
@@ -1728,6 +1849,7 @@ async function restoreOccupancyBackupAtomic(
         record.reportedPercentage === null ? null : String(record.reportedPercentage),
         record.presences,
         record.capacity,
+        record.aggregatorPresences ?? null,
         record.startTime ? `${record.startTime}:00` : null,
         record.endTime ? `${record.endTime}:00` : null,
         record.className,
@@ -1802,9 +1924,9 @@ async function saveRecord(
         .prepare(
           `INSERT INTO occupancy_records
             (id, modality_id, kind, date, month, percentage, reported_percentage, presences,
-             capacity, start_time, end_time, class_name, scope_key, notes, version,
+             capacity, aggregator_presences, start_time, end_time, class_name, scope_key, notes, version,
              created_by, updated_by, created_at, updated_at, deleted_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, NULL)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, NULL)`,
         )
         .bind(
           recordId,
@@ -1816,6 +1938,7 @@ async function saveRecord(
           values.reportedPercentage,
           values.presences,
           values.capacity,
+          values.aggregatorPresences,
           values.startTime,
           values.endTime,
           values.className,
@@ -1866,28 +1989,32 @@ async function saveRecord(
     throw new ApiFailure(409, "Este registro foi alterado. Atualize antes de salvar.");
   }
   const version = expectedVersion;
+  const updateValues = input.aggregatorPresences === undefined
+    ? recordValues({ ...input, aggregatorPresences: current.aggregator_presences == null ? null : Number(current.aggregator_presences) })
+    : values;
   const result = await env.DB.batch([
     env.DB
       .prepare(
         `UPDATE occupancy_records SET modality_id=?, kind=?, date=?, month=?, percentage=?,
-          reported_percentage=?, presences=?, capacity=?, start_time=?, end_time=?, class_name=?,
+          reported_percentage=?, presences=?, capacity=?, aggregator_presences=?, start_time=?, end_time=?, class_name=?,
           scope_key=?, notes=?, version=version+1, updated_by=?, updated_at=?
          WHERE id=? AND version=? AND deleted_at IS NULL`,
       )
       .bind(
         modality.id,
-        values.kind,
-        values.date,
-        values.month,
-        values.percentage,
-        values.reportedPercentage,
-        values.presences,
-        values.capacity,
-        values.startTime,
-        values.endTime,
-        values.className,
-        values.scopeKey,
-        values.notes,
+        updateValues.kind,
+        updateValues.date,
+        updateValues.month,
+        updateValues.percentage,
+        updateValues.reportedPercentage,
+        updateValues.presences,
+        updateValues.capacity,
+        updateValues.aggregatorPresences,
+        updateValues.startTime,
+        updateValues.endTime,
+        updateValues.className,
+        updateValues.scopeKey,
+        updateValues.notes,
         actor.userId,
         now,
         id,
@@ -1924,6 +2051,8 @@ export async function handleOccupancyRequest(
   path: string,
 ): Promise<Response | null> {
   try {
+    const goalResponse = await monthlyGoalRoutes(request, env, path);
+    if (goalResponse) return goalResponse;
     const modalityResponse = await modalityRoutes(request, env, actor, path);
     if (modalityResponse) return modalityResponse;
     if (path === "/occupancy" && request.method === "GET") {

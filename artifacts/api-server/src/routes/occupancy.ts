@@ -1,12 +1,13 @@
 import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
 import { getAuth } from "@clerk/express";
 import { and, asc, desc, eq, gte, inArray, isNull, lte, like, or, sql, type SQL } from "drizzle-orm";
-import { db, occupancyHistoryTable, occupancyModalitiesTable, occupancyRecordsTable, productsTable } from "@workspace/db";
+import { db, occupancyHistoryTable, occupancyModalitiesTable, occupancyMonthlyGoalsTable, occupancyRecordsTable, productsTable } from "@workspace/db";
 import {
   CreateOccupancyModalityBody, CreateOccupancyModalityResponse,
   DeleteOccupancyModalityBody, DeleteOccupancyModalityParams, DeleteOccupancyModalityResponse,
   UpdateOccupancyModalityBody, UpdateOccupancyModalityParams, UpdateOccupancyModalityResponse,
   GetOccupancyModalitiesResponse, GetOccupancyRecordsQueryParams, GetOccupancyRecordsResponse,
+  GetOccupancyMonthlyGoalsQueryParams, GetOccupancyMonthlyGoalsResponse,
   CreateOccupancyRecordBody, CreateOccupancyRecordResponse,
   UpdateOccupancyRecordBody, UpdateOccupancyRecordParams, UpdateOccupancyRecordResponse,
   DeleteOccupancyRecordBody, DeleteOccupancyRecordParams,
@@ -15,6 +16,7 @@ import {
   CreateOccupancyBackupBody, CreateOccupancyBackupResponse,
   PreviewOccupancyBackupRestoreBody, PreviewOccupancyBackupRestoreResponse,
   RestoreOccupancyBackupBody, RestoreOccupancyBackupResponse,
+  UpsertOccupancyMonthlyGoalBody, UpsertOccupancyMonthlyGoalParams, UpsertOccupancyMonthlyGoalResponse,
   type OccupancyImportRowInput,
 } from "@workspace/api-zod";
 import { isAuthorizedUser } from "../lib/authorization";
@@ -44,9 +46,10 @@ function validateImportOrigin(row: OccupancyImportRowInput) {
     ? row.presences !== undefined && row.capacity !== undefined && Boolean(row.startTime)
       && Boolean(cells.presences) && Boolean(cells.capacity) && Boolean(cells.startTime)
       && cells.presences === row.sourceCell
+      && (row.aggregatorPresences == null || Boolean(cells.aggregatorPresences))
       && (row.reportedPercentage === undefined || Boolean(cells.percentage))
     : row.percentage !== undefined && Boolean(cells.percentage) && cells.percentage === row.sourceCell;
-  if (!row.sourceSheet.trim() || Object.keys(cells).length < 2 || Object.keys(cells).length > 8
+  if (!row.sourceSheet.trim() || Object.keys(cells).length < 2 || Object.keys(cells).length > 9
     || !cells.period || !cells.modality || !sourceValid) {
     throw new OccupancyError(400, "A origem deve informar aba, células de período/modalidade e os campos de ocupação reconhecidos.");
   }
@@ -74,6 +77,82 @@ export function createOccupancyRouter(dependencies: Dependencies = {}): IRouter 
       res.status(403).json({ error: "Acesso restrito à equipe autorizada." }); return;
     }
     next();
+  });
+  router.get("/occupancy/monthly-goals", async (req, res): Promise<void> => {
+    const input = parse(GetOccupancyMonthlyGoalsQueryParams, req.query);
+    if (input.fromMonth && input.toMonth && input.fromMonth > input.toMonth) {
+      throw new OccupancyError(400, "O mês inicial deve ser anterior ou igual ao mês final.");
+    }
+    const filters: SQL[] = [];
+    if (input.fromMonth) filters.push(gte(occupancyMonthlyGoalsTable.month, input.fromMonth));
+    if (input.toMonth) filters.push(lte(occupancyMonthlyGoalsTable.month, input.toMonth));
+    const rows = await database.select().from(occupancyMonthlyGoalsTable)
+      .where(filters.length ? and(...filters) : undefined)
+      .orderBy(asc(occupancyMonthlyGoalsTable.month), asc(occupancyMonthlyGoalsTable.scopeKey));
+    res.json(GetOccupancyMonthlyGoalsResponse.parse(rows.map((row) => ({
+      month: row.month,
+      modalityId: row.modalityId,
+      modalityName: row.modalityName,
+      aggregatorTargetPresences: row.aggregatorTargetPresences,
+      occupancyTargetPercentage: row.occupancyTargetPercentage === null ? null : Number(row.occupancyTargetPercentage),
+      notes: row.notes,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    }))));
+  });
+  router.put("/occupancy/monthly-goals/:month", async (req, res): Promise<void> => {
+    const { month } = parse(UpsertOccupancyMonthlyGoalParams, req.params);
+    const input = parse(UpsertOccupancyMonthlyGoalBody, req.body);
+    if (input.aggregatorTargetPresences === null && input.occupancyTargetPercentage === null) {
+      throw new OccupancyError(400, "Informe ao menos uma meta mensal.");
+    }
+    let modalityName: string | null = null;
+    if (input.modalityId) {
+      const [modality] = await database.select({ id: occupancyModalitiesTable.id, name: occupancyModalitiesTable.name })
+        .from(occupancyModalitiesTable)
+        .where(eq(occupancyModalitiesTable.id, input.modalityId))
+        .limit(1);
+      if (!modality) throw new OccupancyError(404, "Modalidade não encontrada.");
+      modalityName = modality.name;
+    }
+    const scopeKey = input.modalityId ?? "all";
+    const now = new Date();
+    const [row] = await database.insert(occupancyMonthlyGoalsTable).values({
+      month,
+      scopeKey,
+      modalityId: input.modalityId,
+      modalityName,
+      aggregatorTargetPresences: input.aggregatorTargetPresences,
+      occupancyTargetPercentage: input.occupancyTargetPercentage === null
+        ? null
+        : String(input.occupancyTargetPercentage),
+      notes: input.notes?.trim() || null,
+      createdAt: now,
+      updatedAt: now,
+    }).onConflictDoUpdate({
+      target: [occupancyMonthlyGoalsTable.month, occupancyMonthlyGoalsTable.scopeKey],
+      set: {
+        modalityId: input.modalityId,
+        modalityName,
+        aggregatorTargetPresences: input.aggregatorTargetPresences,
+        occupancyTargetPercentage: input.occupancyTargetPercentage === null
+          ? null
+          : String(input.occupancyTargetPercentage),
+        notes: input.notes?.trim() || null,
+        updatedAt: now,
+      },
+    }).returning();
+    if (!row) throw new OccupancyError(500, "Não foi possível salvar a meta mensal.");
+    res.json(UpsertOccupancyMonthlyGoalResponse.parse({
+      month: row.month,
+      modalityId: row.modalityId,
+      modalityName: row.modalityName,
+      aggregatorTargetPresences: row.aggregatorTargetPresences,
+      occupancyTargetPercentage: row.occupancyTargetPercentage === null ? null : Number(row.occupancyTargetPercentage),
+      notes: row.notes,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    }));
   });
   router.post("/occupancy/import/preview", async (req, res): Promise<void> => {
     const input = parse(PreviewOccupancyImportBody, req.body);
@@ -103,6 +182,8 @@ export function createOccupancyRouter(dependencies: Dependencies = {}): IRouter 
           && occupancyKey(existing.modalityName) === occupancyKey(entry.modalityName)
           && Number(existing.percentage) === Number(values.percentage)
           && existing.presences === values.presences && existing.capacity === values.capacity
+          && existing.aggregatorPresences === values.aggregatorPresences
+          && existing.aggregatorPresences === values.aggregatorPresences
           && existing.startTime === values.startTime && existing.endTime === values.endTime
           && existing.reportedPercentage === (values.reportedPercentage === null ? null : Number(values.reportedPercentage))
           && occupancyKey(existing.className ?? "") === occupancyKey(entry.className ?? "");
@@ -177,6 +258,7 @@ export function createOccupancyRouter(dependencies: Dependencies = {}): IRouter 
               && occupancyKey(existing.modalityName) === occupancyKey(entry.modalityName)
               && Number(existing.percentage) === Number(values.percentage)
               && existing.presences === values.presences && existing.capacity === values.capacity
+              && existing.aggregatorPresences === values.aggregatorPresences
               && existing.startTime === values.startTime && existing.endTime === values.endTime
               && existing.reportedPercentage === (values.reportedPercentage === null ? null : Number(values.reportedPercentage))
               && occupancyKey(existing.className ?? "") === occupancyKey(entry.className ?? "");
@@ -295,6 +377,7 @@ export function createOccupancyRouter(dependencies: Dependencies = {}): IRouter 
               && scopeMatch.date === values.date && occupancyKey(scopeModality?.name ?? "") === occupancyKey(entry.modalityName)
               && Number(scopeMatch.percentage) === Number(values.percentage) && sameLogicalScope(scopeMatch.scopeKey, values.scopeKey)
               && scopeMatch.presences === values.presences && scopeMatch.capacity === values.capacity
+              && scopeMatch.aggregatorPresences === values.aggregatorPresences
               && (scopeMatch.startTime?.slice(0, 5) ?? null) === values.startTime
               && (scopeMatch.endTime?.slice(0, 5) ?? null) === values.endTime;
             const alreadyExists = sameSource && samePayload;
@@ -326,6 +409,8 @@ export function createOccupancyRouter(dependencies: Dependencies = {}): IRouter 
                 && occupancyKey(existing.modalityName) === occupancyKey(entry.modalityName)
                 && Number(existing.percentage) === Number(values.percentage)
                 && existing.presences === values.presences && existing.capacity === values.capacity
+                && existing.aggregatorPresences === values.aggregatorPresences
+                && existing.aggregatorPresences === values.aggregatorPresences
                 && existing.startTime === values.startTime && existing.endTime === values.endTime
                 && existing.reportedPercentage === (values.reportedPercentage === null ? null : Number(values.reportedPercentage))
                 && occupancyKey(existing.className ?? "") === occupancyKey(entry.className ?? "");
@@ -513,11 +598,13 @@ export function createOccupancyRouter(dependencies: Dependencies = {}): IRouter 
   router.patch("/occupancy/:id", async (req, res): Promise<void> => {
     const { id } = parse(UpdateOccupancyRecordParams, req.params);
     const input = parse(UpdateOccupancyRecordBody, req.body);
-    const values = occupancyValues(input);
     const record = await database.transaction(async (tx) => {
       const [before] = await tx.select().from(occupancyRecordsTable).where(and(eq(occupancyRecordsTable.id, id), isNull(occupancyRecordsTable.deletedAt))).for("update");
       if (!before) throw new OccupancyError(404, "Registro não encontrado. Atualize o histórico.");
       if (before.version !== input.version) throw new OccupancyError(409, "Este registro foi alterado. Atualize o histórico e reabra a edição.");
+      const values = occupancyValues(input.aggregatorPresences === undefined
+        ? { ...input, aggregatorPresences: before.aggregatorPresences }
+        : input);
       const modality = await resolveOccupancyModality(tx, input, getUserId(req)!);
       const [updated] = await tx.update(occupancyRecordsTable).set({ ...values, modalityId: modality.id, version: input.version + 1, updatedBy: getUserId(req)!, updatedAt: new Date() })
         .where(and(eq(occupancyRecordsTable.id, id), eq(occupancyRecordsTable.version, input.version), isNull(occupancyRecordsTable.deletedAt))).returning();

@@ -6,16 +6,21 @@ import { getWeekdayName, getWeekdayNameForIsoDay } from './occupancy-calendar';
 type EffectiveGroup = { daily: OccupancyRecord[]; monthly: OccupancyRecord[] };
 
 const occupancyColumns = [
-  'Modalidade', 'Data', 'Dia da semana', 'Horário inicial', 'Presenças/Vagas', 'Ocupação (%)',
+  'Modalidade', 'Data', 'Dia da semana', 'Horário inicial', 'Presenças/Vagas', 'Agregadores',
+  'Demais alunos', 'Participação agregadores (%)', 'Ocupação (%)',
   'Horário final', 'Turma', 'Observação', 'Tipo do registro', 'Percentual original (%)', 'Critério de cálculo',
 ];
 const summaryColumns = [
   'Competência mensal', 'Modalidade agregada', 'Aulas consideradas', 'Aulas medidas', 'Registros legados',
-  'Presenças somadas', 'Vagas somadas', 'Ocupação calculada (%)', 'Percentual legado (%) — média simples, sem contagens', 'Critério',
+  'Presenças somadas', 'Agregadores informados (presenças)', 'Cobertura agregadores (aulas)',
+  'Participação agregadores (%)', 'Vagas somadas', 'Ocupação calculada (%)',
+  'Percentual legado (%) — média simples, sem contagens', 'Critério',
 ];
 const timeColumns = [
   'Faixa horária', 'Modalidade analisada', 'Aulas diárias', 'Aulas medidas', 'Registros legados',
-  'Presenças somadas', 'Vagas somadas', 'Ocupação calculada (%)', 'Percentual legado (%) — média simples, sem contagens',
+  'Presenças somadas', 'Agregadores informados (presenças)', 'Cobertura agregadores (aulas)',
+  'Participação agregadores (%)', 'Vagas somadas', 'Ocupação calculada (%)',
+  'Percentual legado (%) — média simples, sem contagens',
 ];
 
 function normalized(value: string | null | undefined) {
@@ -92,6 +97,13 @@ function detailedRows(records: readonly OccupancyRecord[]) {
     'Dia da semana': record.kind === 'daily' ? getWeekdayName(record.period) ?? '' : '',
     'Horário inicial': record.startTime ?? '',
     'Presenças/Vagas': record.presences === null || record.capacity === null ? '' : `${record.presences}/${record.capacity}`,
+    'Agregadores': record.aggregatorPresences ?? '',
+    'Demais alunos': record.aggregatorPresences == null || record.presences === null
+      ? ''
+      : record.presences - record.aggregatorPresences,
+    'Participação agregadores (%)': record.aggregatorPresences == null || record.presences === null
+      ? ''
+      : record.presences > 0 ? record.aggregatorPresences / record.presences * 100 : 0,
     'Ocupação (%)': occupancyValue(record),
     'Horário final': record.endTime ?? '',
     'Turma': record.className ?? '',
@@ -117,6 +129,9 @@ function summaryRows(records: readonly OccupancyRecord[], selection: OccupancyBa
     const legacyRecords = group.filter((record) => !measured(record));
     const presences = numericTotal(measuredRecords, 'presences');
     const capacity = numericTotal(measuredRecords, 'capacity');
+    const aggregatorKnown = measuredRecords.filter((record) => record.aggregatorPresences != null);
+    const aggregatorTotal = aggregatorKnown.reduce((sum, record) => sum + (record.aggregatorPresences ?? 0), 0);
+    const aggregatorCoverageComplete = measuredRecords.length > 0 && aggregatorKnown.length === measuredRecords.length;
     return {
       'Competência mensal': sample.month,
       'Modalidade agregada': sample.modalityName,
@@ -124,6 +139,11 @@ function summaryRows(records: readonly OccupancyRecord[], selection: OccupancyBa
       'Aulas medidas': measuredRecords.length,
       'Registros legados': legacyRecords.length,
       'Presenças somadas': presences,
+      'Agregadores informados (presenças)': aggregatorKnown.length ? aggregatorTotal : '',
+      'Cobertura agregadores (aulas)': `${aggregatorKnown.length}/${measuredRecords.length}`,
+      'Participação agregadores (%)': aggregatorCoverageComplete
+        ? presences > 0 ? aggregatorTotal / presences * 100 : 0
+        : '',
       'Vagas somadas': capacity,
       'Ocupação calculada (%)': capacity ? presences / capacity * 100 : '',
       'Percentual legado (média simples; sem contagens)': average(legacyRecords.map((record) => record.reportedPercentage ?? record.percentage)) ?? '',
@@ -149,6 +169,9 @@ function timeRows(records: readonly OccupancyRecord[]) {
     const legacyRecords = group.filter((record) => !measured(record));
     const presences = numericTotal(measuredRecords, 'presences');
     const capacity = numericTotal(measuredRecords, 'capacity');
+    const aggregatorKnown = measuredRecords.filter((record) => record.aggregatorPresences != null);
+    const aggregatorTotal = aggregatorKnown.reduce((sum, record) => sum + (record.aggregatorPresences ?? 0), 0);
+    const aggregatorCoverageComplete = measuredRecords.length > 0 && aggregatorKnown.length === measuredRecords.length;
     return {
       'Faixa horária': sample.startTime ?? '',
       'Modalidade analisada': sample.modalityName,
@@ -156,6 +179,11 @@ function timeRows(records: readonly OccupancyRecord[]) {
       'Aulas medidas': measuredRecords.length,
       'Registros legados': legacyRecords.length,
       'Presenças somadas': presences,
+      'Agregadores informados (presenças)': aggregatorKnown.length ? aggregatorTotal : '',
+      'Cobertura agregadores (aulas)': `${aggregatorKnown.length}/${measuredRecords.length}`,
+      'Participação agregadores (%)': aggregatorCoverageComplete
+        ? presences > 0 ? aggregatorTotal / presences * 100 : 0
+        : '',
       'Vagas somadas': capacity,
       'Ocupação calculada (%)': capacity ? presences / capacity * 100 : '',
       'Percentual legado (média simples; sem contagens)': average(legacyRecords.map((record) => record.reportedPercentage ?? record.percentage)) ?? '',
@@ -188,17 +216,17 @@ function jsonSheet(rows: Record<string, unknown>[], headers: string[]) {
 export function createOccupancyWorkbook(records: readonly OccupancyRecord[], selection: OccupancyBackupSelection) {
   const workbook = XLSX.utils.book_new();
   const detailed = jsonSheet(detailedRows(records), occupancyColumns);
-  detailed['!cols'] = [22, 14, 12, 16, 16, 14, 24, 36, 18, 22, 42].map((wch) => ({ wch }));
+  detailed['!cols'] = [22, 14, 12, 16, 16, 13, 13, 22, 14, 24, 36, 18, 22, 42].map((wch) => ({ wch }));
   styleOccupancyColumns(detailed);
   XLSX.utils.book_append_sheet(workbook, detailed, 'Lançamentos');
 
   const summary = jsonSheet(summaryRows(records, selection), summaryColumns);
-  summary['!cols'] = [14, 22, 16, 14, 16, 12, 10, 20, 36, 42].map((wch) => ({ wch }));
+  summary['!cols'] = [14, 22, 16, 14, 16, 12, 23, 22, 22, 10, 20, 36, 42].map((wch) => ({ wch }));
   styleOccupancyColumns(summary);
   XLSX.utils.book_append_sheet(workbook, summary, 'Resumo modalidade-mês');
 
   const times = jsonSheet(timeRows(records), timeColumns);
-  times['!cols'] = [12, 22, 15, 14, 16, 12, 10, 20, 36].map((wch) => ({ wch }));
+  times['!cols'] = [12, 22, 15, 14, 16, 12, 23, 22, 22, 10, 20, 36].map((wch) => ({ wch }));
   styleOccupancyColumns(times);
   XLSX.utils.book_append_sheet(workbook, times, 'Comparação por horário');
   return workbook;

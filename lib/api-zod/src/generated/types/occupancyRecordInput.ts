@@ -38,6 +38,13 @@ export interface OccupancyRecordInput {
      * @maximum 2147483647
      */
   capacity?: number;
+  /**
+     * Presenças de agregadores; opcional para preservar registros sem informação.
+     * @minimum 0
+     * @maximum 2147483647
+     * @nullable
+     */
+  aggregatorPresences?: number | null;
   /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$ */
   startTime?: string;
   /**

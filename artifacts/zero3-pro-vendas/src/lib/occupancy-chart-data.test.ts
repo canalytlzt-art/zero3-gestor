@@ -305,3 +305,27 @@ test('weekday groups remain calendar-date based across December and January and 
     { label: 'Sexta', recordCount: 1, presences: 15, capacity: 20, percentage: 75 },
   ]);
 });
+
+test('aggregator metrics preserve unknown coverage and compare month-by-month without counting people', () => {
+  const analytics = buildOccupancyChartAnalytics([
+    { ...record('oct-a', 'daily', '2026-10-01', 'crossfit', 'CrossFit', 50), presences: 10, capacity: 20, aggregatorPresences: 4 },
+    { ...record('oct-b', 'daily', '2026-10-02', 'crossfit', 'CrossFit', 40), presences: 8, capacity: 20, aggregatorPresences: null },
+    { ...record('nov-a', 'daily', '2026-11-02', 'crossfit', 'CrossFit', 40), presences: 2, capacity: 5, aggregatorPresences: 1 },
+  ], { viewMode: 'daily', selectedMonths: ['2026-10', '2026-11'] });
+
+  assert.equal(analytics.totals.presences, 20);
+  assert.equal(analytics.totals.aggregatorPresences, 5);
+  assert.equal(analytics.totals.aggregatorInformedClassCount, 2);
+  assert.equal(analytics.totals.aggregatorSharePercentage, null);
+  assert.equal(analytics.totals.otherPresences, null);
+  assert.deepEqual(analytics.aggregatorsByMonth.map((month) => ({
+    month: month.month,
+    totalPresences: month.totalPresences,
+    aggregatorPresences: month.aggregatorPresences,
+    sharePercentage: month.sharePercentage,
+    coverage: `${month.aggregatorInformedClassCount}/${month.measuredClassCount}`,
+  })), [
+    { month: '2026-10', totalPresences: 18, aggregatorPresences: 4, sharePercentage: null, coverage: '1/2' },
+    { month: '2026-11', totalPresences: 2, aggregatorPresences: 1, sharePercentage: 50, coverage: '1/1' },
+  ]);
+});

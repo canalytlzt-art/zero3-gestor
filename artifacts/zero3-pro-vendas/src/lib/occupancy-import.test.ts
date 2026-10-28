@@ -278,3 +278,26 @@ test("imports the template from semicolon-delimited CSV with UTF-8 accents", asy
   assert.equal(result.entries[0].startTime, "06:00");
   assert.equal(result.entries[0].endTime, "07:00");
 });
+
+test("imports optional aggregator attendance without treating missing values as zero", async () => {
+  const result = await parseOccupancySpreadsheet(workbookBytes({
+    Aulas: rows(
+      ["Data", "Modalidade", "Presenças", "Vagas", "Horário inicial", "Agregadores"],
+      ["2026-10-27", "CrossFit", 18, 20, "07:00", 10],
+      ["2026-10-28", "CrossFit", 12, 20, "07:00", ""],
+      ["2026-10-29", "CrossFit", 5, 20, "07:00", 6],
+    ),
+  }), "agregadores.xlsx");
+
+  assert.deepEqual(result.entries.map(({ status, presences, aggregatorPresences }) => ({
+    status,
+    presences,
+    aggregatorPresences,
+  })), [
+    { status: "ready", presences: 18, aggregatorPresences: 10 },
+    { status: "ready", presences: 12, aggregatorPresences: null },
+    { status: "pending", presences: 5, aggregatorPresences: 6 },
+  ]);
+  assert.equal(result.entries[0]?.sourceCells.aggregatorPresences, "F2");
+  assert.match(result.entries[2]?.reason ?? "", /Agregadores não pode ultrapassar/);
+});

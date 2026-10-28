@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS occupancy_records (
   reported_percentage numeric,
   presences integer,
   capacity integer,
+  aggregator_presences integer,
   start_time time,
   end_time time,
   class_name text,
@@ -42,6 +43,9 @@ CREATE TABLE IF NOT EXISTS occupancy_records (
         AND capacity IS NOT NULL AND capacity > 0 AND start_time IS NOT NULL))
     AND (reported_percentage IS NULL OR (presences IS NOT NULL AND capacity IS NOT NULL))
   ),
+  CONSTRAINT occupancy_aggregator_presences_valid CHECK (
+    aggregator_presences IS NULL OR (aggregator_presences >= 0 AND presences IS NOT NULL AND aggregator_presences <= presences)
+  ),
   CONSTRAINT occupancy_period_valid CHECK (month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$' AND left(month,4) <> '0000' AND ((kind = 'daily' AND date IS NOT NULL AND month = to_char(date,'YYYY-MM')) OR (kind = 'monthly' AND date IS NULL))),
   CONSTRAINT occupancy_record_version_valid CHECK (version > 0),
   CONSTRAINT occupancy_record_text_valid CHECK (coalesce(length(class_name),0) <= 120 AND coalesce(length(notes),0) <= 1000)
@@ -49,6 +53,7 @@ CREATE TABLE IF NOT EXISTS occupancy_records (
 ALTER TABLE occupancy_records ADD COLUMN IF NOT EXISTS reported_percentage numeric;
 ALTER TABLE occupancy_records ADD COLUMN IF NOT EXISTS presences integer;
 ALTER TABLE occupancy_records ADD COLUMN IF NOT EXISTS capacity integer;
+ALTER TABLE occupancy_records ADD COLUMN IF NOT EXISTS aggregator_presences integer;
 ALTER TABLE occupancy_records ADD COLUMN IF NOT EXISTS start_time time;
 ALTER TABLE occupancy_records ADD COLUMN IF NOT EXISTS end_time time;
 ALTER TABLE occupancy_records DROP CONSTRAINT IF EXISTS occupancy_percentage_valid;
@@ -61,6 +66,10 @@ ALTER TABLE occupancy_records ADD CONSTRAINT occupancy_measurements_valid CHECK 
     OR (kind = 'daily' AND date IS NOT NULL AND presences IS NOT NULL AND presences >= 0
       AND capacity IS NOT NULL AND capacity > 0 AND start_time IS NOT NULL))
   AND (reported_percentage IS NULL OR (presences IS NOT NULL AND capacity IS NOT NULL))
+);
+ALTER TABLE occupancy_records DROP CONSTRAINT IF EXISTS occupancy_aggregator_presences_valid;
+ALTER TABLE occupancy_records ADD CONSTRAINT occupancy_aggregator_presences_valid CHECK (
+  aggregator_presences IS NULL OR (aggregator_presences >= 0 AND presences IS NOT NULL AND aggregator_presences <= presences)
 );
 ALTER TABLE occupancy_records ADD COLUMN IF NOT EXISTS source_file_hash text;
 ALTER TABLE occupancy_records ADD COLUMN IF NOT EXISTS source_sheet text;
@@ -84,6 +93,34 @@ CREATE UNIQUE INDEX occupancy_records_scope_unique
   ON occupancy_records(modality_id,kind,month,coalesce(date,'0001-01-01'::date),scope_key,coalesce(start_time,TIME '00:00'))
   WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS occupancy_records_month_idx ON occupancy_records(month,modality_id);
+
+CREATE TABLE IF NOT EXISTS occupancy_monthly_goals (
+  month text NOT NULL,
+  scope_key text NOT NULL,
+  modality_id text,
+  modality_name text,
+  aggregator_target_presences integer,
+  occupancy_target_percentage numeric,
+  notes text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT occupancy_monthly_goals_pkey PRIMARY KEY (month, scope_key),
+  CONSTRAINT occupancy_monthly_goals_month_valid CHECK (month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$' AND left(month, 4) <> '0000'),
+  CONSTRAINT occupancy_monthly_goals_scope_valid CHECK (
+    (modality_id IS NULL AND scope_key = 'all' AND modality_name IS NULL)
+    OR (modality_id IS NOT NULL AND scope_key = modality_id AND modality_name IS NOT NULL AND length(btrim(modality_name)) > 0)
+  ),
+  CONSTRAINT occupancy_monthly_goals_aggregator_target_valid CHECK (aggregator_target_presences IS NULL OR aggregator_target_presences >= 0),
+  CONSTRAINT occupancy_monthly_goals_occupancy_target_valid CHECK (
+    occupancy_target_percentage IS NULL OR (occupancy_target_percentage >= 0 AND occupancy_target_percentage <> 'NaN'::numeric)
+  ),
+  CONSTRAINT occupancy_monthly_goals_target_required CHECK (
+    aggregator_target_presences IS NOT NULL OR occupancy_target_percentage IS NOT NULL
+  ),
+  CONSTRAINT occupancy_monthly_goals_notes_valid CHECK (notes IS NULL OR length(notes) <= 1000)
+);
+CREATE INDEX IF NOT EXISTS occupancy_monthly_goals_modality_month_idx
+  ON occupancy_monthly_goals(modality_id, month);
 CREATE TABLE IF NOT EXISTS occupancy_history (
   id uuid PRIMARY KEY,
   entity_type text NOT NULL,

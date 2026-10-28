@@ -21,12 +21,15 @@ import type {
 
 import type {
   AccessStatus,
+  ActiveContractsMonth,
+  ActiveContractsMonthInput,
   ApiError,
   CancelSaleInput,
   CreateProductInput,
   CreateSaleInput,
   CreateSalesRefundInput,
   GetMonthlySalesBackupParams,
+  GetOccupancyMonthlyGoalsParams,
   GetOccupancyRecordsParams,
   GetSalesImportOriginsParams,
   GetSalesScoreboardParams,
@@ -49,6 +52,8 @@ import type {
   OccupancyModalityDeletion,
   OccupancyModalityInput,
   OccupancyModalityUpdate,
+  OccupancyMonthlyGoal,
+  OccupancyMonthlyGoalInput,
   OccupancyRecord,
   OccupancyRecordInput,
   OccupancyRecordUpdate,
@@ -422,6 +427,179 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getDeleteOccupancyModalityMutationOptions(options));
+    }
+
+export const getGetOccupancyMonthlyGoalsUrl = (params?: GetOccupancyMonthlyGoalsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/occupancy/monthly-goals?${stringifiedParams}` : `/api/occupancy/monthly-goals`
+}
+
+/**
+ * @summary List monthly occupancy and aggregator targets
+ */
+export const getOccupancyMonthlyGoals = async (params?: GetOccupancyMonthlyGoalsParams, options?: Parameters<typeof customFetch>[1]): Promise<OccupancyMonthlyGoal[]> => {
+
+  return customFetch<OccupancyMonthlyGoal[]>(getGetOccupancyMonthlyGoalsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOccupancyMonthlyGoalsQueryKey = (params?: GetOccupancyMonthlyGoalsParams,) => {
+    return [
+    `/api/occupancy/monthly-goals`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetOccupancyMonthlyGoalsQueryOptions = <TData = Awaited<ReturnType<typeof getOccupancyMonthlyGoals>>, TError = ErrorType<OccupancyFailureResponse>>(params?: GetOccupancyMonthlyGoalsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOccupancyMonthlyGoals>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOccupancyMonthlyGoalsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOccupancyMonthlyGoals>>> = ({ signal }) => getOccupancyMonthlyGoals(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOccupancyMonthlyGoals>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetOccupancyMonthlyGoalsQueryResult = NonNullable<Awaited<ReturnType<typeof getOccupancyMonthlyGoals>>>
+export type GetOccupancyMonthlyGoalsQueryError = ErrorType<OccupancyFailureResponse>
+
+
+/**
+ * @summary List monthly occupancy and aggregator targets
+ */
+
+export function useGetOccupancyMonthlyGoals<TData = Awaited<ReturnType<typeof getOccupancyMonthlyGoals>>, TError = ErrorType<OccupancyFailureResponse>>(
+ params?: GetOccupancyMonthlyGoalsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOccupancyMonthlyGoals>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetOccupancyMonthlyGoalsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpsertOccupancyMonthlyGoalUrl = (month: string,) => {
+
+
+
+
+  return `/api/occupancy/monthly-goals/${month}`
+}
+
+/**
+ * @summary Create or update monthly occupancy and aggregator targets
+ */
+export const upsertOccupancyMonthlyGoal = async (month: string,
+    occupancyMonthlyGoalInput: OccupancyMonthlyGoalInput, options?: Parameters<typeof customFetch>[1]): Promise<OccupancyMonthlyGoal> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<OccupancyMonthlyGoal>(getUpsertOccupancyMonthlyGoalUrl(month),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(occupancyMonthlyGoalInput)
+  }
+);}
+
+
+
+
+
+export const getUpsertOccupancyMonthlyGoalMutationKey = () => ['upsertOccupancyMonthlyGoal'] as const;
+
+export const getUpsertOccupancyMonthlyGoalMutationOptions = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertOccupancyMonthlyGoal>>, TError,UpsertOccupancyMonthlyGoalMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof upsertOccupancyMonthlyGoal>>, TError,UpsertOccupancyMonthlyGoalMutationVariables, TContext> => {
+
+const mutationKey = getUpsertOccupancyMonthlyGoalMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof upsertOccupancyMonthlyGoal>>, UpsertOccupancyMonthlyGoalMutationVariables> = (props) => {
+          const {month,data} = props ?? {};
+
+          return  upsertOccupancyMonthlyGoal(month,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpsertOccupancyMonthlyGoalMutationResult = NonNullable<Awaited<ReturnType<typeof upsertOccupancyMonthlyGoal>>>
+    export type UpsertOccupancyMonthlyGoalMutationBody = BodyType<OccupancyMonthlyGoalInput>
+    export type UpsertOccupancyMonthlyGoalMutationError = ErrorType<OccupancyFailureResponse>
+    export type UpsertOccupancyMonthlyGoalMutationVariables = {month: string;data: BodyType<OccupancyMonthlyGoalInput>}
+
+    /**
+ * @summary Create or update monthly occupancy and aggregator targets
+ */
+export const useUpsertOccupancyMonthlyGoal = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertOccupancyMonthlyGoal>>, TError,UpsertOccupancyMonthlyGoalMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof upsertOccupancyMonthlyGoal>>,
+        TError,
+        UpsertOccupancyMonthlyGoalMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpsertOccupancyMonthlyGoalMutationOptions(options));
     }
 
 export const getGetOccupancyRecordsUrl = (params?: GetOccupancyRecordsParams,) => {
@@ -2913,6 +3091,172 @@ export const useUpsertSalesGoal = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getUpsertSalesGoalMutationOptions(options));
+    }
+
+export const getGetActiveContractsUrl = () => {
+
+
+
+
+  return `/api/sales/active-contracts`
+}
+
+/**
+ * @summary List monthly active-contract balances
+ */
+export const getActiveContracts = async ( options?: Parameters<typeof customFetch>[1]): Promise<ActiveContractsMonth[]> => {
+
+  return customFetch<ActiveContractsMonth[]>(getGetActiveContractsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetActiveContractsQueryKey = () => {
+    return [
+    `/api/sales/active-contracts`
+    ] as const;
+    }
+
+
+export const getGetActiveContractsQueryOptions = <TData = Awaited<ReturnType<typeof getActiveContracts>>, TError = ErrorType<ApiError>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getActiveContracts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetActiveContractsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getActiveContracts>>> = ({ signal }) => getActiveContracts({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getActiveContracts>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetActiveContractsQueryResult = NonNullable<Awaited<ReturnType<typeof getActiveContracts>>>
+export type GetActiveContractsQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary List monthly active-contract balances
+ */
+
+export function useGetActiveContracts<TData = Awaited<ReturnType<typeof getActiveContracts>>, TError = ErrorType<ApiError>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getActiveContracts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetActiveContractsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpsertActiveContractsMonthUrl = (month: string,) => {
+
+
+
+
+  return `/api/sales/active-contracts/${month}`
+}
+
+/**
+ * @summary Create or correct one month's active-contract balance
+ */
+export const upsertActiveContractsMonth = async (month: string,
+    activeContractsMonthInput: ActiveContractsMonthInput, options?: Parameters<typeof customFetch>[1]): Promise<ActiveContractsMonth> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ActiveContractsMonth>(getUpsertActiveContractsMonthUrl(month),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(activeContractsMonthInput)
+  }
+);}
+
+
+
+
+
+export const getUpsertActiveContractsMonthMutationKey = () => ['upsertActiveContractsMonth'] as const;
+
+export const getUpsertActiveContractsMonthMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertActiveContractsMonth>>, TError,UpsertActiveContractsMonthMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof upsertActiveContractsMonth>>, TError,UpsertActiveContractsMonthMutationVariables, TContext> => {
+
+const mutationKey = getUpsertActiveContractsMonthMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof upsertActiveContractsMonth>>, UpsertActiveContractsMonthMutationVariables> = (props) => {
+          const {month,data} = props ?? {};
+
+          return  upsertActiveContractsMonth(month,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpsertActiveContractsMonthMutationResult = NonNullable<Awaited<ReturnType<typeof upsertActiveContractsMonth>>>
+    export type UpsertActiveContractsMonthMutationBody = BodyType<ActiveContractsMonthInput>
+    export type UpsertActiveContractsMonthMutationError = ErrorType<ApiError>
+    export type UpsertActiveContractsMonthMutationVariables = {month: string;data: BodyType<ActiveContractsMonthInput>}
+
+    /**
+ * @summary Create or correct one month's active-contract balance
+ */
+export const useUpsertActiveContractsMonth = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertActiveContractsMonth>>, TError,UpsertActiveContractsMonthMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof upsertActiveContractsMonth>>,
+        TError,
+        UpsertActiveContractsMonthMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpsertActiveContractsMonthMutationOptions(options));
     }
 
 export const getGetMonthlySalesBackupUrl = (params: GetMonthlySalesBackupParams,) => {

@@ -7,12 +7,15 @@
  */
 
 export * from './accessStatus';
+export * from './activeContractsMonth';
+export * from './activeContractsMonthInput';
 export * from './apiError';
 export * from './cancelSaleInput';
 export * from './createProductInput';
 export * from './createSaleInput';
 export * from './createSalesRefundInput';
 export * from './getMonthlySalesBackupParams';
+export * from './getOccupancyMonthlyGoalsParams';
 export * from './getOccupancyRecordsKind';
 export * from './getOccupancyRecordsParams';
 export * from './getSalesImportOriginsParams';
@@ -66,6 +69,8 @@ export * from './occupancyModalityDelete';
 export * from './occupancyModalityDeletion';
 export * from './occupancyModalityInput';
 export * from './occupancyModalityUpdate';
+export * from './occupancyMonthlyGoal';
+export * from './occupancyMonthlyGoalInput';
 export * from './occupancyRecord';
 export * from './occupancyRecordInput';
 export * from './occupancyRecordInputKind';

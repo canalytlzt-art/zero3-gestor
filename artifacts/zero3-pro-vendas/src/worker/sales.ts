@@ -14,6 +14,7 @@ import {
   GetSalesScoreboardQueryParams,
   GetSalesScoreboardResponse,
   GetSalesGoalsResponse,
+  GetActiveContractsResponse,
   GetSalesRefundCandidatesResponse,
   GetSalesRefundsResponse,
   GetMonthlySalesBackupQueryParams,
@@ -37,6 +38,9 @@ import {
   UpdateSalesRefundParams,
   UpdateSalesRefundResponse,
   UpsertSalesGoalBody,
+  UpsertActiveContractsMonthBody,
+  UpsertActiveContractsMonthParams,
+  UpsertActiveContractsMonthResponse,
   VoidSalesRefundBody,
   VoidSalesRefundParams,
   VoidSalesRefundResponse,
@@ -916,6 +920,50 @@ async function getGoals(env: WorkerEnv): Promise<Response> {
       })),
     ),
   );
+}
+
+function activeContractsOut(row: Row) {
+  return {
+    month: String(row.month),
+    activeCount: Number(row.active_count),
+    targetCount: row.target_count == null ? null : Number(row.target_count),
+    notes: row.notes == null ? null : String(row.notes),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+async function getActiveContracts(env: WorkerEnv): Promise<Response> {
+  const rows = await asRows(
+    env.DB.prepare("SELECT * FROM active_contracts_monthly ORDER BY month"),
+  );
+  return json(GetActiveContractsResponse.parse(rows.map(activeContractsOut)));
+}
+
+async function upsertActiveContractsMonth(
+  request: Request,
+  env: WorkerEnv,
+  rawMonth: string,
+): Promise<Response> {
+  const { month } = bodyParse(UpsertActiveContractsMonthParams, { month: rawMonth });
+  const input = bodyParse(UpsertActiveContractsMonthBody, await readJson(request));
+  const now = nowIso();
+  await env.DB.prepare(
+    `INSERT INTO active_contracts_monthly
+       (month, active_count, target_count, notes, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(month) DO UPDATE SET
+       active_count=excluded.active_count,
+       target_count=excluded.target_count,
+       notes=excluded.notes,
+       updated_at=excluded.updated_at`,
+  ).bind(month, input.activeCount, input.targetCount, input.notes, now, now).run();
+
+  const row = await env.DB.prepare(
+    "SELECT * FROM active_contracts_monthly WHERE month=?",
+  ).bind(month).first<Row>();
+  if (!row) throw new Error("O saldo mensal de contratos ativos não foi salvo.");
+  return json(UpsertActiveContractsMonthResponse.parse(activeContractsOut(row)));
 }
 
 async function salesImportOrigins(env: WorkerEnv, fileHash: string) {
@@ -2706,6 +2754,13 @@ export async function handleSalesRequest(
   path: string,
 ): Promise<Response | null> {
   try {
+    if (path === "/sales/active-contracts" && request.method === "GET") {
+      return await getActiveContracts(env);
+    }
+    const activeContractsMonth = /^\/sales\/active-contracts\/([^/]+)$/.exec(path)?.[1];
+    if (activeContractsMonth && request.method === "PUT") {
+      return await upsertActiveContractsMonth(request, env, activeContractsMonth);
+    }
     if (path === "/sales/pending" && request.method === "GET") {
       return await listSalesPendingDrafts(env);
     }

@@ -39,6 +39,7 @@ const recordSchema = z.object({
   reportedPercentage: z.number().finite().min(0).nullable(),
   presences: z.number().int().min(0).nullable(),
   capacity: z.number().int().min(1).nullable(),
+  aggregatorPresences: z.number().int().min(0).nullable().optional(),
   startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullable(),
   endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullable(),
   className: z.string().nullable(),
@@ -108,6 +109,10 @@ const backupSchema = z.object({
     if ((record.presences === null && record.startTime !== null)
       || (record.kind === 'monthly' && (record.presences !== null || record.capacity !== null || record.startTime !== null || record.endTime !== null))) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['records', index, 'record'], message: 'O tipo de registro não permite os horários ou contagens informados.' });
+    }
+    if (record.aggregatorPresences != null
+      && (record.presences === null || record.aggregatorPresences > record.presences)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['records', index, 'record', 'aggregatorPresences'], message: 'Agregadores deve estar dentro do total de presenças.' });
     }
     if (record.presences !== null && record.capacity !== null
       && Math.abs(record.percentage - record.presences / record.capacity * 100) > 0.00001) {

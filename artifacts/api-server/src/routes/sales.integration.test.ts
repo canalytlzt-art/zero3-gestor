@@ -89,6 +89,15 @@ before(async () => {
       updated_at timestamptz NOT NULL DEFAULT now(),
       UNIQUE (month, scope_key)
     );
+    CREATE TABLE active_contracts_monthly (
+      month text PRIMARY KEY
+        CHECK (month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$' AND left(month, 4) <> '0000'),
+      active_count integer NOT NULL CHECK (active_count >= 0),
+      target_count integer CHECK (target_count IS NULL OR target_count >= 0),
+      notes text CHECK (notes IS NULL OR length(notes) <= 1000),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
     CREATE TABLE sales_history (
       id uuid PRIMARY KEY,
       entity_type text NOT NULL,
@@ -291,6 +300,58 @@ async function recordSale(
   createdProductIds.push(sale.productId);
   return sale.id;
 }
+
+test("monthly active-contract balances are admin-only and update without replacing other months", async () => {
+  await withSalesApi(getTestDatabase(), async (baseUrl) => {
+    const anonymousRead = await apiRequest(baseUrl, "/sales/active-contracts", { auth: "anonymous" });
+    assert.equal(anonymousRead.status, 401);
+    const unauthorizedWrite = await apiRequest(baseUrl, "/sales/active-contracts/2094-04", {
+      method: "PUT",
+      auth: "unauthorized",
+      body: { activeCount: 1, targetCount: null, notes: null },
+    });
+    assert.equal(unauthorizedWrite.status, 403);
+
+    const firstMonth = await apiRequest(baseUrl, "/sales/active-contracts/2094-04", {
+      method: "PUT",
+      body: { activeCount: 137, targetCount: 160, notes: "Fechamento abril" },
+    });
+    assert.equal(firstMonth.status, 200);
+    const first = await firstMonth.json() as {
+      month: string;
+      activeCount: number;
+      targetCount: number | null;
+      notes: string | null;
+      createdAt: string;
+      updatedAt: string;
+    };
+    assert.equal(first.activeCount, 137);
+
+    const secondMonth = await apiRequest(baseUrl, "/sales/active-contracts/2094-05", {
+      method: "PUT",
+      body: { activeCount: 143, targetCount: 160, notes: null },
+    });
+    assert.equal(secondMonth.status, 200);
+    const second = await secondMonth.json() as typeof first;
+
+    const correction = await apiRequest(baseUrl, "/sales/active-contracts/2094-04", {
+      method: "PUT",
+      body: { activeCount: 139, targetCount: 165, notes: "Saldo corrigido" },
+    });
+    assert.equal(correction.status, 200);
+    const corrected = await correction.json() as typeof first;
+    assert.equal(corrected.createdAt, first.createdAt);
+    assert.equal(corrected.activeCount, 139);
+
+    const historyResponse = await apiRequest(baseUrl, "/sales/active-contracts");
+    assert.equal(historyResponse.status, 200);
+    const history = await historyResponse.json() as typeof first[];
+    assert.deepEqual(history.filter(({ month }) => ["2094-04", "2094-05"].includes(month)), [
+      corrected,
+      second,
+    ]);
+  });
+});
 
 test("Scoreboard modality filters preserve gross sales, refunds, net revenue, and unclassified products", async () => {
   await withSalesApi(getTestDatabase(), async (baseUrl) => {

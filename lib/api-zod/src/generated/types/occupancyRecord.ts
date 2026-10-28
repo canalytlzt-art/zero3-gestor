@@ -35,6 +35,13 @@ export interface OccupancyRecord {
      */
   capacity: number | null;
   /**
+     * Presenças de alunos agregadores incluídas no total; null significa não informado.
+     * @minimum 0
+     * @maximum 2147483647
+     * @nullable
+     */
+  aggregatorPresences?: number | null;
+  /**
      * @nullable
      * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
      */

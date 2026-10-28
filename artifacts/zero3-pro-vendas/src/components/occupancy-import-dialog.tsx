@@ -337,12 +337,13 @@ export default function OccupancyImportDialog({ open, onOpenChange, onImported }
                           <span className="rounded bg-[#f3f0f5] px-1.5 py-0.5">{local.kind === "daily" ? "Diário" : local.kind === "monthly" ? "Mensal" : "Tipo —"}</span>
                           {(local.startTime || local.endTime) && <span className="tabular-nums">{local.startTime || "—"}{local.endTime ? `–${local.endTime}` : ""}</span>}
                           {(local.presences !== null || local.capacity !== null) && <span className="tabular-nums">{local.presences ?? "—"}/{local.capacity ?? "—"}</span>}
+                          {local.aggregatorPresences !== null && <span className="tabular-nums">Agregadores: {local.aggregatorPresences}</span>}
                           <span className="tabular-nums">Calc.: {pct(local.percentage)}</span>
                           {local.reportedPercentage !== null && <span className="tabular-nums">Planilha: {pct(local.reportedPercentage)}</span>}
                         </div>
                         <div className="min-w-0"><span className={`inline-flex rounded-full px-2 py-1 text-[9px] font-extrabold ${badgeClass(shownStatus)}`}>{statusLabel(shownStatus)}</span>
                           <p className="mt-1 text-[10px] leading-4 text-[#817b89]">{rowMessage}</p>
-                          {remote?.status === "conflict" && remote.existingRecord && <p className="mt-1 text-[10px] text-[#746b7c]">Atual: {remote.existingRecord.modalityName} · {formatPeriod(remote.existingRecord.period)}{remote.existingRecord.kind === "daily" && getWeekdayName(remote.existingRecord.period) ? ` · ${getWeekdayName(remote.existingRecord.period)}` : ""} · {remote.existingRecord.startTime || "sem horário"} · {remote.existingRecord.presences ?? "—"}/{remote.existingRecord.capacity ?? "—"} · {pct(remote.existingRecord.percentage)}</p>}
+                          {remote?.status === "conflict" && remote.existingRecord && <p className="mt-1 text-[10px] text-[#746b7c]">Atual: {remote.existingRecord.modalityName} · {formatPeriod(remote.existingRecord.period)}{remote.existingRecord.kind === "daily" && getWeekdayName(remote.existingRecord.period) ? ` · ${getWeekdayName(remote.existingRecord.period)}` : ""} · {remote.existingRecord.startTime || "sem horário"} · {remote.existingRecord.presences ?? "—"}/{remote.existingRecord.capacity ?? "—"} · Agregadores: {remote.existingRecord.aggregatorPresences ?? "Não informado"} · {pct(remote.existingRecord.percentage)}</p>}
                         </div>
                         <div className="space-y-2">
                           {remote?.status === "conflict" && local.status === "ready" && <label className="inline-flex items-center gap-2 text-[10px] font-bold text-[#8e3d33]"><input type="checkbox" checked={conflictUpdate} onChange={(e) => toggleConflict(local.index, e.target.checked)} className="accent-[#a24f45]"/> Atualizar registro existente</label>}
@@ -402,6 +403,7 @@ function toPreviewInput(
     ...(entry.reportedPercentage !== null ? { reportedPercentage: entry.reportedPercentage } : {}),
     ...(entry.presences !== null ? { presences: entry.presences } : {}),
     ...(entry.capacity !== null ? { capacity: entry.capacity } : {}),
+    aggregatorPresences: entry.aggregatorPresences,
     ...(hasValidMeasurements && entry.startTime ? { startTime: entry.startTime } : {}),
     ...(hasValidMeasurements && entry.endTime ? { endTime: entry.endTime } : {}),
     ...(entry.className ? { className: entry.className } : {}),

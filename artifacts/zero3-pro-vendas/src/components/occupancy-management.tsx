@@ -109,6 +109,7 @@ const emptyForm = (kind: Kind = 'daily') => ({
   endTime: '',
   presences: '',
   capacity: '',
+  aggregatorPresences: '',
   className: '',
   notes: '',
 });
@@ -195,8 +196,14 @@ export default function OccupancyManagement() {
   const pct = parsePercentage(form.percentage);
   const presenceCount = parseCount(form.presences, 'as presenças', 0);
   const capacityCount = parseCount(form.capacity, 'a capacidade total', 1);
+  const aggregatorCount = form.aggregatorPresences.trim()
+    ? parseCount(form.aggregatorPresences, 'os agregadores', 0)
+    : { value: null, error: null };
   const calculatedPercentage = presenceCount.value !== null && capacityCount.value !== null
     ? Number(((presenceCount.value / capacityCount.value) * 100).toFixed(6))
+    : null;
+  const aggregatorShare = aggregatorCount.value !== null && presenceCount.value !== null
+    ? (presenceCount.value === 0 ? 0 : Number((aggregatorCount.value / presenceCount.value * 100).toFixed(6)))
     : null;
   const periodValue = form.kind === 'daily' ? form.day : form.month;
   const validation = {
@@ -207,6 +214,12 @@ export default function OccupancyManagement() {
     endTime: !legacyEdit && form.endTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(form.endTime) ? 'Informe um horário final válido.' : null,
     presences: legacyEdit ? null : presenceCount.error,
     capacity: legacyEdit ? null : capacityCount.error,
+    aggregatorPresences: legacyEdit ? null : aggregatorCount.error
+      ?? (aggregatorCount.value !== null && presenceCount.value !== null && aggregatorCount.value > presenceCount.value
+        ? 'Agregadores não pode ultrapassar o total de presenças.'
+        : aggregatorCount.value !== null && presenceCount.value === null
+          ? 'Informe as presenças para validar os agregadores.'
+          : null),
     className: form.className.trim().length > 120 ? 'Máximo de 120 caracteres.' : null,
     notes: form.notes.length > 1000 ? 'Máximo de 1000 caracteres.' : null,
   };
@@ -242,6 +255,7 @@ export default function OccupancyManagement() {
       endTime: record.endTime ?? '',
       presences: record.presences === null ? '' : String(record.presences),
       capacity: record.capacity === null ? '' : String(record.capacity),
+      aggregatorPresences: record.aggregatorPresences == null ? '' : String(record.aggregatorPresences),
       className: record.className ?? '',
       notes: record.notes ?? '',
     });
@@ -278,6 +292,7 @@ export default function OccupancyManagement() {
           modalityName: match ? match.name : typed,
           presences: presenceCount.value!,
           capacity: capacityCount.value!,
+          aggregatorPresences: aggregatorCount.value,
           startTime: form.startTime,
           endTime: form.endTime || null,
           ...(editing?.reportedPercentage !== null && editing?.reportedPercentage !== undefined
@@ -404,6 +419,18 @@ export default function OccupancyManagement() {
                 <input type="number" inputMode="numeric" min="1" max="2147483647" step="1" value={form.capacity} onChange={(e) => setField('capacity', e.target.value)} placeholder="ex.: 18" className={`${fieldClass} tabular-nums`} data-testid="input-occupancy-capacity" aria-invalid={!!showErr(validation.capacity)} />
                 {showErr(validation.capacity) && <span className="mt-1 block text-[10px] normal-case tracking-normal text-[#a24f45]">{validation.capacity}</span>}
               </label>
+              <label className={labelClass}>Agregadores <span className="font-medium normal-case tracking-normal text-[#a39dab]">(opcional; dentro das presenças)</span>
+                <input type="number" inputMode="numeric" min="0" max={presenceCount.value ?? 2147483647} step="1" value={form.aggregatorPresences} onChange={(e) => setField('aggregatorPresences', e.target.value)} placeholder="Não informado" className={`${fieldClass} tabular-nums`} data-testid="input-occupancy-aggregator-presences" aria-invalid={!!showErr(validation.aggregatorPresences)} />
+                {showErr(validation.aggregatorPresences) && <span className="mt-1 block text-[10px] normal-case tracking-normal text-[#a24f45]">{validation.aggregatorPresences}</span>}
+              </label>
+              <div className="rounded-xl bg-[#f3eff8] px-3.5 py-3" aria-live="polite" data-testid="text-occupancy-aggregator-calculated">
+                <span className="text-[10px] font-bold uppercase tracking-[.08em] text-[#817b89]">Check-in de agregadores</span>
+                <p className="mt-1 text-xs font-semibold text-[#5d4a78]">
+                  {aggregatorCount.value === null || presenceCount.value === null
+                    ? 'Não informado'
+                    : `Demais alunos: ${presenceCount.value - aggregatorCount.value} · Agregadores: ${formatCalculatedPct(aggregatorShare ?? 0)}`}
+                </p>
+              </div>
               <div className="rounded-xl bg-[#f3eff8] px-3.5 py-3 sm:col-span-2" aria-live="polite" data-testid="text-occupancy-calculated">
                 <span className="text-[10px] font-bold uppercase tracking-[.08em] text-[#817b89]">Ocupação calculada</span>
                 <span className="ml-2 text-sm font-extrabold tabular-nums text-[#5d4a78]">{calculatedPercentage === null ? 'Informe presenças e vagas' : formatCalculatedPct(calculatedPercentage)}</span>
@@ -580,10 +607,11 @@ export default function OccupancyManagement() {
             </div>
           </div>
 
-          {records.length > 0 && <div className="grid gap-2 border-b border-[#f0edf1] bg-[#fbfafb] p-3 sm:grid-cols-3" data-testid="summary-occupancy-selection">
+          {records.length > 0 && <div className="grid gap-2 border-b border-[#f0edf1] bg-[#fbfafb] p-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="summary-occupancy-selection">
             <div className="rounded-xl bg-white px-3 py-2.5"><p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Aulas com presenças e vagas</p><p className="mt-1 text-sm font-extrabold tabular-nums text-[#443d50]" data-testid="text-occupancy-measured-count">{measuredRecords.toLocaleString('pt-BR')}</p></div>
             <div className="rounded-xl bg-white px-3 py-2.5"><p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Presenças / vagas</p><p className="mt-1 text-sm font-extrabold tabular-nums text-[#443d50]" data-testid="text-occupancy-presence-capacity">{totalPresences?.toLocaleString('pt-BR') ?? '—'} / {totalCapacity?.toLocaleString('pt-BR') ?? '—'}</p></div>
             <div className="rounded-xl bg-white px-3 py-2.5"><p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Ocupação ponderada</p><p className="mt-1 text-sm font-extrabold tabular-nums text-[#5d4a78]" data-testid="text-occupancy-weighted-rate">{weightedOccupancy === null ? 'Sem capacidade registrada' : formatCalculatedPct(weightedOccupancy)}</p></div>
+            <div className="rounded-xl bg-white px-3 py-2.5"><p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]">Presenças agregadoras</p><p className="mt-1 text-sm font-extrabold tabular-nums text-[#5d4a78]" data-testid="text-occupancy-aggregator-total">{summaryAnalytics.totals.aggregatorPresences?.toLocaleString('pt-BR') ?? 'Não informado'}</p><p className="mt-0.5 text-[9px] text-[#817b89]">Informado em {summaryAnalytics.totals.aggregatorInformedClassCount} de {summaryAnalytics.totals.measuredClassCount} aulas</p></div>
             {legacyRecords > 0 && <p className="text-[10px] font-medium text-[#817b89] sm:col-span-3" data-testid="text-occupancy-legacy-count">{legacyRecords} registro(s) legado(s) sem presenças/vagas ficam fora do cálculo ponderado.</p>}
             {filterKind === 'all' && filterState.viewMode !== 'daily' && <p className="text-[10px] font-medium text-[#817b89] sm:col-span-3" data-testid="text-occupancy-summary-precedence">No modo mensal ou trimestral, o resumo mensal substitui os detalhes diários da mesma turma e mês para evitar duplicidade.</p>}
           </div>}
@@ -619,6 +647,12 @@ export default function OccupancyManagement() {
                     {r.presences !== null && r.capacity !== null && <p className="mt-0.5 text-[10px] font-medium tabular-nums text-[#817b89]" data-testid={`text-occupancy-measurements-${r.id}`}>
                       {r.startTime}{r.endTime ? `–${r.endTime}` : ''} · {r.presences}/{r.capacity} presenças/vagas
                     </p>}
+                    <p className="mt-0.5 text-[10px] font-medium text-[#817b89]" data-testid={`text-occupancy-aggregators-${r.id}`}>
+                      Agregadores: {r.aggregatorPresences == null ? 'Não informado' : r.aggregatorPresences.toLocaleString('pt-BR')}
+                      {r.aggregatorPresences != null && r.presences !== null && r.presences > 0
+                        ? ` (${formatCalculatedPct(r.aggregatorPresences / r.presences * 100)}); demais alunos: ${(r.presences - r.aggregatorPresences).toLocaleString('pt-BR')}`
+                        : ''}
+                    </p>
                     {r.notes && <p className="truncate text-[11px] text-[#8a8491]" title={r.notes}>{r.notes}</p>}
                   </div>
                   <div className="col-span-2 flex justify-end gap-1 sm:order-4 sm:col-span-1">

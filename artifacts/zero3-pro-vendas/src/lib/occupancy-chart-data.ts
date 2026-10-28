@@ -77,6 +77,19 @@ export type OccupancyChartTotals = {
   capacity: number | null;
   percentage: number | null;
   legacyRecordCount: number;
+  aggregatorPresences: number | null;
+  aggregatorInformedClassCount: number;
+  aggregatorSharePercentage: number | null;
+  otherPresences: number | null;
+};
+
+export type OccupancyAggregatorMonth = {
+  month: string;
+  totalPresences: number;
+  aggregatorPresences: number | null;
+  aggregatorInformedClassCount: number;
+  measuredClassCount: number;
+  sharePercentage: number | null;
 };
 
 export type OccupancyChartAnalytics = {
@@ -85,13 +98,14 @@ export type OccupancyChartAnalytics = {
   comparison: OccupancyModalityComparison[];
   donut: OccupancyDonutData;
   totals: OccupancyChartTotals;
+  aggregatorsByMonth: OccupancyAggregatorMonth[];
   byHour: OccupancyChartGroup[];
   byWeekday: OccupancyChartGroup[];
 };
 
 type ChartRecord = Pick<
   OccupancyRecord,
-  'id' | 'kind' | 'period' | 'month' | 'modalityId' | 'modalityName' | 'percentage' | 'className' | 'presences' | 'capacity' | 'startTime'
+  'id' | 'kind' | 'period' | 'month' | 'modalityId' | 'modalityName' | 'percentage' | 'className' | 'presences' | 'capacity' | 'aggregatorPresences' | 'startTime'
 >;
 
 function average(values: number[]) {
@@ -577,6 +591,36 @@ export function buildOccupancyChartAnalytics(
   const measuredRows = supportRows.filter((row) => row.source === 'weighted' && row.presences !== null && row.capacity !== null);
   const totalPresences = measuredRows.reduce((total, row) => total + (row.presences ?? 0), 0);
   const totalCapacity = measuredRows.reduce((total, row) => total + (row.capacity ?? 0), 0);
+  const selectedMeasured = selectedRecords.filter((record) => record.presences !== null && record.capacity !== null);
+  const aggregatorInformed = selectedMeasured.filter((record) => record.aggregatorPresences != null);
+  const aggregatorTotal = aggregatorInformed.reduce((total, record) => total + (record.aggregatorPresences ?? 0), 0);
+  const completeAggregatorCoverage = selectedMeasured.length > 0 && aggregatorInformed.length === selectedMeasured.length;
+  const aggregatorsByMonthMap = new Map<string, ChartRecord[]>();
+  for (const record of selectedMeasured) {
+    const group = aggregatorsByMonthMap.get(record.month) ?? [];
+    group.push(record);
+    aggregatorsByMonthMap.set(record.month, group);
+  }
+  const aggregatorsByMonth: OccupancyAggregatorMonth[] = [...aggregatorsByMonthMap.entries()]
+    .sort(([monthA], [monthB]) => monthA.localeCompare(monthB))
+    .map(([month, monthRecords]) => {
+      const informed = monthRecords.filter((record) => record.aggregatorPresences != null);
+      const totalPresencesForMonth = monthRecords.reduce((sum, record) => sum + (record.presences ?? 0), 0);
+      const aggregatorPresences = informed.length
+        ? informed.reduce((sum, record) => sum + (record.aggregatorPresences ?? 0), 0)
+        : null;
+      const complete = informed.length > 0 && informed.length === monthRecords.length;
+      return {
+        month,
+        totalPresences: totalPresencesForMonth,
+        aggregatorPresences,
+        aggregatorInformedClassCount: informed.length,
+        measuredClassCount: monthRecords.length,
+        sharePercentage: complete
+          ? totalPresencesForMonth > 0 ? (aggregatorPresences ?? 0) / totalPresencesForMonth * 100 : 0
+          : null,
+      };
+    });
   const totals: OccupancyChartTotals = {
     classes: classCount,
     measuredClassCount,
@@ -584,6 +628,12 @@ export function buildOccupancyChartAnalytics(
     capacity: measuredRows.length ? totalCapacity : null,
     percentage: measuredRows.length && totalCapacity > 0 ? (totalPresences / totalCapacity) * 100 : null,
     legacyRecordCount: selectedRecords.filter((record) => !isMeasured(record)).length,
+    aggregatorPresences: aggregatorInformed.length ? aggregatorTotal : null,
+    aggregatorInformedClassCount: aggregatorInformed.length,
+    aggregatorSharePercentage: completeAggregatorCoverage
+      ? totalPresences > 0 ? aggregatorTotal / totalPresences * 100 : 0
+      : null,
+    otherPresences: completeAggregatorCoverage ? totalPresences - aggregatorTotal : null,
   };
 
   const dailyRecords = relevant.filter((record) => record.kind === 'daily');
@@ -611,5 +661,5 @@ export function buildOccupancyChartAnalytics(
     .map(([weekday, groupedRecords]) => summarizeRecords(groupedRecords, String(weekday), getWeekdayName(groupedRecords[0]?.period ?? '', 'short') ?? String(weekday)))
     .filter((group): group is OccupancyChartGroup => group !== null);
 
-  return { supportRows, evolution, comparison, donut, totals, byHour, byWeekday };
+  return { supportRows, evolution, comparison, donut, totals, aggregatorsByMonth, byHour, byWeekday };
 }

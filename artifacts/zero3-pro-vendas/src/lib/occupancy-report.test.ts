@@ -44,10 +44,10 @@ const july: OccupancyBackupSelection = { mode: 'months', months: ['2026-07'] };
 
 test('uses weighted occupancy, retains zero and above-capacity values, and separates legacy rows', () => {
   const rows = [
-    record('one-of-two', { period: '2026-07-01', percentage: 50, presences: 1, capacity: 2 }),
-    record('nine-of-ten', { period: '2026-07-02', percentage: 90, presences: 9, capacity: 10 }),
-    record('zero', { period: '2026-07-03', percentage: 0, presences: 0, capacity: 18, startTime: '07:00' }),
-    record('over', { period: '2026-07-04', percentage: 105.555556, presences: 19, capacity: 18, startTime: '07:00' }),
+    record('one-of-two', { period: '2026-07-01', percentage: 50, presences: 1, capacity: 2, aggregatorPresences: 1 }),
+    record('nine-of-ten', { period: '2026-07-02', percentage: 90, presences: 9, capacity: 10, aggregatorPresences: 3 }),
+    record('zero', { period: '2026-07-03', percentage: 0, presences: 0, capacity: 18, startTime: '07:00', aggregatorPresences: 0 }),
+    record('over', { period: '2026-07-04', percentage: 105.555556, presences: 19, capacity: 18, startTime: '07:00', aggregatorPresences: 5 }),
     record('legacy', {
       kind: 'monthly', period: '2026-07', percentage: 76.5, reportedPercentage: 76.5,
       presences: null, capacity: null, startTime: null, endTime: null,
@@ -80,6 +80,9 @@ test('uses weighted occupancy, retains zero and above-capacity values, and separ
   assert.equal(detailRows.find((item) => item['Data'] === '2026-07-03')?.['Presenças/Vagas'], '0/18');
   assert.equal(detailRows.find((item) => item['Data'] === '2026-07-03')?.['Dia da semana'], 'sexta-feira');
   assert.equal(detailRows.find((item) => item['Data'] === '2026-07-03')?.['Ocupação (%)'], 0);
+  assert.equal(detailRows.find((item) => item['Data'] === '2026-07-03')?.['Agregadores'], 0);
+  assert.equal(detailRows.find((item) => item['Data'] === '2026-07-03')?.['Demais alunos'], 0);
+  assert.equal(detailRows.find((item) => item['Data'] === '2026-07-03')?.['Participação agregadores (%)'], 0);
   assert.equal(detailRows.find((item) => item['Data'] === '2026-07-04')?.['Presenças/Vagas'], '19/18');
   assert.equal(detailRows.find((item) => item['Data'] === '2026-07-04')?.['Ocupação (%)'], 105.555556);
   assert.equal(detailRows.find((item) => item['Tipo do registro'] === 'Mensal')?.['Presenças/Vagas'], '');
@@ -87,6 +90,8 @@ test('uses weighted occupancy, retains zero and above-capacity values, and separ
   assert.equal(detailRows.find((item) => item['Tipo do registro'] === 'Mensal')?.['Percentual original (%)'], 76.5);
   const summaryRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['Resumo modalidade-mês']!);
   assert.equal(summaryRows[0]?.['Presenças somadas'], 29);
+  assert.equal(summaryRows[0]?.['Agregadores informados (presenças)'], 9);
+  assert.equal(summaryRows[0]?.['Cobertura agregadores (aulas)'], '4/4');
   assert.equal(summaryRows[0]?.['Vagas somadas'], 48);
   assert.equal(summaryRows[0]?.['Ocupação calculada (%)'], 29 / 48 * 100);
 });

@@ -42,6 +42,54 @@ export interface OccupancyModalityDeletion {
   unlinkedProducts: number;
 }
 
+export interface OccupancyMonthlyGoal {
+  /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
+  month: string;
+  /** @nullable */
+  modalityId: string | null;
+  /** @nullable */
+  modalityName: string | null;
+  /**
+     * @minimum 0
+     * @maximum 2147483647
+     * @nullable
+     */
+  aggregatorTargetPresences: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  occupancyTargetPercentage: number | null;
+  /**
+     * @maxLength 1000
+     * @nullable
+     */
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OccupancyMonthlyGoalInput {
+  /** @nullable */
+  modalityId: string | null;
+  /**
+     * @minimum 0
+     * @maximum 2147483647
+     * @nullable
+     */
+  aggregatorTargetPresences: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  occupancyTargetPercentage: number | null;
+  /**
+     * @maxLength 1000
+     * @nullable
+     */
+  notes: string | null;
+}
+
 export type OccupancyRecordKind = typeof OccupancyRecordKind[keyof typeof OccupancyRecordKind];
 
 
@@ -78,6 +126,13 @@ export interface OccupancyRecord {
      * @nullable
      */
   capacity: number | null;
+  /**
+     * Presenças de alunos agregadores incluídas no total; null significa não informado.
+     * @minimum 0
+     * @maximum 2147483647
+     * @nullable
+     */
+  aggregatorPresences?: number | null;
   /**
      * @nullable
      * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
@@ -143,6 +198,13 @@ export interface OccupancyRecordInput {
      * @maximum 2147483647
      */
   capacity?: number;
+  /**
+     * Presenças de agregadores; opcional para preservar registros sem informação.
+     * @minimum 0
+     * @maximum 2147483647
+     * @nullable
+     */
+  aggregatorPresences?: number | null;
   /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$ */
   startTime?: string;
   /**
@@ -613,6 +675,48 @@ export interface SalesGoalInput {
      */
   targetCents: number;
   idempotencyKey: string;
+}
+
+export interface ActiveContractsMonth {
+  /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
+  month: string;
+  /**
+     * @minimum 0
+     * @maximum 2147483647
+     */
+  activeCount: number;
+  /**
+     * @minimum 0
+     * @maximum 2147483647
+     * @nullable
+     */
+  targetCount: number | null;
+  /**
+     * @maxLength 1000
+     * @nullable
+     */
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ActiveContractsMonthInput {
+  /**
+     * @minimum 0
+     * @maximum 2147483647
+     */
+  activeCount: number;
+  /**
+     * @minimum 0
+     * @maximum 2147483647
+     * @nullable
+     */
+  targetCount: number | null;
+  /**
+     * @maxLength 1000
+     * @nullable
+     */
+  notes: string | null;
 }
 
 export interface Product {
@@ -1458,6 +1562,17 @@ export interface AccessStatus {
  * Erro de validação (400), acesso (401/403), ausência (404) ou conflito de duplicidade/versão (409)
  */
 export type OccupancyFailureResponse = ApiError;
+
+export type GetOccupancyMonthlyGoalsParams = {
+/**
+ * @pattern ^\d{4}-(0[1-9]|1[0-2])$
+ */
+fromMonth?: string;
+/**
+ * @pattern ^\d{4}-(0[1-9]|1[0-2])$
+ */
+toMonth?: string;
+};
 
 export type GetOccupancyRecordsParams = {
 /**

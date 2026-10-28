@@ -115,6 +115,87 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
     await expect(response.json()).resolves.toMatchObject({
       code: "session_missing",
     });
+
+    const protectedContracts = await SELF.fetch(
+      new Request("https://zero3.test/api/sales/active-contracts", {
+        headers: { origin: "https://zero3.test" },
+      }),
+    );
+    expect(protectedContracts.status).toBe(401);
+  });
+
+  it("stores monthly active-contract balances independently and corrects one month at a time", async () => {
+    const year = String(2000 + Math.floor(Math.random() * 7000));
+    const firstMonth = `${year}-04`;
+    const secondMonth = `${year}-05`;
+    const saleDate = `${firstMonth}-12`;
+    await insertSale({
+      id: crypto.randomUUID(),
+      saleDate,
+      productName: "Plano sintético contratos ativos",
+      quantity: 7,
+      unitAmountCents: 2_000,
+      customerName: "Cliente sintético",
+    });
+
+    const first = await callSales(`/sales/active-contracts/${firstMonth}`, "PUT", {
+      activeCount: 137,
+      targetCount: 160,
+      notes: "Fechamento inicial",
+    });
+    expect(first.response.status).toBe(200);
+    expect(first.payload).toMatchObject({
+      month: firstMonth,
+      activeCount: 137,
+      targetCount: 160,
+      notes: "Fechamento inicial",
+    });
+
+    const second = await callSales(`/sales/active-contracts/${secondMonth}`, "PUT", {
+      activeCount: 143,
+      targetCount: 160,
+      notes: null,
+    });
+    expect(second.response.status).toBe(200);
+
+    const corrected = await callSales(`/sales/active-contracts/${firstMonth}`, "PUT", {
+      activeCount: 139,
+      targetCount: 165,
+      notes: "Saldo corrigido",
+    });
+    expect(corrected.response.status).toBe(200);
+    expect(corrected.payload).toMatchObject({
+      month: firstMonth,
+      activeCount: 139,
+      targetCount: 165,
+      notes: "Saldo corrigido",
+      createdAt: first.payload.createdAt,
+    });
+
+    const history = await callSales("/sales/active-contracts");
+    expect(history.response.status).toBe(200);
+    expect(history.payload.filter((record: { month: string }) => [firstMonth, secondMonth].includes(record.month))).toEqual([
+      corrected.payload,
+      second.payload,
+    ]);
+
+    const invalidCount = await callSales(`/sales/active-contracts/${firstMonth}`, "PUT", {
+      activeCount: 1.5,
+      targetCount: null,
+      notes: null,
+    });
+    expect(invalidCount.response.status).toBe(400);
+    const invalidMonth = await callSales("/sales/active-contracts/2099-13", "PUT", {
+      activeCount: 1,
+      targetCount: null,
+      notes: null,
+    });
+    expect(invalidMonth.response.status).toBe(400);
+
+    const monthlySales = await callSales(`/sales/scoreboard?months=${firstMonth}`);
+    expect(monthlySales.response.status).toBe(200);
+    expect(monthlySales.payload.totals.quantity).toBe(7);
+    expect(history.payload.find((record: { month: string }) => record.month === firstMonth).activeCount).toBe(139);
   });
 
   it("queries reconciled sales totals from the local D1 binding", async () => {
@@ -335,6 +416,17 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
     expect(modality.response.status).toBe(201);
     expect((await callOccupancy("/occupancy/modalities")).response.status).toBe(200);
 
+    const invalidAggregator = await callOccupancy("/occupancy", "POST", {
+      kind: "daily",
+      period: "2026-12-02",
+      modalityId: modality.payload.id,
+      modalityName,
+      presences: 3,
+      capacity: 4,
+      aggregatorPresences: 4,
+    });
+    expect(invalidAggregator.response.status).toBe(400);
+
     const occupancy = await callOccupancy("/occupancy", "POST", {
       kind: "daily",
       period: "2026-12-03",
@@ -342,6 +434,7 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
       modalityName,
       presences: 3,
       capacity: 4,
+      aggregatorPresences: 1,
       startTime: "06:00",
       endTime: "07:00",
       className: "Turma sintética",
@@ -351,6 +444,7 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
       modalityName,
       presences: 3,
       capacity: 4,
+      aggregatorPresences: 1,
       percentage: 75,
     });
     const occupancyRows = await callOccupancy(
@@ -359,6 +453,43 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
     expect(occupancyRows.response.status).toBe(200);
     expect(occupancyRows.payload.some((row: { id: string }) => row.id === occupancy.payload.id)).toBe(true);
 
+    const monthlyGoal = await callOccupancy("/occupancy/monthly-goals/2026-12", "PUT", {
+      modalityId: modality.payload.id,
+      aggregatorTargetPresences: 12,
+      occupancyTargetPercentage: 82.5,
+      notes: "Meta de teste",
+    });
+    expect(monthlyGoal.response.status).toBe(200);
+    expect(monthlyGoal.payload).toMatchObject({
+      month: "2026-12",
+      modalityId: modality.payload.id,
+      modalityName,
+      aggregatorTargetPresences: 12,
+      occupancyTargetPercentage: 82.5,
+      notes: "Meta de teste",
+    });
+    const updatedGoal = await callOccupancy("/occupancy/monthly-goals/2026-12", "PUT", {
+      modalityId: modality.payload.id,
+      aggregatorTargetPresences: 14,
+      occupancyTargetPercentage: 85,
+      notes: null,
+    });
+    expect(updatedGoal.response.status).toBe(200);
+    expect(updatedGoal.payload.aggregatorTargetPresences).toBe(14);
+    const globalGoal = await callOccupancy("/occupancy/monthly-goals/2026-12", "PUT", {
+      modalityId: null,
+      aggregatorTargetPresences: null,
+      occupancyTargetPercentage: 70,
+      notes: null,
+    });
+    expect(globalGoal.response.status).toBe(200);
+    const listedGoals = await callOccupancy("/occupancy/monthly-goals?fromMonth=2026-12&toMonth=2026-12");
+    expect(listedGoals.response.status).toBe(200);
+    expect(listedGoals.payload).toHaveLength(2);
+    expect((await callOccupancy("/occupancy/monthly-goals/2026-12", "PUT", {
+      modalityId: null, aggregatorTargetPresences: null, occupancyTargetPercentage: null, notes: null,
+    })).response.status).toBe(400);
+
     const updatedOccupancy = await callOccupancy(`/occupancy/${occupancy.payload.id}`, "PATCH", {
       kind: "daily",
       period: "2026-12-03",
@@ -366,6 +497,7 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
       modalityName,
       presences: 4,
       capacity: 5,
+      aggregatorPresences: 2,
       startTime: "06:30",
       endTime: "07:30",
       className: "Turma atualizada",
@@ -377,6 +509,7 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
       id: occupancy.payload.id,
       presences: 4,
       capacity: 5,
+      aggregatorPresences: 2,
       percentage: 80,
       startTime: "06:30",
       endTime: "07:30",
@@ -391,6 +524,7 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
       .toMatchObject({
         presences: 4,
         capacity: 5,
+        aggregatorPresences: 2,
         percentage: 80,
         startTime: "06:30",
         endTime: "07:30",
@@ -408,6 +542,10 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
       presences: 4,
       capacity: 5,
       percentage: 80,
+      aggregatorPresences: 2,
+      aggregatorInformedClassCount: 1,
+      aggregatorSharePercentage: 50,
+      otherPresences: 2,
     });
 
     const scoreboard = await callSales("/sales/scoreboard?months=2026-12");

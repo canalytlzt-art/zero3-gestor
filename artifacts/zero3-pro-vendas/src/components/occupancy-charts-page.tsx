@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
 import { CalendarDays, ChartNoAxesCombined, ChevronDown, CircleAlert, Clock3, RefreshCw, SlidersHorizontal, WalletCards } from 'lucide-react';
+import ActiveContractsDashboard from './active-contracts-dashboard';
+import CompleteManagementDashboard from './complete-management-dashboard';
 import {
   getGetProductsQueryKey,
   getGetSalesGoalsQueryKey,
@@ -135,7 +137,7 @@ type ShareBy = 'modality' | 'product';
 
 const financeColors = ['#7655a8', '#a9d75a', '#4d8d7b', '#d18b57', '#8b789b', '#6c9cb5', '#c16e78', '#b3a46b'];
 
-function FinancialCharts({ onOccupancy }: { onOccupancy: () => void }) {
+function FinancialCharts({ onOccupancy, onContracts, onComplete }: { onOccupancy: () => void; onContracts: () => void; onComplete: () => void }) {
   const currentMonth = getSaoPauloMonthKey();
   const [periodMode, setPeriodMode] = useState<FinancialPeriodMode>('current');
   const [singleMonth, setSingleMonth] = useState(currentMonth);
@@ -262,6 +264,8 @@ function FinancialCharts({ onOccupancy }: { onOccupancy: () => void }) {
         <div className="flex items-center gap-2 self-start rounded-full bg-[#f5f2f6] p-1 sm:self-auto" aria-label="Área de gráficos">
           <button type="button" onClick={onOccupancy} className="rounded-full px-4 py-2 text-xs font-semibold text-[#766d83] hover:bg-white" data-testid="switch-graficos-ocupacao">Ocupação</button>
           <span className="rounded-full bg-[#ece6f4] px-4 py-2 text-xs font-bold text-[#65479c]" aria-current="page" data-testid="switch-graficos-faturamento">Faturamento</span>
+          <button type="button" onClick={onContracts} className="rounded-full px-4 py-2 text-xs font-semibold text-[#766d83] hover:bg-white" data-testid="switch-graficos-contratos">Contratos ativos</button>
+          <button type="button" onClick={onComplete} className="rounded-full px-4 py-2 text-xs font-semibold text-[#766d83] hover:bg-white" data-testid="switch-graficos-completa">Completa</button>
         </div>
       </div>
 
@@ -368,7 +372,7 @@ function FinancialCharts({ onOccupancy }: { onOccupancy: () => void }) {
 }
 
 export default function OccupancyChartsPage() {
-  const [activeTab, setActiveTab] = useState<'occupancy' | 'financial'>('occupancy');
+  const [activeTab, setActiveTab] = useState<'occupancy' | 'financial' | 'contracts' | 'complete'>('occupancy');
   const filters = useOccupancyFilterState();
   const [monthToAdd, setMonthToAdd] = useState(currentOccupancyMonth());
   const viewMode = filters.viewMode;
@@ -462,7 +466,17 @@ export default function OccupancyChartsPage() {
   };
 
   if (activeTab === 'financial') {
-    return <FinancialCharts onOccupancy={() => setActiveTab('occupancy')} />;
+    return <FinancialCharts onOccupancy={() => setActiveTab('occupancy')} onContracts={() => setActiveTab('contracts')} onComplete={() => setActiveTab('complete')} />;
+  }
+  if (activeTab === 'contracts') {
+    return <ActiveContractsDashboard onOccupancy={() => setActiveTab('occupancy')} onFinancial={() => setActiveTab('financial')} onComplete={() => setActiveTab('complete')} />;
+  }
+  if (activeTab === 'complete') {
+    return <CompleteManagementDashboard
+      onOccupancy={() => setActiveTab('occupancy')}
+      onFinancial={() => setActiveTab('financial')}
+      onContracts={() => setActiveTab('contracts')}
+    />;
   }
 
   return (
@@ -478,6 +492,8 @@ export default function OccupancyChartsPage() {
           <button type="button" onClick={() => setActiveTab('financial')} className="flex items-center gap-2 rounded-full px-3 py-2 text-xs font-semibold text-[#716879] transition hover:bg-white hover:text-[#65479c]" aria-label="Abrir gráficos de faturamento" data-testid="switch-graficos-faturamento">
             Faturamento
           </button>
+          <button type="button" onClick={() => setActiveTab('contracts')} className="rounded-full px-3 py-2 text-xs font-semibold text-[#716879] transition hover:bg-white hover:text-[#65479c]" aria-label="Abrir contratos ativos" data-testid="switch-graficos-contratos">Contratos ativos</button>
+          <button type="button" onClick={() => setActiveTab('complete')} className="rounded-full px-3 py-2 text-xs font-semibold text-[#716879] transition hover:bg-white hover:text-[#65479c]" aria-label="Abrir painel completo" data-testid="switch-graficos-completa">Completa</button>
         </div>
       </div>
 
@@ -609,6 +625,56 @@ export default function OccupancyChartsPage() {
             <p className="mt-2 font-[family-name:var(--app-font-serif)] text-2xl font-extrabold tabular-nums tracking-[-.05em] text-[#65479c]">{formatPercent(analytics.totals.percentage)}</p>
             <p className="mt-1 text-[10px] text-[#837b8b]">{analytics.totals.percentage == null ? 'Sem base de presenças e vagas' : `${formatCount(analytics.totals.presences)} de ${formatCount(analytics.totals.capacity)} presenças/vagas`}</p>
           </article>
+        </section>
+        <section className="rounded-[22px] border border-[#e9e4eb] bg-[#fffefc] p-4 shadow-[0_14px_35px_-30px_rgba(55,40,72,.28)] sm:p-5" aria-label="Indicadores de agregadores e check-in" data-testid="panel-occupancy-aggregators">
+          <SectionHeading eyebrow="agregadores · check-in" title="Participação nas aulas" detail="Contagem de presenças em aulas, não de pessoas únicas." />
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <article className="rounded-2xl border border-[#e9e4eb] bg-[#fffefc] p-4" data-testid="metric-occupancy-aggregator-presences">
+              <p className="text-[9px] font-bold uppercase tracking-[.12em] text-[#8a8491]">Presenças agregadoras</p>
+              <p className="mt-2 text-2xl font-extrabold tabular-nums text-[#342d40]">{analytics.totals.aggregatorPresences === null ? 'Não informado' : formatCount(analytics.totals.aggregatorPresences)}</p>
+              <p className="mt-1 text-[10px] text-[#837b8b]">{formatCount(analytics.totals.aggregatorInformedClassCount)} de {formatCount(analytics.totals.measuredClassCount)} aulas com dado informado</p>
+            </article>
+            <article className="rounded-2xl border border-[#e9e4eb] bg-[#fffefc] p-4" data-testid="metric-occupancy-aggregator-total-presences">
+              <p className="text-[9px] font-bold uppercase tracking-[.12em] text-[#8a8491]">Total de presenças</p>
+              <p className="mt-2 text-2xl font-extrabold tabular-nums text-[#342d40]">{formatCount(analytics.totals.presences)}</p>
+              <p className="mt-1 text-[10px] text-[#837b8b]">Agregadores já estão incluídos neste total</p>
+            </article>
+            <article className="rounded-2xl border border-[#e9e4eb] bg-[#fffefc] p-4" data-testid="metric-occupancy-aggregator-share">
+              <p className="text-[9px] font-bold uppercase tracking-[.12em] text-[#8a8491]">Participação agregadores</p>
+              <p className="mt-2 text-2xl font-extrabold tabular-nums text-[#65479c]">{formatPercent(analytics.totals.aggregatorSharePercentage)}</p>
+              <p className="mt-1 text-[10px] text-[#837b8b]">{analytics.totals.aggregatorSharePercentage === null ? 'Cobertura incompleta ou sem presenças' : `${formatCount(analytics.totals.otherPresences)} demais presenças`}</p>
+            </article>
+            <article className="rounded-2xl border border-[#e9e4eb] bg-[#f8f5fb] p-4" data-testid="metric-occupancy-aggregator-goal">
+              <p className="text-[9px] font-bold uppercase tracking-[.12em] text-[#806aa0]">Meta mensal</p>
+              <p className="mt-2 text-2xl font-extrabold tabular-nums text-[#65479c]">Meta não definida</p>
+              <p className="mt-1 text-[10px] text-[#837b8b]">A comparação depende de uma meta cadastrada</p>
+            </article>
+          </div>
+          <div className="mt-5 rounded-2xl border border-[#eeeaf1] bg-[#fbfafc] p-4" data-testid="panel-occupancy-aggregator-monthly">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-xs font-extrabold text-[#443d50]">Comparativo mensal</h3>
+              <span className="text-[10px] text-[#837b8b]">Percentual só aparece quando todas as aulas medidas têm o dado.</span>
+            </div>
+            {analytics.aggregatorsByMonth.length ? (
+              <div className="space-y-3">
+                {analytics.aggregatorsByMonth.map((month) => {
+                  const maxAggregators = Math.max(1, ...analytics.aggregatorsByMonth.map((item) => item.aggregatorPresences ?? 0));
+                  const barWidth = month.aggregatorPresences === null ? 0 : month.aggregatorPresences / maxAggregators * 100;
+                  return <div key={month.month} className="grid gap-2 sm:grid-cols-[90px_1fr_auto] sm:items-center" data-testid={`row-occupancy-aggregator-month-${month.month}`}>
+                    <span className="text-[11px] font-bold text-[#5d4a78]">{formatMonthKey(month.month)}</span>
+                    <div className="h-2 overflow-hidden rounded-full bg-[#eee8f7]" role="img" aria-label={`${formatMonthKey(month.month)}: ${month.aggregatorPresences === null ? 'agregadores não informados' : `${formatCount(month.aggregatorPresences)} presenças agregadoras`}`}>
+                      <div className="h-full rounded-full bg-[#7656b8]" style={{ width: `${barWidth}%` }} />
+                    </div>
+                    <span className="text-[10px] tabular-nums text-[#716879]">
+                      {month.aggregatorPresences === null ? 'Não informado' : `${formatCount(month.aggregatorPresences)} agregadores`}
+                      {' · '}{formatCount(month.totalPresences)} presenças
+                      {' · '}{month.sharePercentage === null ? `cobertura ${month.aggregatorInformedClassCount}/${month.measuredClassCount}` : formatPercent(month.sharePercentage)}
+                    </span>
+                  </div>;
+                })}
+              </div>
+            ) : <p className="text-xs text-[#837b8b]">Nenhuma aula medida neste recorte.</p>}
+          </div>
         </section>
         {analytics.totals.legacyRecordCount > 0 && <p className="rounded-xl bg-[#f6f3f8] px-4 py-2.5 text-[10px] leading-4 text-[#716879]" role="status" data-testid="status-occupancy-legacy-count">{formatCount(analytics.totals.legacyRecordCount)} registro(s) legado(s) sem presenças/vagas permanecem fora do cálculo ponderado.</p>}
         <div className="grid gap-5 lg:grid-cols-[.9fr_1.1fr]">

@@ -8,7 +8,7 @@ import express from "express";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { pool, type db } from "@workspace/db";
 import * as schema from "@workspace/db/schema";
-import type { OccupancyRecord, OccupancyModality } from "@workspace/api-zod";
+import type { OccupancyMonthlyGoal, OccupancyRecord, OccupancyModality } from "@workspace/api-zod";
 import { createOccupancyRouter } from "./occupancy";
 
 const testSchema = `occupancy_test_${randomUUID().replaceAll("-", "")}`;
@@ -86,6 +86,65 @@ test("access and strict manual validation preserve zero, decimals and actual cal
   const raw = await testPool.query("SELECT kind,date,month FROM occupancy_records ORDER BY kind");
   assert.equal(raw.rowCount, 3);
   assert.equal(raw.rows.filter((r) => r.kind === "monthly" && r.date === null).length, 1);
+});
+
+test("monthly occupancy and aggregator goals are scoped, editable, and reject empty targets", async () => {
+  const modality = await call<OccupancyModality>("/occupancy/modalities", "POST", { name: `Meta ${randomUUID()}` });
+  assert.equal(modality.status, 201);
+  const month = "2026-10";
+  try {
+    const scoped = await call<OccupancyMonthlyGoal>(`/occupancy/monthly-goals/${month}`, "PUT", {
+      modalityId: modality.body.id,
+      aggregatorTargetPresences: 94,
+      occupancyTargetPercentage: 78.5,
+      notes: "Meta da modalidade",
+    });
+    assert.equal(scoped.status, 200);
+    assert.deepEqual(
+      {
+        month: scoped.body.month,
+        modalityId: scoped.body.modalityId,
+        modalityName: scoped.body.modalityName,
+        aggregatorTargetPresences: scoped.body.aggregatorTargetPresences,
+        occupancyTargetPercentage: scoped.body.occupancyTargetPercentage,
+        notes: scoped.body.notes,
+      },
+      {
+        month,
+        modalityId: modality.body.id,
+        modalityName: modality.body.name,
+        aggregatorTargetPresences: 94,
+        occupancyTargetPercentage: 78.5,
+        notes: "Meta da modalidade",
+      },
+    );
+    const global = await call<OccupancyMonthlyGoal>(`/occupancy/monthly-goals/${month}`, "PUT", {
+      modalityId: null,
+      aggregatorTargetPresences: 120,
+      occupancyTargetPercentage: null,
+      notes: null,
+    });
+    assert.equal(global.status, 200);
+    assert.equal(global.body.modalityId, null);
+    const listed = await call<OccupancyMonthlyGoal[]>(`/occupancy/monthly-goals?fromMonth=${month}&toMonth=${month}`);
+    assert.equal(listed.status, 200);
+    assert.equal(listed.body.length, 2);
+    assert.equal((await call(`/occupancy/monthly-goals/${month}`, "PUT", {
+      modalityId: null,
+      aggregatorTargetPresences: null,
+      occupancyTargetPercentage: null,
+      notes: null,
+    })).status, 400);
+    assert.equal((await call(`/occupancy/monthly-goals/${month}`, "PUT", {
+      modalityId: randomUUID(),
+      aggregatorTargetPresences: 1,
+      occupancyTargetPercentage: null,
+      notes: null,
+    })).status, 404);
+  } finally {
+    await testPool.query("DELETE FROM occupancy_monthly_goals WHERE month=$1", [month]);
+    await testPool.query("DELETE FROM occupancy_modalities WHERE id=$1", [modality.body.id]);
+  }
 });
 
 test("manual class entries calculate occupancy from counts, accept overcapacity and distinguish start times", async () => {

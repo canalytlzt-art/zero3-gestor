@@ -14,6 +14,7 @@ export const occupancyRecordsTable = pgTable("occupancy_records", {
   reportedPercentage: numeric("reported_percentage"),
   presences: integer("presences"),
   capacity: integer("capacity"),
+  aggregatorPresences: integer("aggregator_presences"),
   startTime: time("start_time"),
   endTime: time("end_time"),
   className: text("class_name"),
@@ -47,6 +48,7 @@ export const occupancyRecordsTable = pgTable("occupancy_records", {
     or (${t.kind} = 'daily' and ${t.date} is not null and ${t.presences} is not null and ${t.presences} >= 0
       and ${t.capacity} is not null and ${t.capacity} > 0 and ${t.startTime} is not null)
   ) and (${t.reportedPercentage} is null or (${t.presences} is not null and ${t.capacity} is not null))`),
+  check("occupancy_aggregator_presences_valid", sql`${t.aggregatorPresences} is null or (${t.aggregatorPresences} >= 0 and ${t.presences} is not null and ${t.aggregatorPresences} <= ${t.presences})`),
   check("occupancy_period_valid", sql`${t.month} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$' and left(${t.month}, 4) <> '0000' and ((${t.kind} = 'daily' and ${t.date} is not null and ${t.month} = to_char(${t.date}, 'YYYY-MM')) or (${t.kind} = 'monthly' and ${t.date} is null))`),
   check("occupancy_record_version_valid", sql`${t.version} > 0`),
   check("occupancy_record_text_valid", sql`coalesce(length(${t.className}), 0) <= 120 and coalesce(length(${t.notes}), 0) <= 1000`),

@@ -23,7 +23,8 @@ export function occupancyValues(input: OccupancyRecordInput) {
   if (!name) throw new OccupancyError(400, "Informe a modalidade.");
 
   const hasMeasurements = input.presences !== undefined || input.capacity !== undefined
-    || input.startTime !== undefined || input.endTime != null;
+    || input.startTime !== undefined || input.endTime != null
+    || (input.aggregatorPresences !== undefined && input.aggregatorPresences !== null);
   let percentage: number;
   let reportedPercentage: number | null = null;
   if (hasMeasurements) {
@@ -34,6 +35,11 @@ export function occupancyValues(input: OccupancyRecordInput) {
       || (input.endTime != null && !validClassTime(input.endTime))) {
       throw new OccupancyError(400, "Informe data, horário inicial válido, presenças inteiras iguais ou maiores que zero e capacidade inteira maior que zero.");
     }
+    if (input.aggregatorPresences !== undefined && input.aggregatorPresences !== null
+      && (!Number.isSafeInteger(input.aggregatorPresences) || input.aggregatorPresences < 0
+        || input.aggregatorPresences > input.presences!)) {
+      throw new OccupancyError(400, "Agregadores deve ser um número inteiro entre zero e o total de presenças.");
+    }
     percentage = Number(((input.presences / input.capacity) * 100).toFixed(6));
     const suppliedPercentage = input.reportedPercentage ?? input.percentage;
     if (suppliedPercentage !== undefined) {
@@ -43,6 +49,9 @@ export function occupancyValues(input: OccupancyRecordInput) {
       reportedPercentage = suppliedPercentage;
     }
   } else {
+    if (input.aggregatorPresences !== undefined && input.aggregatorPresences !== null) {
+      throw new OccupancyError(400, "Informe presenças e capacidade para cadastrar agregadores.");
+    }
     if (input.percentage === undefined || !Number.isFinite(input.percentage) || input.percentage < 0) {
       throw new OccupancyError(400, "Informe presenças e capacidade, ou um percentual válido para manter um registro legado.");
     }
@@ -57,6 +66,7 @@ export function occupancyValues(input: OccupancyRecordInput) {
     reportedPercentage: reportedPercentage === null ? null : String(reportedPercentage),
     presences: hasMeasurements ? input.presences! : null,
     capacity: hasMeasurements ? input.capacity! : null,
+    aggregatorPresences: hasMeasurements ? input.aggregatorPresences ?? null : null,
     startTime: hasMeasurements ? input.startTime! : null,
     endTime: hasMeasurements ? input.endTime ?? null : null,
     className,
@@ -94,6 +104,7 @@ export function serializeOccupancy(record: OccupancyRecordRow, modalityName: str
     percentage: Number(record.percentage),
     reportedPercentage: record.reportedPercentage === null ? null : Number(record.reportedPercentage),
     presences: record.presences, capacity: record.capacity,
+    aggregatorPresences: record.aggregatorPresences,
     startTime: record.startTime?.slice(0, 5) ?? null, endTime: record.endTime?.slice(0, 5) ?? null,
     className: record.className, notes: record.notes,
     sourceFileHash: record.sourceFileHash, sourceSheet: record.sourceSheet,
