@@ -479,13 +479,23 @@
 .dashboard-print-page-group { display: contents; }
 .dashboard-pdf-only,
 .dashboard-pdf-table,
-.dashboard-pdf-appendix { display: none; }
+.dashboard-pdf-appendix,
+.dashboard-pdf-goals { display: none; }
 
 @page {
   margin: 9mm;
 }
 
 @media print {
+  body[data-zero3-pdf-scope],
+  body[data-zero3-pdf-scope] *,
+  body[data-zero3-pdf-scope] *::before,
+  body[data-zero3-pdf-scope] *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+
   *,
   *::before,
   *::after {
@@ -523,11 +533,12 @@
   }
 
   body[data-zero3-pdf-scope] [data-pdf-hide-on-export] { display: none !important; }
-  body[data-zero3-pdf-scope]:not([data-zero3-pdf-scope="complete-full"]) [data-pdf-panel] { display: none !important; }
+  body[data-zero3-pdf-scope]:not([data-zero3-pdf-scope="complete-full"]) [data-pdf-panel] { display: none; }
   body[data-zero3-pdf-scope="complete-contracts"] [data-pdf-panel="complete-contracts"],
   body[data-zero3-pdf-scope="complete-aggregators"] [data-pdf-panel="complete-aggregators"],
   body[data-zero3-pdf-scope="complete-occupancy"] [data-pdf-panel="complete-occupancy"],
   body[data-zero3-pdf-scope="complete-revenue"] [data-pdf-panel="complete-revenue"],
+  body[data-zero3-pdf-scope="complete-goals"] [data-pdf-panel="complete-goals"],
   body[data-zero3-pdf-scope="financial-modality"] [data-pdf-panel="financial-modality"],
   body[data-zero3-pdf-scope="financial-product"] [data-pdf-panel="financial-product"],
   body[data-zero3-pdf-scope="financial-timeline"] [data-pdf-panel="financial-timeline"],
@@ -544,6 +555,21 @@
   }
   body[data-zero3-pdf-scope^="complete-"] .dashboard-print-page-group { display: none !important; }
   body[data-zero3-pdf-scope="complete-full"] .dashboard-print-page-group { display: grid !important; }
+  body[data-zero3-pdf-scope="complete-goals"] .dashboard-pdf-goals { display: block !important; }
+  body[data-zero3-pdf-scope="complete-goals"] .dashboard-pdf-goals-content { max-width: 270mm; margin: 5mm auto 0; }
+  body[data-zero3-pdf-scope="complete-goals"] .dashboard-pdf-goals-content h2 {
+    margin: 0 0 3mm;
+    color: #594275;
+    font-size: 13pt;
+    font-weight: 800;
+    break-after: avoid-page;
+    page-break-after: avoid;
+  }
+  body[data-zero3-pdf-scope="complete-goals"] .dashboard-pdf-table th,
+  body[data-zero3-pdf-scope="complete-goals"] .dashboard-pdf-table td {
+    padding: 1.5mm 2mm;
+    font-size: 8.5pt;
+  }
   body[data-zero3-pdf-scope^="complete-"] .dashboard-print-page-group > .dashboard-pdf-page-heading { display: none !important; }
   body[data-zero3-pdf-scope="complete-full"] .dashboard-print-page-group > .dashboard-pdf-page-heading { display: flex !important; }
   body[data-zero3-pdf-scope="complete-contracts"] .dashboard-print-page-group:nth-child(1),
@@ -570,7 +596,8 @@
   body[data-zero3-pdf-scope="complete-contracts"] [data-pdf-panel="complete-contracts"] > .dashboard-pdf-page-heading,
   body[data-zero3-pdf-scope="complete-aggregators"] [data-pdf-panel="complete-aggregators"] > .dashboard-pdf-page-heading,
   body[data-zero3-pdf-scope="complete-occupancy"] [data-pdf-panel="complete-occupancy"] > .dashboard-pdf-page-heading,
-  body[data-zero3-pdf-scope="complete-revenue"] [data-pdf-panel="complete-revenue"] > .dashboard-pdf-page-heading {
+  body[data-zero3-pdf-scope="complete-revenue"] [data-pdf-panel="complete-revenue"] > .dashboard-pdf-page-heading,
+  body[data-zero3-pdf-scope="complete-goals"] [data-pdf-panel="complete-goals"] > .dashboard-pdf-page-heading {
     display: flex !important;
   }
   body[data-zero3-pdf-scope] .dashboard-pdf-page-heading { display: flex !important; }
@@ -604,45 +631,62 @@
   }
 
   body[data-zero3-pdf-scope="complete-full"] [data-testid="grid-complete-management-charts"] {
-    display: grid !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    align-content: start;
-    gap: 3mm !important;
+    display: block !important;
   }
   body[data-zero3-pdf-scope="complete-full"] .dashboard-print-page-group {
-    display: contents !important;
-    break-before: auto !important;
-    page-break-before: auto !important;
-  }
-  body[data-zero3-pdf-scope="complete-full"] .dashboard-print-page-group:nth-child(2) > .dashboard-pdf-page-heading {
-    display: none !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    align-items: stretch;
+    gap: 4mm !important;
+    width: 100%;
+    break-inside: avoid-page;
+    page-break-inside: avoid;
   }
   body[data-zero3-pdf-scope="complete-full"] .dashboard-print-page-group + .dashboard-print-page-group {
-    break-before: auto !important;
-    page-break-before: auto !important;
+    break-before: page !important;
+    page-break-before: always !important;
+  }
+  body[data-zero3-pdf-scope="complete-full"] .dashboard-print-page-group > .dashboard-pdf-page-heading {
+    display: flex !important;
+  }
+  body[data-zero3-pdf-scope="complete-full"] .dashboard-print-page-group > [data-testid^="chart-complete-"] {
+    min-width: 0 !important;
+    height: 100%;
   }
   body[data-zero3-pdf-scope="complete-full"] [data-testid^="chart-complete-"] .dashboard-pdf-table {
     display: none !important;
   }
-  body[data-zero3-pdf-scope="complete-full"] .dashboard-pdf-appendix {
+  body[data-zero3-pdf-scope="complete-full"][data-zero3-pdf-details="true"] .dashboard-pdf-appendix {
     display: block !important;
     break-before: page !important;
     page-break-before: always !important;
   }
-  body[data-zero3-pdf-scope="complete-full"] .dashboard-pdf-appendix-tables {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 4mm;
+  body[data-zero3-pdf-scope="complete-full"][data-zero3-pdf-details="false"] .dashboard-pdf-appendix {
+    display: none !important;
   }
-  body[data-zero3-pdf-scope="complete-full"] .dashboard-pdf-appendix-card {
+  body[data-zero3-pdf-scope="complete-full"][data-zero3-pdf-details="true"] .dashboard-pdf-appendix-tables {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3mm;
+  }
+  body[data-zero3-pdf-scope="complete-full"][data-zero3-pdf-details="true"] .dashboard-pdf-appendix-card {
+    display: block;
+    margin: 0 0 3mm;
     break-inside: auto;
     page-break-inside: auto;
   }
-  body[data-zero3-pdf-scope="complete-full"] .dashboard-pdf-appendix-card h2 {
+  body[data-zero3-pdf-scope="complete-full"][data-zero3-pdf-details="true"] .dashboard-pdf-appendix-card h2 {
     margin: 0 0 1.5mm;
     color: #594275;
     font-size: 11pt;
     font-weight: 800;
+    break-after: avoid-page;
+    page-break-after: avoid;
+  }
+  body[data-zero3-pdf-scope="complete-full"][data-zero3-pdf-details="true"] .dashboard-pdf-appendix-card .dashboard-pdf-table {
+    margin-top: 0;
+    break-before: avoid-page;
+    page-break-before: avoid;
   }
   body[data-zero3-pdf-scope="complete-full"] .dashboard-pdf-full-hide {
     display: none !important;
@@ -723,20 +767,88 @@
   .dashboard-pdf-chart {
     height: 48mm !important;
     min-height: 48mm !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+  body[data-zero3-pdf-scope^="complete-"]:not([data-zero3-pdf-scope="complete-full"]) .dashboard-pdf-chart {
+    height: 160mm !important;
+    min-height: 160mm !important;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
   }
   body[data-zero3-pdf-scope="complete-full"] .dashboard-pdf-chart {
-    height: 29mm !important;
-    min-height: 29mm !important;
+    height: 135mm !important;
+    min-height: 135mm !important;
+  }
+  .dashboard-pdf-chart svg,
+  .dashboard-pdf-chart .recharts-wrapper,
+  .dashboard-pdf-chart .recharts-surface {
+    max-width: 100% !important;
+    overflow: visible !important;
+  }
+  body[data-zero3-pdf-scope="complete-full"] .dashboard-pdf-chart {
+    height: 47mm !important;
+    min-height: 47mm !important;
   }
   body[data-zero3-pdf-scope="complete-full"] .dashboard-pdf-donut {
-    width: 20mm !important;
-    height: 16mm !important;
+    width: 22mm !important;
+    height: 19mm !important;
   }
   body[data-zero3-pdf-scope="complete-full"] [data-testid="chart-complete-aggregators"] .dashboard-pdf-chart {
-    height: 25mm !important;
-    min-height: 25mm !important;
+    height: 44mm !important;
+    min-height: 44mm !important;
   }
-  .dashboard-pdf-chart svg text { fill: #62596d !important; }
+  body[data-zero3-pdf-scope="complete-full"] [data-testid="chart-complete-revenue"] .dashboard-pdf-chart {
+    height: 49mm !important;
+    min-height: 49mm !important;
+  }
+  body[data-zero3-pdf-scope^="complete-"]:not([data-zero3-pdf-scope="complete-full"]) [data-testid^="chart-complete-"] .dashboard-pdf-chart {
+    height: 62mm !important;
+    min-height: 62mm !important;
+    max-width: 250mm;
+    margin-inline: auto;
+  }
+  body[data-zero3-pdf-scope="complete-aggregators"] [data-testid="chart-complete-aggregators"] .dashboard-pdf-chart {
+    height: 52mm !important;
+    min-height: 52mm !important;
+  }
+  body[data-zero3-pdf-scope="complete-occupancy"] [data-testid="chart-complete-occupancy"] .dashboard-pdf-chart {
+    height: 62mm !important;
+    min-height: 62mm !important;
+  }
+  body[data-zero3-pdf-scope="complete-contracts"] [data-testid="chart-complete-contracts"] .dashboard-pdf-chart,
+  body[data-zero3-pdf-scope="complete-revenue"] [data-testid="chart-complete-revenue"] .dashboard-pdf-chart {
+    height: 62mm !important;
+    min-height: 62mm !important;
+  }
+  body[data-zero3-pdf-scope="complete-aggregators"] [data-testid="chart-complete-aggregators"] .dashboard-pdf-donut,
+  body[data-zero3-pdf-scope="complete-revenue"] [data-testid="chart-complete-revenue"] .dashboard-pdf-donut {
+    width: 34mm !important;
+    height: 30mm !important;
+  }
+  body[data-zero3-pdf-scope="complete-aggregators"] [data-testid="chart-complete-aggregators"] .dashboard-pdf-donut {
+    width: 23mm !important;
+    height: 18mm !important;
+  }
+  body[data-zero3-pdf-scope="complete-aggregators"] [data-testid="chart-complete-aggregators"] .dashboard-pdf-donut,
+  body[data-zero3-pdf-scope="complete-revenue"] [data-testid="chart-complete-revenue"] .dashboard-pdf-donut {
+    display: none !important;
+  }
+  body[data-zero3-pdf-scope^="financial-"] [data-pdf-panel] .dashboard-pdf-chart,
+  body[data-zero3-pdf-scope^="occupancy-"] [data-pdf-panel] .dashboard-pdf-chart {
+    height: 95mm !important;
+    min-height: 95mm !important;
+    max-width: 250mm;
+    margin-inline: auto;
+  }
+  .dashboard-pdf-chart svg text {
+    fill: #62596d !important;
+    font-size: 8px !important;
+  }
   [data-testid="chart-complete-aggregators"] .dashboard-pdf-chart {
     height: 39mm !important;
     min-height: 39mm !important;
@@ -746,6 +858,9 @@
     display: block !important;
     margin-top: 2.5mm;
   }
+  body[data-zero3-pdf-scope="complete-full"] .dashboard-pdf-table {
+    margin-top: 2mm;
+  }
   .dashboard-pdf-table table {
     width: 100%;
     border-collapse: collapse;
@@ -753,6 +868,7 @@
     color: #342d40;
   }
   .dashboard-pdf-table thead { display: table-header-group; }
+  .dashboard-pdf-table tfoot { display: table-row-group; }
   .dashboard-pdf-table tr { break-inside: avoid; page-break-inside: avoid; }
   .dashboard-pdf-table th,
   .dashboard-pdf-table td {
@@ -763,6 +879,12 @@
     text-align: left;
     vertical-align: top;
     overflow-wrap: anywhere;
+  }
+  body[data-zero3-pdf-scope="complete-full"] .dashboard-pdf-table th,
+  body[data-zero3-pdf-scope="complete-full"] .dashboard-pdf-table td {
+    padding: 0.8mm 0.7mm;
+    font-size: 6.8pt;
+    line-height: 1.15;
   }
   .dashboard-pdf-table th {
     background: #f1ebf7 !important;
@@ -776,6 +898,72 @@
     color: #455238;
   }
   .dashboard-pdf-empty { text-align: center !important; color: #716879; }
+
+  body[data-zero3-pdf-scope]:not([data-zero3-pdf-scope="complete-full"]) [data-pdf-panel] {
+    width: 100%;
+    max-width: 270mm;
+    margin-inline: auto;
+    padding: 6mm !important;
+  }
+  body[data-zero3-pdf-scope^="complete-"]:not([data-zero3-pdf-scope="complete-full"]) [data-testid^="chart-complete-"] {
+    padding: 4mm !important;
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+  }
+  body[data-zero3-pdf-scope^="complete-"]:not([data-zero3-pdf-scope="complete-full"]) [data-testid^="chart-complete-"] > .mb-3 {
+    display: none !important;
+  }
+  body[data-zero3-pdf-scope^="complete-"]:not([data-zero3-pdf-scope="complete-full"]) .dashboard-pdf-full-hide {
+    display: none !important;
+  }
+  body[data-zero3-pdf-scope]:not([data-zero3-pdf-scope="complete-full"]) .dashboard-pdf-table {
+    margin-top: 4mm;
+    break-before: avoid-page;
+    page-break-before: avoid;
+  }
+  body[data-zero3-pdf-scope="contracts-monthly"] [data-pdf-panel="contracts-monthly"] .dashboard-pdf-chart {
+    height: 62mm !important;
+    min-height: 62mm !important;
+    max-width: 250mm;
+    margin-inline: auto;
+  }
+  body[data-zero3-pdf-scope="contracts-monthly"] [data-pdf-panel="contracts-monthly"] > .mb-3 {
+    display: none !important;
+  }
+  body[data-zero3-pdf-scope]:not([data-zero3-pdf-scope="complete-full"]) .dashboard-pdf-table th,
+  body[data-zero3-pdf-scope]:not([data-zero3-pdf-scope="complete-full"]) .dashboard-pdf-table td {
+    padding: 1.2mm 1.5mm;
+    font-size: 8pt;
+    line-height: 1.25;
+  }
+
+  body[data-zero3-pdf-scope="complete-full"] [data-testid^="chart-complete-"] > .mb-3 {
+    margin-bottom: 1.5mm !important;
+  }
+  body[data-zero3-pdf-scope="complete-full"] [data-testid^="chart-complete-"] > .mb-3 p {
+    font-size: 6.5pt !important;
+    line-height: 1.2 !important;
+  }
+  body[data-zero3-pdf-scope="complete-full"] [data-testid^="chart-complete-"] h2 {
+    font-size: 10pt !important;
+  }
+}
+
+@media print {
+  body[data-zero3-pdf-scope="complete-full"] [data-testid^="chart-complete-"] .dashboard-pdf-chart {
+    height: 135mm !important;
+    min-height: 135mm !important;
+  }
+
+  body[data-zero3-pdf-scope^="complete-"]:not([data-zero3-pdf-scope="complete-full"]) [data-testid^="chart-complete-"] .dashboard-pdf-chart {
+    height: 160mm !important;
+    min-height: 160mm !important;
+  }
+
+  body[data-zero3-pdf-scope] [data-testid^="chart-complete-"] .dashboard-pdf-chart.dashboard-pdf-empty {
+    height: 45mm !important;
+    min-height: 45mm !important;
+  }
 }
 
 /**

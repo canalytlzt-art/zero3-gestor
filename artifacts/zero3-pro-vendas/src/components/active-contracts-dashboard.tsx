@@ -126,7 +126,7 @@ export default function ActiveContractsDashboard({
             <PdfPrintHeader title="Contratos ativos e meta" period="Histórico mensal registrado" filters="Exibição do gráfico: até 24 meses; sem valores presumidos para meses sem cadastro" />
             <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
               <div><p className="text-[9px] font-bold uppercase tracking-[.15em] text-[#8c73b4]">evolução mensal</p><h2 className="mt-1 font-[family-name:var(--app-font-serif)] text-xl font-extrabold tracking-[-.045em] text-[#342d40]">Contratos ativos e meta</h2><p className="mt-1 text-[10px] text-[#837b8b]">{chartRecords.length} meses com registro · sem valores presumidos</p></div>
-              <DownloadPdfButton scope="contracts-monthly" title="Contratos ativos e meta" period="Histórico mensal" compact disabled={contractsQuery.isLoading || contractsQuery.isError} />
+              <DownloadPdfButton scope="contracts-monthly" title="Contratos ativos e meta" period="Histórico mensal" compact disabled={contractsQuery.isFetching || contractsQuery.isError} />
             </div>
             <ChartContainer role="img" aria-label="Gráfico de barras mensais de contratos ativos comparados à meta" config={{ activeCount: { label: 'Contratos ativos', color: '#7655a8' }, targetCount: { label: 'Meta', color: '#a9d75a' } }} className="dashboard-pdf-chart h-[310px] w-full">
               <ResponsiveContainer width="100%" height="100%">

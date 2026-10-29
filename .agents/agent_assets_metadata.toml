@@ -70,3 +70,143 @@ mtime_ms = 1793150608067
 storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:c91b3b47-0600-408b-85d9-1acffd854e30/c3cf2ad3-6b5e-49af-be12-6f74738e7e2e/40f850c2-4c8e-4359-bca3-67f4ce59ffca"
 storage_version_token = "1793150711958241"
 content_type = "image/jpeg"
+
+[[outputs]]
+id = "KDdeTsrpWt24e78VBQfql"
+uri = "file://generated-artifacts/zero3-pdf-review/painel-mensal-com-detalhes.pdf"
+type = "pdf"
+title = "Painel completo mensal — revisão"
+description = "Prévia A4 em paisagem, com dados sintéticos apenas para conferir a diagramação; não contém dados reais do D1."
+logical_id = "57f63e9c-ed1c-45bb-994b-585bec94d31e"
+content_hash = "sha256:45cb9f4c7c3df87108a1d518551f86d1a04cf25a230fb8416ca8c62fd3e99394"
+size = 70787
+mtime_ms = 1793235381078
+storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:c91b3b47-0600-408b-85d9-1acffd854e30/57f63e9c-ed1c-45bb-994b-585bec94d31e/d1e73393-dc1d-4162-81df-3ebc4aa67301"
+storage_version_token = "1793235642844625"
+content_type = "application/pdf"
+
+[[outputs]]
+id = "wR1rNKYfeAqf0zk0L8mq2"
+uri = "file://generated-artifacts/zero3-pdf-review/painel-anual-com-detalhes.pdf"
+type = "pdf"
+title = "Painel completo anual — revisão"
+description = "Prévia A4 em paisagem, com dados sintéticos apenas para conferir a diagramação; não contém dados reais do D1."
+logical_id = "7c67c6b9-76e1-470c-827f-630205cc1248"
+content_hash = "sha256:d0059adde33e4e94b23244eb467c5f32dd9416de8cabe2b76533f74522680120"
+size = 162204
+mtime_ms = 1793235387914
+storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:c91b3b47-0600-408b-85d9-1acffd854e30/7c67c6b9-76e1-470c-827f-630205cc1248/91fdc064-70c1-4292-895d-aba8a7836dfb"
+storage_version_token = "1793235643403866"
+content_type = "application/pdf"
+
+[[outputs]]
+id = "EJZ9LXwUMiSnHhA8wK3gG"
+uri = "file://generated-artifacts/zero3-pdf-review/painel-sem-dados.pdf"
+type = "pdf"
+title = "Painel sem dados — revisão"
+description = "Prévia do estado sem dados, com dados sintéticos/estado vazio para conferir a apresentação."
+logical_id = "8195ec44-dd58-43e0-b93f-b2a05c2bb0ee"
+content_hash = "sha256:46c2937f34ebf88f1b1d4e28c8248b025d78286923c41505551efa3f0dde3c23"
+size = 59981
+mtime_ms = 1793235394782
+storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:c91b3b47-0600-408b-85d9-1acffd854e30/8195ec44-dd58-43e0-b93f-b2a05c2bb0ee/14afcd9e-845f-444f-8a88-8751b9a9704c"
+storage_version_token = "1793235643990566"
+content_type = "application/pdf"
+
+[[outputs]]
+id = "LHjCfv2eT8RlMksRP-Nx_"
+uri = "file://generated-artifacts/zero3-pdf-review/individual-contracts.pdf"
+type = "pdf"
+title = "PDF individual — Contratos ativos"
+description = "Exemplo sintético de PDF individual, em uma página A4."
+logical_id = "2fda969d-6144-48b8-a0ca-2bb920eef982"
+content_hash = "sha256:3d4d2ed4fa22581190ce023d5b34062b9354e941a9226734550e671581ba61b3"
+size = 32967
+mtime_ms = 1793235401683
+storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:c91b3b47-0600-408b-85d9-1acffd854e30/2fda969d-6144-48b8-a0ca-2bb920eef982/f28bff62-6d8d-43d4-88e2-93c7f956377d"
+storage_version_token = "1793235644496408"
+content_type = "application/pdf"
+
+[[outputs]]
+id = "_6sRPgdQe49hJ4NxERcQi"
+uri = "file://generated-artifacts/zero3-pdf-review/individual-aggregators.pdf"
+type = "pdf"
+title = "PDF individual — Agregadores"
+description = "Exemplo sintético de PDF individual, em uma página A4."
+logical_id = "166b5052-a849-49c8-acf3-c12ee77adfcc"
+content_hash = "sha256:d4746adbe2decfe5e1326b0d6df42754f4a61cee9077f7b8f1290dfd7012f67f"
+size = 32199
+mtime_ms = 1793235408491
+storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:c91b3b47-0600-408b-85d9-1acffd854e30/166b5052-a849-49c8-acf3-c12ee77adfcc/8b19302a-528f-42a6-89c3-1c406f427680"
+storage_version_token = "1793235645015864"
+content_type = "application/pdf"
+
+[[outputs]]
+id = "L8dk-s0mnCxGq7krrdfNC"
+uri = "file://generated-artifacts/zero3-pdf-review/individual-occupancy.pdf"
+type = "pdf"
+title = "PDF individual — Check-in e ocupação"
+description = "Exemplo sintético de PDF individual, em uma página A4."
+logical_id = "2b0b20ed-ab62-477c-8172-67ef17509824"
+content_hash = "sha256:8cabf327b7d02717342ee485bb250393428e8affb2faa1a72c4da50ae3c68d71"
+size = 34394
+mtime_ms = 1793235415595
+storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:c91b3b47-0600-408b-85d9-1acffd854e30/2b0b20ed-ab62-477c-8172-67ef17509824/f622ee56-00c5-4ca4-a5fe-d0c3f7ee614e"
+storage_version_token = "1793235645496162"
+content_type = "application/pdf"
+
+[[outputs]]
+id = "BbVtvcTl0vdMEzSVtRhdf"
+uri = "file://generated-artifacts/zero3-pdf-review/individual-revenue.pdf"
+type = "pdf"
+title = "PDF individual — Faturamento"
+description = "Exemplo sintético de PDF individual, em uma página A4."
+logical_id = "ff18fef8-5195-4995-97bb-8d9a2a850f45"
+content_hash = "sha256:4a161e332707a062e7a637de2e90a2fd1bf5fab305869a02c123e146dd84460e"
+size = 32170
+mtime_ms = 1793235422035
+storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:c91b3b47-0600-408b-85d9-1acffd854e30/ff18fef8-5195-4995-97bb-8d9a2a850f45/021ad1de-cbde-4fa5-a2b0-92ff880c5c27"
+storage_version_token = "1793235646038511"
+content_type = "application/pdf"
+
+[[outputs]]
+id = "VzluzUxUGEdif8q77-QWc"
+uri = "file://generated-artifacts/zero3-pdf-review/metas-com-meta.pdf"
+type = "pdf"
+title = "PDF de metas cadastradas — revisão"
+description = "Exemplo sintético para verificar realizado, meta, atingimento e diferença."
+logical_id = "454cfa3a-2307-4840-a8b0-eef673c8a138"
+content_hash = "sha256:067f31485c15e3eaf45a965995118c3e233ab361ba5d1d9cd1a3e62f9debf489"
+size = 35509
+mtime_ms = 1793235428399
+storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:c91b3b47-0600-408b-85d9-1acffd854e30/454cfa3a-2307-4840-a8b0-eef673c8a138/dc1df1ae-15f1-40e1-bb92-3c0a0b24b528"
+storage_version_token = "1793235646501220"
+content_type = "application/pdf"
+
+[[outputs]]
+id = "vfBdGIQIuZwqm7TWw6zoC"
+uri = "file://generated-artifacts/zero3-pdf-review/metas-sem-meta.pdf"
+type = "pdf"
+title = "PDF sem meta cadastrada — revisão"
+description = "Exemplo sintético que exibe Meta não definida sem calcular atingimento."
+logical_id = "bbc68f99-346b-410e-98bc-797b795bb17e"
+content_hash = "sha256:d7349c331216ac0a51fbcc3d5251769204f817b98dc6ae3da7309973e2f49e8c"
+size = 35730
+mtime_ms = 1793235435139
+storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:c91b3b47-0600-408b-85d9-1acffd854e30/bbc68f99-346b-410e-98bc-797b795bb17e/e4e314be-daf5-401a-a62c-04fffcf8cc03"
+storage_version_token = "1793235646964012"
+content_type = "application/pdf"
+
+[[outputs]]
+id = "5nZfYAGPxh2wfuaWM7dSm"
+uri = "file://generated-artifacts/zero3-pdf-review/painel-mensal-mobile.pdf"
+type = "pdf"
+title = "Painel mensal — viewport móvel"
+description = "A4 em paisagem gerado em simulação de viewport 375 × 812; conteúdo sintético, não representa exportação real do D1."
+logical_id = "4fb43bdd-da03-493a-8a74-4e491a015044"
+content_hash = "sha256:3a789156f0569cd055b9d9317092a291077be97367ebc53cdf86f2292b581e64"
+size = 71045
+mtime_ms = 1793235441507
+storage_uri = "gcs://replit-rams-assets-reed/rams/assets/repl:c91b3b47-0600-408b-85d9-1acffd854e30/4fb43bdd-da03-493a-8a74-4e491a015044/0aa8e22f-9fe7-4071-97d6-ba27dc38c62a"
+storage_version_token = "1793235647428440"
+content_type = "application/pdf"
