@@ -13,6 +13,8 @@ import {
   GetOccupancyModalitiesResponse,
   GetOccupancyMonthlyGoalsQueryParams,
   GetOccupancyMonthlyGoalsResponse,
+  GetOccupancyMonthlyAggregatorAdjustmentsQueryParams,
+  GetOccupancyMonthlyAggregatorAdjustmentsResponse,
   GetOccupancyRecordsQueryParams,
   GetOccupancyRecordsResponse,
   PreviewOccupancyImportBody,
@@ -24,6 +26,13 @@ import {
   UpsertOccupancyMonthlyGoalBody,
   UpsertOccupancyMonthlyGoalParams,
   UpsertOccupancyMonthlyGoalResponse,
+  PreviewOccupancyMonthlyAggregatorAdjustmentBody,
+  PreviewOccupancyMonthlyAggregatorAdjustmentResponse,
+  SaveOccupancyMonthlyAggregatorAdjustmentParams,
+  SaveOccupancyMonthlyAggregatorAdjustmentBody,
+  SaveOccupancyMonthlyAggregatorAdjustmentResponse,
+  UndoOccupancyMonthlyAggregatorAdjustmentParams,
+  UndoOccupancyMonthlyAggregatorAdjustmentBody,
   UpdateOccupancyModalityBody,
   UpdateOccupancyModalityParams,
   UpdateOccupancyRecordBody,
@@ -94,6 +103,9 @@ function recordOut(row: Row) {
     aggregatorPresences: row.aggregator_presences === null || row.aggregator_presences === undefined
       ? null
       : Number(row.aggregator_presences),
+    aggregatorSource: row.aggregator_presences === null || row.aggregator_presences === undefined
+      ? null
+      : row.aggregator_origin === "monthly_estimated" ? "monthly_estimated" : "recorded",
     startTime: row.start_time ? String(row.start_time).slice(0, 5) : null,
     endTime: row.end_time ? String(row.end_time).slice(0, 5) : null,
     className: row.class_name === null ? null : String(row.class_name),
@@ -582,6 +594,502 @@ async function monthlyGoalRoutes(
   return null;
 }
 
+type MonthlyAggregatorRecord = Row & {
+  id: string;
+  modality_id: string;
+  modality_name: string;
+  date: string;
+  presences: number;
+  aggregator_presences: number | null;
+  aggregator_adjustment_id: string | null;
+  version: number;
+};
+
+type MonthlyAggregatorPreviewInput = {
+  month: string;
+  modalityId: string | null;
+  targetPresences: number;
+};
+
+type MonthlyAggregatorSnapshotRow = {
+  id: string;
+  version: number;
+  presences: number;
+  aggregatorPresences: number | null;
+  aggregatorAdjustmentId: string | null;
+};
+
+function distributeProportionally(
+  rows: readonly MonthlyAggregatorRecord[],
+  target: number,
+) {
+  const totalWeight = rows.reduce((sum, row) => sum + Number(row.presences), 0);
+  if (rows.length === 0) return new Map<string, number>();
+  if (target === 0 || totalWeight === 0) {
+    return new Map(rows.map((row) => [row.id, 0]));
+  }
+
+  const parts = rows.map((row) => {
+    const exact = target * Number(row.presences) / totalWeight;
+    const floor = Math.floor(exact);
+    return { id: row.id, value: floor, remainder: exact - floor };
+  });
+  let residue = target - parts.reduce((sum, part) => sum + part.value, 0);
+  const ranked = [...parts].sort((a, b) => b.remainder - a.remainder || a.id.localeCompare(b.id));
+  for (let index = 0; residue > 0; index = (index + 1) % ranked.length) {
+    const part = ranked[index]!;
+    const row = rows.find((candidate) => candidate.id === part.id)!;
+    if (part.value >= Number(row.presences)) continue;
+    part.value += 1;
+    residue -= 1;
+  }
+  return new Map(parts.map((part) => [part.id, part.value]));
+}
+
+async function digestSnapshot(value: unknown) {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function adjustmentOut(row: Row) {
+  return {
+    id: String(row.id),
+    month: String(row.month),
+    scopeKey: String(row.scope_key),
+    modalityId: row.modality_id == null ? null : String(row.modality_id),
+    modalityName: row.modality_name == null ? null : String(row.modality_name),
+    targetPresences: Number(row.target_presences),
+    version: Number(row.version),
+    active: row.deleted_at == null,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    deletedAt: row.deleted_at == null ? null : String(row.deleted_at),
+  };
+}
+
+async function getMonthlyAggregatorRows(
+  env: WorkerEnv,
+  month: string,
+  modalityId: string | null,
+) {
+  return all<MonthlyAggregatorRecord>(
+    env.DB.prepare(
+      `SELECT r.*, m.name AS modality_name
+       FROM occupancy_records r
+       JOIN occupancy_modalities m ON m.id=r.modality_id
+       WHERE r.month=? AND r.kind='daily' AND r.presences IS NOT NULL
+         AND r.deleted_at IS NULL AND (? IS NULL OR r.modality_id=?)
+       ORDER BY r.date ASC, r.start_time ASC, r.id ASC`,
+    ).bind(month, modalityId, modalityId),
+  );
+}
+
+async function buildMonthlyAggregatorPreview(
+  env: WorkerEnv,
+  input: MonthlyAggregatorPreviewInput,
+  requestedAdjustmentId?: string,
+) {
+  if (!validMonth(input.month)) throw new ApiFailure(400, "Selecione um mês válido.");
+  if (!Number.isSafeInteger(input.targetPresences) || input.targetPresences < 0 || input.targetPresences > 2_147_483_647) {
+    throw new ApiFailure(400, "Informe um total mensal inteiro e igual ou maior que zero.");
+  }
+  let modalityName: string | null = null;
+  if (input.modalityId) {
+    const modality = await env.DB.prepare("SELECT name FROM occupancy_modalities WHERE id=?")
+      .bind(input.modalityId).first<{ name: string }>();
+    if (!modality) throw new ApiFailure(404, "Modalidade não encontrada.");
+    modalityName = String(modality.name);
+  }
+  const scopeKey = input.modalityId ?? "all";
+  const current = await env.DB.prepare(
+    "SELECT * FROM occupancy_aggregator_adjustments WHERE month=? AND scope_key=?",
+  ).bind(input.month, scopeKey).first<Row>();
+  const overlap = await env.DB.prepare(
+    `SELECT id FROM occupancy_aggregator_adjustments
+     WHERE month=? AND deleted_at IS NULL AND scope_key<>?
+       AND (?='all' OR scope_key='all') LIMIT 1`,
+  ).bind(input.month, scopeKey, scopeKey).first<{ id: string }>();
+  const records = await getMonthlyAggregatorRows(env, input.month, input.modalityId);
+  const adjustmentId = current
+    ? String(current.id)
+    : requestedAdjustmentId ?? crypto.randomUUID();
+  const totalPresences = records.reduce((sum, row) => sum + Number(row.presences), 0);
+  const recordedRows = records.filter((row) =>
+    row.aggregator_presences != null && row.aggregator_adjustment_id !== adjustmentId
+  );
+  const recordedAggregatorPresences = recordedRows.reduce(
+    (sum, row) => sum + Number(row.aggregator_presences ?? 0),
+    0,
+  );
+  const previousEstimatedPresences = records
+    .filter((row) => row.aggregator_adjustment_id === adjustmentId)
+    .reduce((sum, row) => sum + Number(row.aggregator_presences ?? 0), 0);
+  const candidates = records.filter((row) =>
+    row.aggregator_presences == null || row.aggregator_adjustment_id === adjustmentId
+  );
+  const remainingToDistribute = input.targetPresences - recordedAggregatorPresences;
+  const candidateCapacity = candidates.reduce((sum, row) => sum + Number(row.presences), 0);
+  const canSave = !overlap
+    && records.length > 0
+    && remainingToDistribute >= 0
+    && remainingToDistribute <= candidateCapacity;
+  const allocations = canSave
+    ? distributeProportionally(candidates, remainingToDistribute)
+    : new Map<string, number>();
+  let message = "Prévia pronta. As presenças manuais serão preservadas.";
+  if (overlap) {
+    message = "Já existe um ajuste geral ou de modalidade que abrange estas aulas. Desfaça-o antes de criar outro.";
+  } else if (records.length === 0) {
+    message = "Não há aulas diárias com presenças registradas neste mês e recorte.";
+  } else if (remainingToDistribute < 0) {
+    message = "O total informado é menor que os agregadores já registrados. Nenhum valor foi alterado.";
+  } else if (remainingToDistribute > candidateCapacity) {
+    message = "Não há presenças sem classificação suficientes para distribuir esse total.";
+  }
+  const snapshotRows: MonthlyAggregatorSnapshotRow[] = records.map((row) => ({
+    id: String(row.id),
+    version: Number(row.version),
+    presences: Number(row.presences),
+    aggregatorPresences: row.aggregator_presences == null ? null : Number(row.aggregator_presences),
+    aggregatorAdjustmentId: row.aggregator_adjustment_id == null
+      ? null
+      : String(row.aggregator_adjustment_id),
+  }));
+  const snapshotToken = await digestSnapshot({
+    month: input.month,
+    scopeKey,
+    targetPresences: input.targetPresences,
+    adjustmentId,
+    expectedVersion: current ? Number(current.version) : 0,
+    adjustmentUpdatedAt: current?.updated_at ?? null,
+    rows: snapshotRows,
+  });
+  const preview = PreviewOccupancyMonthlyAggregatorAdjustmentResponse.parse({
+    month: input.month,
+    modalityId: input.modalityId,
+    modalityName,
+    targetPresences: input.targetPresences,
+    totalPresences,
+    recordedAggregatorPresences,
+    previousEstimatedPresences,
+    remainingToDistribute,
+    otherPresences: canSave ? totalPresences - input.targetPresences : null,
+    measuredClassCount: records.length,
+    candidateClassCount: candidates.length,
+    canSave,
+    message,
+    expectedVersion: current ? Number(current.version) : 0,
+    adjustmentId,
+    snapshotToken,
+    allocations: candidates.map((row) => ({
+      recordId: String(row.id),
+      date: String(row.date),
+      modalityName: String(row.modality_name),
+      startTime: row.start_time == null ? null : String(row.start_time).slice(0, 5),
+      className: row.class_name == null ? null : String(row.class_name),
+      presences: Number(row.presences),
+      previousAggregatorPresences: row.aggregator_presences == null
+        ? null
+        : Number(row.aggregator_presences),
+      assignedAggregatorPresences: allocations.get(String(row.id)) ?? 0,
+    })),
+  });
+  return {
+    preview,
+    scopeKey,
+    current,
+    records,
+    candidates,
+    snapshotRows,
+    modalityName,
+  };
+}
+
+function monthlyAggregatorRouteError(error: unknown): never {
+  const message = error instanceof Error ? error.message : "";
+  if (message.includes("occupancy_aggregator_adjustment_scope_overlap")) {
+    throw new ApiFailure(409, "Há outro ajuste mensal ativo que abrange estas aulas. Atualize a base e tente novamente.");
+  }
+  throw error;
+}
+
+async function monthlyAggregatorAdjustmentRoutes(
+  request: Request,
+  env: WorkerEnv,
+  actor: AuthContext,
+  path: string,
+) {
+  if (path === "/occupancy/monthly-aggregator-adjustments" && request.method === "GET") {
+    const url = new URL(request.url);
+    const input = parse(
+      GetOccupancyMonthlyAggregatorAdjustmentsQueryParams,
+      Object.fromEntries(url.searchParams),
+    );
+    const rows = await all(
+      env.DB.prepare(
+        `SELECT * FROM occupancy_aggregator_adjustments
+         WHERE month=? ORDER BY scope_key ASC`,
+      ).bind(input.month),
+    );
+    return json(GetOccupancyMonthlyAggregatorAdjustmentsResponse.parse(rows.map(adjustmentOut)));
+  }
+
+  if (path === "/occupancy/monthly-aggregator-adjustments/preview" && request.method === "POST") {
+    const input = parse(PreviewOccupancyMonthlyAggregatorAdjustmentBody, await readJson(request));
+    const result = await buildMonthlyAggregatorPreview(env, input);
+    return json(result.preview);
+  }
+
+  const monthPath = /^\/occupancy\/monthly-aggregator-adjustments\/(\d{4}-(?:0[1-9]|1[0-2]))$/.exec(path)?.[1];
+  if (monthPath && request.method === "PUT") {
+    const { month } = parse(SaveOccupancyMonthlyAggregatorAdjustmentParams, { month: monthPath });
+    const input = parse(SaveOccupancyMonthlyAggregatorAdjustmentBody, await readJson(request));
+    if (input.month !== month) throw new ApiFailure(400, "O mês do ajuste não corresponde à rota.");
+    const result = await buildMonthlyAggregatorPreview(env, input, input.adjustmentId);
+    if (
+      !result.preview.canSave ||
+      result.preview.snapshotToken !== input.snapshotToken ||
+      result.preview.expectedVersion !== input.expectedVersion ||
+      result.preview.adjustmentId !== input.adjustmentId
+    ) {
+      throw new ApiFailure(409, result.preview.canSave
+        ? "Os check-ins mudaram desde a prévia. Atualize a prévia antes de salvar."
+        : result.preview.message);
+    }
+    const now = nowIso();
+    const operationToken = crypto.randomUUID();
+    const scopeKey = input.modalityId ?? "all";
+    const snapshotJson = JSON.stringify(result.snapshotRows);
+    const allocations = result.preview.allocations.map((allocation) => ({
+      id: allocation.recordId,
+      version: result.records.find((row) => String(row.id) === allocation.recordId)!.version,
+      assigned: allocation.assignedAggregatorPresences,
+      historyId: crypto.randomUUID(),
+      beforeData: JSON.stringify({
+        id: allocation.recordId,
+        aggregatorPresences: allocation.previousAggregatorPresences,
+        aggregatorSource: allocation.previousAggregatorPresences === null ? null : "recorded",
+        adjustmentId: result.records.find((row) => String(row.id) === allocation.recordId)?.aggregator_adjustment_id ?? null,
+      }),
+    }));
+    const allocationsJson = JSON.stringify(allocations);
+    const batch = await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO occupancy_aggregator_adjustments
+          (id, month, scope_key, modality_id, modality_name, target_presences,
+           version, created_by, updated_by, created_at, updated_at, operation_token, deleted_by, deleted_at)
+         SELECT ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, NULL, NULL
+         WHERE
+           (SELECT COUNT(*) FROM occupancy_records
+            WHERE month=? AND kind='daily' AND presences IS NOT NULL AND deleted_at IS NULL
+              AND (? IS NULL OR modality_id=?)) = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM json_each(?) snapshot
+             LEFT JOIN occupancy_records r ON r.id=json_extract(snapshot.value, '$.id')
+             WHERE r.id IS NULL OR r.deleted_at IS NOT NULL
+               OR r.version IS NOT json_extract(snapshot.value, '$.version')
+               OR r.presences IS NOT json_extract(snapshot.value, '$.presences')
+               OR r.aggregator_presences IS NOT json_extract(snapshot.value, '$.aggregatorPresences')
+               OR coalesce(r.aggregator_adjustment_id, '') <>
+                  coalesce(json_extract(snapshot.value, '$.aggregatorAdjustmentId'), '')
+           )
+         ON CONFLICT(month, scope_key) DO UPDATE SET
+           modality_id=excluded.modality_id,
+           modality_name=excluded.modality_name,
+           target_presences=excluded.target_presences,
+           version=occupancy_aggregator_adjustments.version+1,
+           updated_by=excluded.updated_by,
+           updated_at=excluded.updated_at,
+           operation_token=excluded.operation_token,
+           deleted_by=NULL,
+           deleted_at=NULL
+         WHERE occupancy_aggregator_adjustments.version=?`,
+      ).bind(
+        input.adjustmentId,
+        month,
+        scopeKey,
+        input.modalityId,
+        result.modalityName,
+        input.targetPresences,
+        actor.userId,
+        actor.userId,
+        now,
+        now,
+        operationToken,
+        month,
+        input.modalityId,
+        input.modalityId,
+        result.snapshotRows.length,
+        snapshotJson,
+        input.expectedVersion,
+      ),
+      env.DB.prepare(
+        `UPDATE occupancy_records
+         SET aggregator_presences=json_extract(allocation.value, '$.assigned'),
+             aggregator_origin='monthly_estimated',
+             aggregator_adjustment_id=?,
+             version=version+1, updated_by=?, updated_at=?
+         FROM json_each(?) allocation
+         WHERE occupancy_records.id=json_extract(allocation.value, '$.id')
+           AND occupancy_records.version=json_extract(allocation.value, '$.version')
+           AND EXISTS (
+             SELECT 1 FROM occupancy_aggregator_adjustments
+             WHERE id=? AND operation_token=? AND deleted_at IS NULL
+           )`,
+      ).bind(input.adjustmentId, actor.userId, now, allocationsJson, input.adjustmentId, operationToken),
+      env.DB.prepare(
+        `INSERT INTO occupancy_history
+          (id, entity_type, entity_id, operation, actor_id, before_data, after_data, created_at)
+         SELECT json_extract(allocation.value, '$.historyId'),
+                'record', r.id, 'monthly_aggregator_adjustment', ?,
+                json_extract(allocation.value, '$.beforeData'),
+                json_object('id', r.id, 'aggregatorPresences', r.aggregator_presences,
+                  'aggregatorSource', 'monthly_estimated', 'adjustmentId', ?,
+                  'version', r.version),
+                ?
+         FROM json_each(?) allocation
+         JOIN occupancy_records r ON r.id=json_extract(allocation.value, '$.id')
+         WHERE r.aggregator_adjustment_id=? AND r.updated_at=?
+           AND EXISTS (SELECT 1 FROM occupancy_aggregator_adjustments a
+                       WHERE a.id=? AND a.operation_token=?)`,
+      ).bind(actor.userId, input.adjustmentId, now, allocationsJson, input.adjustmentId, now, input.adjustmentId, operationToken),
+      env.DB.prepare(
+        `INSERT INTO occupancy_history
+          (id, entity_type, entity_id, operation, actor_id, before_data, after_data, created_at)
+         SELECT ?, 'aggregator_adjustment', id, ? , ?, ?, json_object(
+           'id', id, 'month', month, 'scopeKey', scope_key,
+           'targetPresences', target_presences, 'version', version,
+           'deletedAt', deleted_at), ?
+         FROM occupancy_aggregator_adjustments WHERE id=? AND operation_token=?`,
+      ).bind(
+        crypto.randomUUID(),
+        result.current ? "update" : "create",
+        actor.userId,
+        result.current ? JSON.stringify(adjustmentOut(result.current)) : null,
+        now,
+        input.adjustmentId,
+        operationToken,
+      ),
+    ]);
+    if (Number(batch[0]?.meta?.changes ?? 0) !== 1) {
+      throw new ApiFailure(409, "Os check-ins ou o ajuste mudaram durante a gravação. Atualize a prévia e tente novamente.");
+    }
+    if (Number(batch[1]?.meta?.changes ?? 0) !== allocations.length) {
+      throw new ApiFailure(409, "Nem todos os valores estimados foram gravados. Atualize a base antes de continuar.");
+    }
+    const saved = await env.DB.prepare(
+      "SELECT * FROM occupancy_aggregator_adjustments WHERE id=?",
+    ).bind(input.adjustmentId).first<Row>();
+    if (!saved) throw new ApiFailure(500, "O ajuste mensal não foi encontrado após salvar.");
+    return json(SaveOccupancyMonthlyAggregatorAdjustmentResponse.parse(adjustmentOut(saved)));
+  }
+
+  const adjustmentId = /^\/occupancy\/monthly-aggregator-adjustments\/([0-9a-f-]{36})$/i.exec(path)?.[1];
+  if (adjustmentId && request.method === "DELETE") {
+    const { id } = parse(UndoOccupancyMonthlyAggregatorAdjustmentParams, { id: adjustmentId });
+    const input = parse(UndoOccupancyMonthlyAggregatorAdjustmentBody, await readJson(request));
+    const current = await env.DB.prepare(
+      "SELECT * FROM occupancy_aggregator_adjustments WHERE id=? AND deleted_at IS NULL",
+    ).bind(id).first<Row>();
+    if (!current) throw new ApiFailure(404, "Ajuste mensal ativo não encontrado.");
+    if (Number(current.version) !== input.expectedVersion) {
+      throw new ApiFailure(409, "O ajuste foi atualizado. Atualize a base antes de desfazê-lo.");
+    }
+    const rows = await all<MonthlyAggregatorRecord>(
+      env.DB.prepare(
+        `SELECT * FROM occupancy_records
+         WHERE aggregator_adjustment_id=? AND deleted_at IS NULL ORDER BY id`,
+      ).bind(id),
+    );
+    const snapshots = rows.map((row) => ({
+      id: String(row.id),
+      version: Number(row.version),
+      aggregatorPresences: row.aggregator_presences == null ? null : Number(row.aggregator_presences),
+    }));
+    const snapshotsJson = JSON.stringify(snapshots);
+    const now = nowIso();
+    const operationToken = crypto.randomUUID();
+    const batch = await env.DB.batch([
+      env.DB.prepare(
+        `UPDATE occupancy_aggregator_adjustments
+         SET deleted_by=?, deleted_at=?, updated_by=?, updated_at=?, operation_token=?, version=version+1
+         WHERE id=? AND version=? AND deleted_at IS NULL
+           AND (SELECT COUNT(*) FROM occupancy_records
+                WHERE aggregator_adjustment_id=? AND deleted_at IS NULL)=?
+           AND NOT EXISTS (
+             SELECT 1 FROM json_each(?) snapshot
+             LEFT JOIN occupancy_records r ON r.id=json_extract(snapshot.value, '$.id')
+             WHERE r.id IS NULL OR r.deleted_at IS NOT NULL
+               OR r.version IS NOT json_extract(snapshot.value, '$.version')
+               OR r.aggregator_presences IS NOT json_extract(snapshot.value, '$.aggregatorPresences')
+               OR r.aggregator_adjustment_id IS NOT ?
+           )`,
+      ).bind(actor.userId, now, actor.userId, now, operationToken, id, input.expectedVersion, id, snapshots.length, snapshotsJson, id),
+      env.DB.prepare(
+        `UPDATE occupancy_records
+         SET aggregator_presences=NULL, aggregator_origin=NULL, aggregator_adjustment_id=NULL,
+             version=version+1, updated_by=?, updated_at=?
+         WHERE aggregator_adjustment_id=? AND version IN (
+           SELECT json_extract(snapshot.value, '$.version') FROM json_each(?) snapshot
+           WHERE json_extract(snapshot.value, '$.id')=occupancy_records.id
+         )
+           AND EXISTS (
+             SELECT 1 FROM occupancy_aggregator_adjustments
+             WHERE id=? AND operation_token=? AND deleted_at IS NOT NULL
+           )`,
+      ).bind(actor.userId, now, id, snapshotsJson, id, operationToken),
+      env.DB.prepare(
+        `INSERT INTO occupancy_history
+          (id, entity_type, entity_id, operation, actor_id, before_data, after_data, created_at)
+         SELECT json_extract(snapshot.value, '$.historyId'),
+                'record', r.id, 'undo_monthly_aggregator_adjustment', ?,
+                json_extract(snapshot.value, '$.beforeData'),
+                json_object('id', r.id, 'aggregatorPresences', NULL,
+                  'aggregatorSource', NULL, 'adjustmentId', NULL, 'version', r.version),
+                ?
+         FROM json_each(?) snapshot
+         JOIN occupancy_records r ON r.id=json_extract(snapshot.value, '$.id')
+         WHERE r.updated_at=? AND r.aggregator_adjustment_id IS NULL
+           AND EXISTS (SELECT 1 FROM occupancy_aggregator_adjustments a
+                       WHERE a.id=? AND a.operation_token=?)`,
+      ).bind(
+        actor.userId,
+        now,
+        JSON.stringify(rows.map((row) => ({
+          id: String(row.id),
+          historyId: crypto.randomUUID(),
+          beforeData: JSON.stringify({
+            id: row.id,
+            aggregatorPresences: row.aggregator_presences,
+            aggregatorSource: "monthly_estimated",
+            adjustmentId: id,
+          }),
+        }))),
+        now,
+        id,
+        operationToken,
+      ),
+      env.DB.prepare(
+        `INSERT INTO occupancy_history
+          (id, entity_type, entity_id, operation, actor_id, before_data, after_data, created_at)
+         SELECT ?, 'aggregator_adjustment', id, 'undo', ?, ?, json_object(
+           'id', id, 'month', month, 'scopeKey', scope_key, 'targetPresences', target_presences,
+           'version', version, 'deletedAt', deleted_at), ?
+         FROM occupancy_aggregator_adjustments WHERE id=? AND operation_token=?`,
+      ).bind(crypto.randomUUID(), actor.userId, JSON.stringify(adjustmentOut(current)), now, id, operationToken),
+    ]);
+    if (Number(batch[0]?.meta?.changes ?? 0) !== 1) {
+      throw new ApiFailure(409, "As aulas do ajuste mudaram durante a operação. Atualize a base e tente novamente.");
+    }
+    if (Number(batch[1]?.meta?.changes ?? 0) !== rows.length) {
+      throw new ApiFailure(409, "Nem todas as estimativas foram desfeitas. Atualize a base antes de continuar.");
+    }
+    return new Response(null, { status: 204 });
+  }
+  return null;
+}
+
 async function listRecords(request: Request, env: WorkerEnv) {
   const url = new URL(request.url);
   const input = parse(GetOccupancyRecordsQueryParams, Object.fromEntries(url.searchParams));
@@ -900,7 +1408,8 @@ async function commitOccupancyImport(
       const result = await env.DB.batch([
         env.DB.prepare(
           `UPDATE occupancy_records SET modality_id=?, kind=?, date=?, month=?, percentage=?,
-             reported_percentage=?, presences=?, capacity=?, aggregator_presences=?, start_time=?, end_time=?, class_name=?,
+             reported_percentage=?, presences=?, capacity=?, aggregator_presences=?, aggregator_origin=NULL,
+             aggregator_adjustment_id=NULL, start_time=?, end_time=?, class_name=?,
              scope_key=?, notes=?, source_file_hash=?, source_sheet=?, source_cell=?, source_cells=?,
              version=version+1, updated_by=?, updated_at=?
            WHERE id=? AND version=? AND deleted_at IS NULL`,
@@ -1633,7 +2142,8 @@ async function restoreOccupancyBackup(
       const result = await env.DB.batch([
         env.DB.prepare(
           `UPDATE occupancy_records SET modality_id=?, kind=?, date=?, month=?, percentage=?,
-             reported_percentage=?, presences=?, capacity=?, aggregator_presences=?, start_time=?, end_time=?, class_name=?,
+             reported_percentage=?, presences=?, capacity=?, aggregator_presences=?, aggregator_origin=NULL,
+             aggregator_adjustment_id=NULL, start_time=?, end_time=?, class_name=?,
              scope_key=?, notes=?, source_file_hash=?, source_sheet=?, source_cell=?, source_cells=?,
              version=version+1, updated_by=?, updated_at=?
            WHERE id=? AND deleted_at IS NULL`,
@@ -1995,8 +2505,9 @@ async function saveRecord(
   const result = await env.DB.batch([
     env.DB
       .prepare(
-        `UPDATE occupancy_records SET modality_id=?, kind=?, date=?, month=?, percentage=?,
-          reported_percentage=?, presences=?, capacity=?, aggregator_presences=?, start_time=?, end_time=?, class_name=?,
+          `UPDATE occupancy_records SET modality_id=?, kind=?, date=?, month=?, percentage=?,
+           reported_percentage=?, presences=?, capacity=?, aggregator_presences=?, aggregator_origin=NULL,
+           aggregator_adjustment_id=NULL, start_time=?, end_time=?, class_name=?,
           scope_key=?, notes=?, version=version+1, updated_by=?, updated_at=?
          WHERE id=? AND version=? AND deleted_at IS NULL`,
       )
@@ -2051,6 +2562,17 @@ export async function handleOccupancyRequest(
   path: string,
 ): Promise<Response | null> {
   try {
+    try {
+      const aggregatorAdjustmentResponse = await monthlyAggregatorAdjustmentRoutes(
+        request,
+        env,
+        actor,
+        path,
+      );
+      if (aggregatorAdjustmentResponse) return aggregatorAdjustmentResponse;
+    } catch (error) {
+      monthlyAggregatorRouteError(error);
+    }
     const goalResponse = await monthlyGoalRoutes(request, env, path);
     if (goalResponse) return goalResponse;
     const modalityResponse = await modalityRoutes(request, env, actor, path);

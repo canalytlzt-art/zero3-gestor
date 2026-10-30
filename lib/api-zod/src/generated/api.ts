@@ -159,6 +159,164 @@ export const UpsertOccupancyMonthlyGoalResponse = zod.object({
 })
 
 
+/**
+ * @summary List monthly aggregator adjustments
+ */
+export const getOccupancyMonthlyAggregatorAdjustmentsQueryMonthRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
+
+
+export const GetOccupancyMonthlyAggregatorAdjustmentsQueryParams = zod.object({
+  "month": zod.coerce.string().regex(getOccupancyMonthlyAggregatorAdjustmentsQueryMonthRegExp)
+})
+
+export const getOccupancyMonthlyAggregatorAdjustmentsResponseMonthRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
+export const getOccupancyMonthlyAggregatorAdjustmentsResponseTargetPresencesMin = 0;
+export const getOccupancyMonthlyAggregatorAdjustmentsResponseTargetPresencesMax = 2147483647;
+
+
+
+
+export const GetOccupancyMonthlyAggregatorAdjustmentsResponseItem = zod.object({
+  "id": zod.string().uuid(),
+  "month": zod.string().regex(getOccupancyMonthlyAggregatorAdjustmentsResponseMonthRegExp),
+  "scopeKey": zod.string(),
+  "modalityId": zod.string().uuid().nullable(),
+  "modalityName": zod.string().nullable(),
+  "targetPresences": zod.number().int().min(getOccupancyMonthlyAggregatorAdjustmentsResponseTargetPresencesMin).max(getOccupancyMonthlyAggregatorAdjustmentsResponseTargetPresencesMax),
+  "version": zod.number().int().min(1),
+  "active": zod.boolean(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date(),
+  "deletedAt": zod.coerce.date().nullable()
+})
+export const GetOccupancyMonthlyAggregatorAdjustmentsResponse = zod.array(GetOccupancyMonthlyAggregatorAdjustmentsResponseItem)
+
+
+/**
+ * @summary Preview a proportional monthly aggregator adjustment
+ */
+export const previewOccupancyMonthlyAggregatorAdjustmentBodyMonthRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
+export const previewOccupancyMonthlyAggregatorAdjustmentBodyTargetPresencesMin = 0;
+export const previewOccupancyMonthlyAggregatorAdjustmentBodyTargetPresencesMax = 2147483647;
+
+
+
+export const PreviewOccupancyMonthlyAggregatorAdjustmentBody = zod.object({
+  "month": zod.string().regex(previewOccupancyMonthlyAggregatorAdjustmentBodyMonthRegExp),
+  "modalityId": zod.string().uuid().nullable(),
+  "targetPresences": zod.number().int().min(previewOccupancyMonthlyAggregatorAdjustmentBodyTargetPresencesMin).max(previewOccupancyMonthlyAggregatorAdjustmentBodyTargetPresencesMax)
+})
+
+export const previewOccupancyMonthlyAggregatorAdjustmentResponseExpectedVersionMin = 0;
+
+export const previewOccupancyMonthlyAggregatorAdjustmentResponseAllocationsItemPresencesMin = 0;
+
+export const previewOccupancyMonthlyAggregatorAdjustmentResponseAllocationsItemPreviousAggregatorPresencesMin = 0;
+
+export const previewOccupancyMonthlyAggregatorAdjustmentResponseAllocationsItemAssignedAggregatorPresencesMin = 0;
+
+
+
+export const PreviewOccupancyMonthlyAggregatorAdjustmentResponse = zod.object({
+  "month": zod.string(),
+  "modalityId": zod.string().uuid().nullable(),
+  "modalityName": zod.string().nullable(),
+  "targetPresences": zod.number().int(),
+  "totalPresences": zod.number().int(),
+  "recordedAggregatorPresences": zod.number().int(),
+  "previousEstimatedPresences": zod.number().int(),
+  "remainingToDistribute": zod.number().int(),
+  "otherPresences": zod.number().int().nullable(),
+  "measuredClassCount": zod.number().int(),
+  "candidateClassCount": zod.number().int(),
+  "canSave": zod.boolean(),
+  "message": zod.string(),
+  "expectedVersion": zod.number().int().min(previewOccupancyMonthlyAggregatorAdjustmentResponseExpectedVersionMin),
+  "adjustmentId": zod.string().uuid(),
+  "snapshotToken": zod.string(),
+  "allocations": zod.array(zod.object({
+  "recordId": zod.string().uuid(),
+  "date": zod.string(),
+  "modalityName": zod.string(),
+  "startTime": zod.string().nullable(),
+  "className": zod.string().nullable(),
+  "presences": zod.number().int().min(previewOccupancyMonthlyAggregatorAdjustmentResponseAllocationsItemPresencesMin),
+  "previousAggregatorPresences": zod.number().int().min(previewOccupancyMonthlyAggregatorAdjustmentResponseAllocationsItemPreviousAggregatorPresencesMin).nullable(),
+  "assignedAggregatorPresences": zod.number().int().min(previewOccupancyMonthlyAggregatorAdjustmentResponseAllocationsItemAssignedAggregatorPresencesMin)
+}))
+})
+
+
+/**
+ * @summary Save or update a previewed monthly aggregator adjustment
+ */
+export const saveOccupancyMonthlyAggregatorAdjustmentPathMonthRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
+
+
+export const SaveOccupancyMonthlyAggregatorAdjustmentParams = zod.object({
+  "month": zod.coerce.string().regex(saveOccupancyMonthlyAggregatorAdjustmentPathMonthRegExp)
+})
+
+export const saveOccupancyMonthlyAggregatorAdjustmentBodyOneMonthRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
+export const saveOccupancyMonthlyAggregatorAdjustmentBodyOneTargetPresencesMin = 0;
+export const saveOccupancyMonthlyAggregatorAdjustmentBodyOneTargetPresencesMax = 2147483647;
+
+export const saveOccupancyMonthlyAggregatorAdjustmentBodyTwoExpectedVersionMin = 0;
+
+export const saveOccupancyMonthlyAggregatorAdjustmentBodyTwoSnapshotTokenMin = 64;
+export const saveOccupancyMonthlyAggregatorAdjustmentBodyTwoSnapshotTokenMax = 64;
+
+
+
+export const SaveOccupancyMonthlyAggregatorAdjustmentBody = zod.object({
+  "month": zod.string().regex(saveOccupancyMonthlyAggregatorAdjustmentBodyOneMonthRegExp),
+  "modalityId": zod.string().uuid().nullable(),
+  "targetPresences": zod.number().int().min(saveOccupancyMonthlyAggregatorAdjustmentBodyOneTargetPresencesMin).max(saveOccupancyMonthlyAggregatorAdjustmentBodyOneTargetPresencesMax)
+}).and(zod.object({
+  "expectedVersion": zod.number().int().min(saveOccupancyMonthlyAggregatorAdjustmentBodyTwoExpectedVersionMin),
+  "adjustmentId": zod.string().uuid(),
+  "snapshotToken": zod.string().min(saveOccupancyMonthlyAggregatorAdjustmentBodyTwoSnapshotTokenMin).max(saveOccupancyMonthlyAggregatorAdjustmentBodyTwoSnapshotTokenMax)
+}))
+
+export const saveOccupancyMonthlyAggregatorAdjustmentResponseMonthRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
+export const saveOccupancyMonthlyAggregatorAdjustmentResponseTargetPresencesMin = 0;
+export const saveOccupancyMonthlyAggregatorAdjustmentResponseTargetPresencesMax = 2147483647;
+
+
+
+
+export const SaveOccupancyMonthlyAggregatorAdjustmentResponse = zod.object({
+  "id": zod.string().uuid(),
+  "month": zod.string().regex(saveOccupancyMonthlyAggregatorAdjustmentResponseMonthRegExp),
+  "scopeKey": zod.string(),
+  "modalityId": zod.string().uuid().nullable(),
+  "modalityName": zod.string().nullable(),
+  "targetPresences": zod.number().int().min(saveOccupancyMonthlyAggregatorAdjustmentResponseTargetPresencesMin).max(saveOccupancyMonthlyAggregatorAdjustmentResponseTargetPresencesMax),
+  "version": zod.number().int().min(1),
+  "active": zod.boolean(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date(),
+  "deletedAt": zod.coerce.date().nullable()
+})
+
+
+/**
+ * @summary Undo estimates while preserving recorded aggregator values
+ */
+export const UndoOccupancyMonthlyAggregatorAdjustmentParams = zod.object({
+  "id": zod.coerce.string().uuid()
+})
+
+
+
+
+export const UndoOccupancyMonthlyAggregatorAdjustmentBody = zod.object({
+  "expectedVersion": zod.number().int().min(1)
+})
+
+export const UndoOccupancyMonthlyAggregatorAdjustmentResponse = zod.void()
+
+
 export const getOccupancyRecordsQueryYearMin = 1900;
 export const getOccupancyRecordsQueryYearMax = 2100;
 
@@ -209,6 +367,7 @@ export const GetOccupancyRecordsResponseItem = zod.object({
   "presences": zod.number().int().min(getOccupancyRecordsResponsePresencesMin).max(getOccupancyRecordsResponsePresencesMax).nullable(),
   "capacity": zod.number().int().min(1).max(getOccupancyRecordsResponseCapacityMax).nullable(),
   "aggregatorPresences": zod.number().int().min(getOccupancyRecordsResponseAggregatorPresencesMin).max(getOccupancyRecordsResponseAggregatorPresencesMax).nullish().describe('Presenças de alunos agregadores incluídas no total; null significa não informado.'),
+  "aggregatorSource": zod.union([zod.literal('recorded'),zod.literal('monthly_estimated'),zod.literal(null)]).nullish().describe('Origem do valor de agregadores; distingue valores registrados das estimativas do ajuste mensal.'),
   "startTime": zod.string().regex(getOccupancyRecordsResponseStartTimeRegExp).nullable(),
   "endTime": zod.string().regex(getOccupancyRecordsResponseEndTimeRegExp).nullable(),
   "className": zod.string().nullable(),
@@ -293,6 +452,7 @@ export const CreateOccupancyRecordResponse = zod.object({
   "presences": zod.number().int().min(createOccupancyRecordResponsePresencesMin).max(createOccupancyRecordResponsePresencesMax).nullable(),
   "capacity": zod.number().int().min(1).max(createOccupancyRecordResponseCapacityMax).nullable(),
   "aggregatorPresences": zod.number().int().min(createOccupancyRecordResponseAggregatorPresencesMin).max(createOccupancyRecordResponseAggregatorPresencesMax).nullish().describe('Presenças de alunos agregadores incluídas no total; null significa não informado.'),
+  "aggregatorSource": zod.union([zod.literal('recorded'),zod.literal('monthly_estimated'),zod.literal(null)]).nullish().describe('Origem do valor de agregadores; distingue valores registrados das estimativas do ajuste mensal.'),
   "startTime": zod.string().regex(createOccupancyRecordResponseStartTimeRegExp).nullable(),
   "endTime": zod.string().regex(createOccupancyRecordResponseEndTimeRegExp).nullable(),
   "className": zod.string().nullable(),
@@ -383,6 +543,7 @@ export const UpdateOccupancyRecordResponse = zod.object({
   "presences": zod.number().int().min(updateOccupancyRecordResponsePresencesMin).max(updateOccupancyRecordResponsePresencesMax).nullable(),
   "capacity": zod.number().int().min(1).max(updateOccupancyRecordResponseCapacityMax).nullable(),
   "aggregatorPresences": zod.number().int().min(updateOccupancyRecordResponseAggregatorPresencesMin).max(updateOccupancyRecordResponseAggregatorPresencesMax).nullish().describe('Presenças de alunos agregadores incluídas no total; null significa não informado.'),
+  "aggregatorSource": zod.union([zod.literal('recorded'),zod.literal('monthly_estimated'),zod.literal(null)]).nullish().describe('Origem do valor de agregadores; distingue valores registrados das estimativas do ajuste mensal.'),
   "startTime": zod.string().regex(updateOccupancyRecordResponseStartTimeRegExp).nullable(),
   "endTime": zod.string().regex(updateOccupancyRecordResponseEndTimeRegExp).nullable(),
   "className": zod.string().nullable(),
@@ -504,6 +665,7 @@ export const PreviewOccupancyImportResponse = zod.object({
   "presences": zod.number().int().min(previewOccupancyImportResponseRowsItemExistingRecordOnePresencesMin).max(previewOccupancyImportResponseRowsItemExistingRecordOnePresencesMax).nullable(),
   "capacity": zod.number().int().min(1).max(previewOccupancyImportResponseRowsItemExistingRecordOneCapacityMax).nullable(),
   "aggregatorPresences": zod.number().int().min(previewOccupancyImportResponseRowsItemExistingRecordOneAggregatorPresencesMin).max(previewOccupancyImportResponseRowsItemExistingRecordOneAggregatorPresencesMax).nullish().describe('Presenças de alunos agregadores incluídas no total; null significa não informado.'),
+  "aggregatorSource": zod.union([zod.literal('recorded'),zod.literal('monthly_estimated'),zod.literal(null)]).nullish().describe('Origem do valor de agregadores; distingue valores registrados das estimativas do ajuste mensal.'),
   "startTime": zod.string().regex(previewOccupancyImportResponseRowsItemExistingRecordOneStartTimeRegExp).nullable(),
   "endTime": zod.string().regex(previewOccupancyImportResponseRowsItemExistingRecordOneEndTimeRegExp).nullable(),
   "className": zod.string().nullable(),
@@ -752,6 +914,7 @@ export const CreateOccupancyBackupResponse = zod.object({
   "presences": zod.number().int().min(createOccupancyBackupResponseRecordsItemRecordPresencesMin).max(createOccupancyBackupResponseRecordsItemRecordPresencesMax).nullable(),
   "capacity": zod.number().int().min(1).max(createOccupancyBackupResponseRecordsItemRecordCapacityMax).nullable(),
   "aggregatorPresences": zod.number().int().min(createOccupancyBackupResponseRecordsItemRecordAggregatorPresencesMin).max(createOccupancyBackupResponseRecordsItemRecordAggregatorPresencesMax).nullish().describe('Presenças de alunos agregadores incluídas no total; null significa não informado.'),
+  "aggregatorSource": zod.union([zod.literal('recorded'),zod.literal('monthly_estimated'),zod.literal(null)]).nullish().describe('Origem do valor de agregadores; distingue valores registrados das estimativas do ajuste mensal.'),
   "startTime": zod.string().regex(createOccupancyBackupResponseRecordsItemRecordStartTimeRegExp).nullable(),
   "endTime": zod.string().regex(createOccupancyBackupResponseRecordsItemRecordEndTimeRegExp).nullable(),
   "className": zod.string().nullable(),
@@ -881,6 +1044,7 @@ export const PreviewOccupancyBackupRestoreBody = zod.object({
   "presences": zod.number().int().min(previewOccupancyBackupRestoreBodyBackupRecordsItemRecordPresencesMin).max(previewOccupancyBackupRestoreBodyBackupRecordsItemRecordPresencesMax).nullable(),
   "capacity": zod.number().int().min(1).max(previewOccupancyBackupRestoreBodyBackupRecordsItemRecordCapacityMax).nullable(),
   "aggregatorPresences": zod.number().int().min(previewOccupancyBackupRestoreBodyBackupRecordsItemRecordAggregatorPresencesMin).max(previewOccupancyBackupRestoreBodyBackupRecordsItemRecordAggregatorPresencesMax).nullish().describe('Presenças de alunos agregadores incluídas no total; null significa não informado.'),
+  "aggregatorSource": zod.union([zod.literal('recorded'),zod.literal('monthly_estimated'),zod.literal(null)]).nullish().describe('Origem do valor de agregadores; distingue valores registrados das estimativas do ajuste mensal.'),
   "startTime": zod.string().regex(previewOccupancyBackupRestoreBodyBackupRecordsItemRecordStartTimeRegExp).nullable(),
   "endTime": zod.string().regex(previewOccupancyBackupRestoreBodyBackupRecordsItemRecordEndTimeRegExp).nullable(),
   "className": zod.string().nullable(),
@@ -1041,6 +1205,7 @@ export const RestoreOccupancyBackupBody = zod.object({
   "presences": zod.number().int().min(restoreOccupancyBackupBodyBackupRecordsItemRecordPresencesMin).max(restoreOccupancyBackupBodyBackupRecordsItemRecordPresencesMax).nullable(),
   "capacity": zod.number().int().min(1).max(restoreOccupancyBackupBodyBackupRecordsItemRecordCapacityMax).nullable(),
   "aggregatorPresences": zod.number().int().min(restoreOccupancyBackupBodyBackupRecordsItemRecordAggregatorPresencesMin).max(restoreOccupancyBackupBodyBackupRecordsItemRecordAggregatorPresencesMax).nullish().describe('Presenças de alunos agregadores incluídas no total; null significa não informado.'),
+  "aggregatorSource": zod.union([zod.literal('recorded'),zod.literal('monthly_estimated'),zod.literal(null)]).nullish().describe('Origem do valor de agregadores; distingue valores registrados das estimativas do ajuste mensal.'),
   "startTime": zod.string().regex(restoreOccupancyBackupBodyBackupRecordsItemRecordStartTimeRegExp).nullable(),
   "endTime": zod.string().regex(restoreOccupancyBackupBodyBackupRecordsItemRecordEndTimeRegExp).nullable(),
   "className": zod.string().nullable(),

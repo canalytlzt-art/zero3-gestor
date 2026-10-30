@@ -74,3 +74,9 @@ Aplicar a mesma regra a vendas: dia da semana, semana ISO, mês, trimestre e ano
 **Why:** O usuário pediu filtros retroativos no faturamento, preservando os registros financeiros existentes e sem alterar o D1.
 
 **How to apply:** Tratar `sale_date` como data civil (`YYYY-MM-DD`), calcular dias e semanas sem conversão de fuso, manter intervalos inclusivos e não criar migrações para atributos que podem ser derivados.
+
+Totais mensais de agregadores precisam ser distribuídos somente entre aulas diárias medidas sem valor informado, proporcionalmente às presenças. Valores registrados, inclusive zero, nunca são substituídos; estimativas devem permanecer identificáveis e reversíveis.
+
+**Why:** Um total mensal administrativo precisa conciliar com os registros de aula sem alterar presença/capacidade nem tratar participação repetida como aluno único.
+
+**How to apply:** Excluir resumos mensais, manter estimativas vinculadas ao ajuste e registrar auditoria; na atualização ou reversão, tocar apenas nas linhas pertencentes ao ajuste e preservar valores informados fora dele.

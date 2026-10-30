@@ -7,7 +7,7 @@ type EffectiveGroup = { daily: OccupancyRecord[]; monthly: OccupancyRecord[] };
 
 const occupancyColumns = [
   'Modalidade', 'Data', 'Dia da semana', 'Horário inicial', 'Presenças/Vagas', 'Agregadores',
-  'Demais alunos', 'Participação agregadores (%)', 'Ocupação (%)',
+  'Demais alunos', 'Participação agregadores (%)', 'Origem dos agregadores', 'Ocupação (%)',
   'Horário final', 'Turma', 'Observação', 'Tipo do registro', 'Percentual original (%)', 'Critério de cálculo',
 ];
 const summaryColumns = [
@@ -104,6 +104,9 @@ function detailedRows(records: readonly OccupancyRecord[]) {
     'Participação agregadores (%)': record.aggregatorPresences == null || record.presences === null
       ? ''
       : record.presences > 0 ? record.aggregatorPresences / record.presences * 100 : 0,
+    'Origem dos agregadores': record.aggregatorPresences == null
+      ? ''
+      : record.aggregatorSource === 'monthly_estimated' ? 'Ajuste mensal estimado' : 'Informado na aula',
     'Ocupação (%)': occupancyValue(record),
     'Horário final': record.endTime ?? '',
     'Turma': record.className ?? '',

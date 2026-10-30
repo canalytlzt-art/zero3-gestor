@@ -29,6 +29,7 @@ import type {
   CreateSaleInput,
   CreateSalesRefundInput,
   GetMonthlySalesBackupParams,
+  GetOccupancyMonthlyAggregatorAdjustmentsParams,
   GetOccupancyMonthlyGoalsParams,
   GetOccupancyRecordsParams,
   GetSalesImportOriginsParams,
@@ -52,6 +53,11 @@ import type {
   OccupancyModalityDeletion,
   OccupancyModalityInput,
   OccupancyModalityUpdate,
+  OccupancyMonthlyAggregatorAdjustment,
+  OccupancyMonthlyAggregatorAdjustmentDelete,
+  OccupancyMonthlyAggregatorAdjustmentInput,
+  OccupancyMonthlyAggregatorAdjustmentPreview,
+  OccupancyMonthlyAggregatorAdjustmentSave,
   OccupancyMonthlyGoal,
   OccupancyMonthlyGoalInput,
   OccupancyRecord,
@@ -600,6 +606,356 @@ export const useUpsertOccupancyMonthlyGoal = <TError = ErrorType<OccupancyFailur
         TContext
       > => {
       return useMutation(getUpsertOccupancyMonthlyGoalMutationOptions(options));
+    }
+
+export const getGetOccupancyMonthlyAggregatorAdjustmentsUrl = (params: GetOccupancyMonthlyAggregatorAdjustmentsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/occupancy/monthly-aggregator-adjustments?${stringifiedParams}` : `/api/occupancy/monthly-aggregator-adjustments`
+}
+
+/**
+ * @summary List monthly aggregator adjustments
+ */
+export const getOccupancyMonthlyAggregatorAdjustments = async (params: GetOccupancyMonthlyAggregatorAdjustmentsParams, options?: Parameters<typeof customFetch>[1]): Promise<OccupancyMonthlyAggregatorAdjustment[]> => {
+
+  return customFetch<OccupancyMonthlyAggregatorAdjustment[]>(getGetOccupancyMonthlyAggregatorAdjustmentsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOccupancyMonthlyAggregatorAdjustmentsQueryKey = (params?: GetOccupancyMonthlyAggregatorAdjustmentsParams,) => {
+    return [
+    `/api/occupancy/monthly-aggregator-adjustments`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetOccupancyMonthlyAggregatorAdjustmentsQueryOptions = <TData = Awaited<ReturnType<typeof getOccupancyMonthlyAggregatorAdjustments>>, TError = ErrorType<OccupancyFailureResponse>>(params: GetOccupancyMonthlyAggregatorAdjustmentsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOccupancyMonthlyAggregatorAdjustments>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOccupancyMonthlyAggregatorAdjustmentsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOccupancyMonthlyAggregatorAdjustments>>> = ({ signal }) => getOccupancyMonthlyAggregatorAdjustments(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOccupancyMonthlyAggregatorAdjustments>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetOccupancyMonthlyAggregatorAdjustmentsQueryResult = NonNullable<Awaited<ReturnType<typeof getOccupancyMonthlyAggregatorAdjustments>>>
+export type GetOccupancyMonthlyAggregatorAdjustmentsQueryError = ErrorType<OccupancyFailureResponse>
+
+
+/**
+ * @summary List monthly aggregator adjustments
+ */
+
+export function useGetOccupancyMonthlyAggregatorAdjustments<TData = Awaited<ReturnType<typeof getOccupancyMonthlyAggregatorAdjustments>>, TError = ErrorType<OccupancyFailureResponse>>(
+ params: GetOccupancyMonthlyAggregatorAdjustmentsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOccupancyMonthlyAggregatorAdjustments>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetOccupancyMonthlyAggregatorAdjustmentsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getPreviewOccupancyMonthlyAggregatorAdjustmentUrl = () => {
+
+
+
+
+  return `/api/occupancy/monthly-aggregator-adjustments/preview`
+}
+
+/**
+ * @summary Preview a proportional monthly aggregator adjustment
+ */
+export const previewOccupancyMonthlyAggregatorAdjustment = async (occupancyMonthlyAggregatorAdjustmentInput: OccupancyMonthlyAggregatorAdjustmentInput, options?: Parameters<typeof customFetch>[1]): Promise<OccupancyMonthlyAggregatorAdjustmentPreview> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<OccupancyMonthlyAggregatorAdjustmentPreview>(getPreviewOccupancyMonthlyAggregatorAdjustmentUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(occupancyMonthlyAggregatorAdjustmentInput)
+  }
+);}
+
+
+
+
+
+export const getPreviewOccupancyMonthlyAggregatorAdjustmentMutationKey = () => ['previewOccupancyMonthlyAggregatorAdjustment'] as const;
+
+export const getPreviewOccupancyMonthlyAggregatorAdjustmentMutationOptions = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewOccupancyMonthlyAggregatorAdjustment>>, TError,PreviewOccupancyMonthlyAggregatorAdjustmentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof previewOccupancyMonthlyAggregatorAdjustment>>, TError,PreviewOccupancyMonthlyAggregatorAdjustmentMutationVariables, TContext> => {
+
+const mutationKey = getPreviewOccupancyMonthlyAggregatorAdjustmentMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof previewOccupancyMonthlyAggregatorAdjustment>>, PreviewOccupancyMonthlyAggregatorAdjustmentMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  previewOccupancyMonthlyAggregatorAdjustment(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PreviewOccupancyMonthlyAggregatorAdjustmentMutationResult = NonNullable<Awaited<ReturnType<typeof previewOccupancyMonthlyAggregatorAdjustment>>>
+    export type PreviewOccupancyMonthlyAggregatorAdjustmentMutationBody = BodyType<OccupancyMonthlyAggregatorAdjustmentInput>
+    export type PreviewOccupancyMonthlyAggregatorAdjustmentMutationError = ErrorType<OccupancyFailureResponse>
+    export type PreviewOccupancyMonthlyAggregatorAdjustmentMutationVariables = {data: BodyType<OccupancyMonthlyAggregatorAdjustmentInput>}
+
+    /**
+ * @summary Preview a proportional monthly aggregator adjustment
+ */
+export const usePreviewOccupancyMonthlyAggregatorAdjustment = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewOccupancyMonthlyAggregatorAdjustment>>, TError,PreviewOccupancyMonthlyAggregatorAdjustmentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof previewOccupancyMonthlyAggregatorAdjustment>>,
+        TError,
+        PreviewOccupancyMonthlyAggregatorAdjustmentMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPreviewOccupancyMonthlyAggregatorAdjustmentMutationOptions(options));
+    }
+
+export const getSaveOccupancyMonthlyAggregatorAdjustmentUrl = (month: string,) => {
+
+
+
+
+  return `/api/occupancy/monthly-aggregator-adjustments/${month}`
+}
+
+/**
+ * @summary Save or update a previewed monthly aggregator adjustment
+ */
+export const saveOccupancyMonthlyAggregatorAdjustment = async (month: string,
+    occupancyMonthlyAggregatorAdjustmentSave: OccupancyMonthlyAggregatorAdjustmentSave, options?: Parameters<typeof customFetch>[1]): Promise<OccupancyMonthlyAggregatorAdjustment> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<OccupancyMonthlyAggregatorAdjustment>(getSaveOccupancyMonthlyAggregatorAdjustmentUrl(month),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(occupancyMonthlyAggregatorAdjustmentSave)
+  }
+);}
+
+
+
+
+
+export const getSaveOccupancyMonthlyAggregatorAdjustmentMutationKey = () => ['saveOccupancyMonthlyAggregatorAdjustment'] as const;
+
+export const getSaveOccupancyMonthlyAggregatorAdjustmentMutationOptions = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveOccupancyMonthlyAggregatorAdjustment>>, TError,SaveOccupancyMonthlyAggregatorAdjustmentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveOccupancyMonthlyAggregatorAdjustment>>, TError,SaveOccupancyMonthlyAggregatorAdjustmentMutationVariables, TContext> => {
+
+const mutationKey = getSaveOccupancyMonthlyAggregatorAdjustmentMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveOccupancyMonthlyAggregatorAdjustment>>, SaveOccupancyMonthlyAggregatorAdjustmentMutationVariables> = (props) => {
+          const {month,data} = props ?? {};
+
+          return  saveOccupancyMonthlyAggregatorAdjustment(month,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveOccupancyMonthlyAggregatorAdjustmentMutationResult = NonNullable<Awaited<ReturnType<typeof saveOccupancyMonthlyAggregatorAdjustment>>>
+    export type SaveOccupancyMonthlyAggregatorAdjustmentMutationBody = BodyType<OccupancyMonthlyAggregatorAdjustmentSave>
+    export type SaveOccupancyMonthlyAggregatorAdjustmentMutationError = ErrorType<OccupancyFailureResponse>
+    export type SaveOccupancyMonthlyAggregatorAdjustmentMutationVariables = {month: string;data: BodyType<OccupancyMonthlyAggregatorAdjustmentSave>}
+
+    /**
+ * @summary Save or update a previewed monthly aggregator adjustment
+ */
+export const useSaveOccupancyMonthlyAggregatorAdjustment = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveOccupancyMonthlyAggregatorAdjustment>>, TError,SaveOccupancyMonthlyAggregatorAdjustmentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveOccupancyMonthlyAggregatorAdjustment>>,
+        TError,
+        SaveOccupancyMonthlyAggregatorAdjustmentMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSaveOccupancyMonthlyAggregatorAdjustmentMutationOptions(options));
+    }
+
+export const getUndoOccupancyMonthlyAggregatorAdjustmentUrl = (id: string,) => {
+
+
+
+
+  return `/api/occupancy/monthly-aggregator-adjustments/${id}`
+}
+
+/**
+ * @summary Undo estimates while preserving recorded aggregator values
+ */
+export const undoOccupancyMonthlyAggregatorAdjustment = async (id: string,
+    occupancyMonthlyAggregatorAdjustmentDelete: OccupancyMonthlyAggregatorAdjustmentDelete, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<void>(getUndoOccupancyMonthlyAggregatorAdjustmentUrl(id),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(occupancyMonthlyAggregatorAdjustmentDelete)
+  }
+);}
+
+
+
+
+
+export const getUndoOccupancyMonthlyAggregatorAdjustmentMutationKey = () => ['undoOccupancyMonthlyAggregatorAdjustment'] as const;
+
+export const getUndoOccupancyMonthlyAggregatorAdjustmentMutationOptions = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof undoOccupancyMonthlyAggregatorAdjustment>>, TError,UndoOccupancyMonthlyAggregatorAdjustmentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof undoOccupancyMonthlyAggregatorAdjustment>>, TError,UndoOccupancyMonthlyAggregatorAdjustmentMutationVariables, TContext> => {
+
+const mutationKey = getUndoOccupancyMonthlyAggregatorAdjustmentMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof undoOccupancyMonthlyAggregatorAdjustment>>, UndoOccupancyMonthlyAggregatorAdjustmentMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  undoOccupancyMonthlyAggregatorAdjustment(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UndoOccupancyMonthlyAggregatorAdjustmentMutationResult = NonNullable<Awaited<ReturnType<typeof undoOccupancyMonthlyAggregatorAdjustment>>>
+    export type UndoOccupancyMonthlyAggregatorAdjustmentMutationBody = BodyType<OccupancyMonthlyAggregatorAdjustmentDelete>
+    export type UndoOccupancyMonthlyAggregatorAdjustmentMutationError = ErrorType<OccupancyFailureResponse>
+    export type UndoOccupancyMonthlyAggregatorAdjustmentMutationVariables = {id: string;data: BodyType<OccupancyMonthlyAggregatorAdjustmentDelete>}
+
+    /**
+ * @summary Undo estimates while preserving recorded aggregator values
+ */
+export const useUndoOccupancyMonthlyAggregatorAdjustment = <TError = ErrorType<OccupancyFailureResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof undoOccupancyMonthlyAggregatorAdjustment>>, TError,UndoOccupancyMonthlyAggregatorAdjustmentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof undoOccupancyMonthlyAggregatorAdjustment>>,
+        TError,
+        UndoOccupancyMonthlyAggregatorAdjustmentMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUndoOccupancyMonthlyAggregatorAdjustmentMutationOptions(options));
     }
 
 export const getGetOccupancyRecordsUrl = (params?: GetOccupancyRecordsParams,) => {

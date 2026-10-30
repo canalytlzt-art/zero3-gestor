@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { OccupancyRecordAggregatorSource } from './occupancyRecordAggregatorSource';
 import type { OccupancyRecordKind } from './occupancyRecordKind';
 import type { OccupancyRecordSourceCells } from './occupancyRecordSourceCells';
 
@@ -41,6 +42,11 @@ export interface OccupancyRecord {
      * @nullable
      */
   aggregatorPresences?: number | null;
+  /**
+     * Origem do valor de agregadores; distingue valores registrados das estimativas do ajuste mensal.
+     * @nullable
+     */
+  aggregatorSource?: OccupancyRecordAggregatorSource;
   /**
      * @nullable
      * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$

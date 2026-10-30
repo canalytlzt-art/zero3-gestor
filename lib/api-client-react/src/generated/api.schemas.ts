@@ -90,12 +90,118 @@ export interface OccupancyMonthlyGoalInput {
   notes: string | null;
 }
 
+export interface OccupancyMonthlyAggregatorAdjustment {
+  id: string;
+  /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
+  month: string;
+  scopeKey: string;
+  /** @nullable */
+  modalityId: string | null;
+  /** @nullable */
+  modalityName: string | null;
+  /**
+     * @minimum 0
+     * @maximum 2147483647
+     */
+  targetPresences: number;
+  /** @minimum 1 */
+  version: number;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+  /** @nullable */
+  deletedAt: string | null;
+}
+
+export interface OccupancyMonthlyAggregatorAdjustmentInput {
+  /** @pattern ^\d{4}-(0[1-9]|1[0-2])$ */
+  month: string;
+  /** @nullable */
+  modalityId: string | null;
+  /**
+     * @minimum 0
+     * @maximum 2147483647
+     */
+  targetPresences: number;
+}
+
+export interface OccupancyMonthlyAggregatorAllocation {
+  recordId: string;
+  date: string;
+  modalityName: string;
+  /** @nullable */
+  startTime: string | null;
+  /** @nullable */
+  className: string | null;
+  /** @minimum 0 */
+  presences: number;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  previousAggregatorPresences: number | null;
+  /** @minimum 0 */
+  assignedAggregatorPresences: number;
+}
+
+export interface OccupancyMonthlyAggregatorAdjustmentPreview {
+  month: string;
+  /** @nullable */
+  modalityId: string | null;
+  /** @nullable */
+  modalityName: string | null;
+  targetPresences: number;
+  totalPresences: number;
+  recordedAggregatorPresences: number;
+  previousEstimatedPresences: number;
+  remainingToDistribute: number;
+  /** @nullable */
+  otherPresences: number | null;
+  measuredClassCount: number;
+  candidateClassCount: number;
+  canSave: boolean;
+  message: string;
+  /** @minimum 0 */
+  expectedVersion: number;
+  adjustmentId: string;
+  snapshotToken: string;
+  allocations: OccupancyMonthlyAggregatorAllocation[];
+}
+
+export type OccupancyMonthlyAggregatorAdjustmentSave = OccupancyMonthlyAggregatorAdjustmentInput & {
+  /** @minimum 0 */
+  expectedVersion: number;
+  adjustmentId: string;
+  /**
+     * @minLength 64
+     * @maxLength 64
+     */
+  snapshotToken: string;
+};
+
+export interface OccupancyMonthlyAggregatorAdjustmentDelete {
+  /** @minimum 1 */
+  expectedVersion: number;
+}
+
 export type OccupancyRecordKind = typeof OccupancyRecordKind[keyof typeof OccupancyRecordKind];
 
 
 export const OccupancyRecordKind = {
   daily: 'daily',
   monthly: 'monthly',
+} as const;
+
+/**
+ * Origem do valor de agregadores; distingue valores registrados das estimativas do ajuste mensal.
+ * @nullable
+ */
+export type OccupancyRecordAggregatorSource = typeof OccupancyRecordAggregatorSource[keyof typeof OccupancyRecordAggregatorSource] | null;
+
+
+export const OccupancyRecordAggregatorSource = {
+  recorded: 'recorded',
+  monthly_estimated: 'monthly_estimated',
 } as const;
 
 export type OccupancyRecordSourceCells = {[key: string]: string} | null;
@@ -133,6 +239,11 @@ export interface OccupancyRecord {
      * @nullable
      */
   aggregatorPresences?: number | null;
+  /**
+     * Origem do valor de agregadores; distingue valores registrados das estimativas do ajuste mensal.
+     * @nullable
+     */
+  aggregatorSource?: OccupancyRecordAggregatorSource;
   /**
      * @nullable
      * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
@@ -1621,6 +1732,13 @@ fromMonth?: string;
  * @pattern ^\d{4}-(0[1-9]|1[0-2])$
  */
 toMonth?: string;
+};
+
+export type GetOccupancyMonthlyAggregatorAdjustmentsParams = {
+/**
+ * @pattern ^\d{4}-(0[1-9]|1[0-2])$
+ */
+month: string;
 };
 
 export type GetOccupancyRecordsParams = {

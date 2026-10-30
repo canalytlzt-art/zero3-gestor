@@ -37,6 +37,7 @@ import {
 } from '@/lib/occupancy-filter-store';
 import OccupancyImportDialog from '@/components/occupancy-import-dialog';
 import OccupancyReportsDialog from '@/components/occupancy-reports-dialog';
+import MonthlyAggregatorAdjustment from '@/components/monthly-aggregator-adjustment';
 
 type Kind = 'daily' | 'monthly';
 
@@ -475,6 +476,8 @@ export default function OccupancyManagement() {
           </div>
         </form>
 
+        <MonthlyAggregatorAdjustment modalities={modalities} />
+
         <button
           type="button"
           onClick={() => setDetailsOpen((open) => !open)}
@@ -657,6 +660,7 @@ export default function OccupancyManagement() {
                         ? ` (${formatOccupancyPercentage(r.aggregatorPresences / r.presences * 100)}); demais alunos: ${(r.presences - r.aggregatorPresences).toLocaleString('pt-BR')}`
                         : ''}
                     </p>
+                    {r.aggregatorSource === 'monthly_estimated' && <span className="mt-1 inline-flex rounded-full bg-[#f1ebf8] px-2 py-0.5 text-[9px] font-bold text-[#65479c]" data-testid={`badge-occupancy-aggregator-source-${r.id}`}>Ajuste mensal estimado</span>}
                     {r.notes && <p className="truncate text-[11px] text-[#8a8491]" title={r.notes}>{r.notes}</p>}
                   </div>
                   <div className="col-span-2 flex justify-end gap-1 sm:order-4 sm:col-span-1">
