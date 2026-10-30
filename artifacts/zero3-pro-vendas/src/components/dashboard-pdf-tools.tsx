@@ -94,11 +94,9 @@ export async function beginDashboardPdf(
   printStyle.textContent = `@page { size: A4 ${landscape ? 'landscape' : 'portrait'}; margin: 9mm; }`;
   if (!previousPrintStyle) document.head.append(printStyle);
   document.body.dataset.zero3PdfScope = scope;
-  if (scope === 'complete-full') {
-    document.body.dataset.zero3PdfDetails = String(options.includeDetails !== false);
-  } else {
-    delete document.body.dataset.zero3PdfDetails;
-  }
+  document.body.dataset.zero3PdfDetails = String(
+    scope === 'complete-full' ? options.includeDetails !== false : options.includeDetails === true,
+  );
   document.body.dataset.zero3PdfPreparing = 'true';
   document.title = `Zero3-PRO-${fileSlug(title)}${period ? `-${fileSlug(period)}` : ''}`;
 

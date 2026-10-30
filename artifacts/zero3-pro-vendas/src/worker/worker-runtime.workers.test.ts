@@ -506,6 +506,116 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
     const refunds = await callSales("/sales/refunds");
     expect(refunds.response.status).toBe(200);
     expect(refunds.payload.some((row: { id: string }) => row.id === refund.payload.id)).toBe(true);
+    const secondPartialRefund = await callSales(`/sales/${saleId}/refunds`, "POST", {
+      refundDate: "2026-12-05",
+      amountCents: 700,
+      reason: "Segundo estorno parcial de teste",
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(secondPartialRefund.response.status).toBe(201);
+    const candidateAfterPartials = (await callSales("/sales/refund-candidates")).payload
+      .find((candidate: { saleId: string }) => candidate.saleId === saleId);
+    expect(candidateAfterPartials).toMatchObject({ refundedCents: 1_200, remainingCents: 3_300 });
+    const exceedsRemainingBalance = await callSales(`/sales/${saleId}/refunds`, "POST", {
+      refundDate: "2026-12-06",
+      amountCents: 3_301,
+      reason: "Tentativa sintética acima do saldo",
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(exceedsRemainingBalance.response.status).toBe(409);
+
+    const cancelWithRefund = await callSales(`/sales/${saleId}/cancel`, "POST", {
+      reason: "Tentativa sintética de cancelamento",
+      expectedVersion: updatedWithNewProduct.payload.version,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(cancelWithRefund.response.status).toBe(409);
+    expect(cancelWithRefund.payload.error).toContain("estorno ativo");
+    const saleRemainsActive = (await callSales("/sales")).payload as Sale[];
+    expect(saleRemainsActive.some((row) => row.id === saleId && row.status === "active")).toBe(true);
+    const refundedScoreboard = await callSales("/sales/scoreboard?months=2026-12");
+    expect(refundedScoreboard.response.status).toBe(200);
+    expect(refundedScoreboard.payload.totals).toMatchObject({
+      salesCents: 4_500,
+      refundCents: 1_200,
+      netCents: 3_300,
+    });
+
+    const cancellableSaleId = crypto.randomUUID();
+    await insertSale({
+      id: cancellableSaleId,
+      saleDate: "2040-02-11",
+      productName: `Venda cancelável ${unique}`,
+      quantity: 2,
+      unitAmountCents: 700,
+      customerName: "Cliente sintético de cancelamento",
+    });
+    const cancelBody = {
+      reason: "Cancelamento de validação local",
+      expectedVersion: 1,
+      idempotencyKey: crypto.randomUUID(),
+    };
+    const cancelledSale = await callSales(`/sales/${cancellableSaleId}/cancel`, "POST", cancelBody);
+    expect(cancelledSale.response.status).toBe(200);
+    expect(cancelledSale.payload).toMatchObject({ id: cancellableSaleId, status: "cancelled" });
+    const replayedCancellation = await callSales(`/sales/${cancellableSaleId}/cancel`, "POST", cancelBody);
+    expect(replayedCancellation.response.status).toBe(200);
+    expect(replayedCancellation.payload).toMatchObject({ id: cancellableSaleId, status: "cancelled" });
+    const activeAfterCancellation = (await callSales("/sales")).payload as Sale[];
+    const allHistoryAfterCancellation = (await callSales("/sales/history")).payload as Sale[];
+    expect(activeAfterCancellation.some((row) => row.id === cancellableSaleId)).toBe(false);
+    expect(allHistoryAfterCancellation.some((row) => row.id === cancellableSaleId && row.status === "cancelled")).toBe(true);
+    const cancelledMonthScoreboard = await callSales("/sales/scoreboard?months=2040-02");
+    expect(cancelledMonthScoreboard.payload.totals).toMatchObject({
+      saleCount: 0,
+      quantity: 0,
+      salesCents: 0,
+      refundCents: 0,
+      netCents: 0,
+    });
+
+    const legacyCancelledSaleId = crypto.randomUUID();
+    const legacyRefundId = crypto.randomUUID();
+    await insertSale({
+      id: legacyCancelledSaleId,
+      saleDate: "2040-03-14",
+      productName: `Venda legada cancelada ${unique}`,
+      quantity: 1,
+      unitAmountCents: 1_000,
+      customerName: "Fixture sintética",
+    });
+    const legacyTimestamp = "2040-03-15T12:00:00.000Z";
+    await workerEnv.DB.batch([
+      workerEnv.DB.prepare(
+        "UPDATE sales SET status='cancelled', cancellation_reason=?, version=version+1, updated_at=? WHERE id=?",
+      ).bind("Estado anterior à proteção", legacyTimestamp, legacyCancelledSaleId),
+      workerEnv.DB.prepare(
+        `INSERT INTO sales_refunds
+          (id, sale_id, refund_date, amount_cents, reason, status, void_reason, version,
+           created_by, updated_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'active', NULL, 1, ?, ?, ?, ?)`,
+      ).bind(
+        legacyRefundId,
+        legacyCancelledSaleId,
+        "2040-03-15",
+        300,
+        "Estorno parcial legado",
+        authorizedFixture.userId,
+        authorizedFixture.userId,
+        legacyTimestamp,
+        legacyTimestamp,
+      ),
+    ]);
+    const legacyRefundAudit = await callSales("/sales/refunds");
+    expect(legacyRefundAudit.payload.some((row: { id: string }) => row.id === legacyRefundId)).toBe(true);
+    const legacyCancelledScoreboard = await callSales("/sales/scoreboard?months=2040-03");
+    expect(legacyCancelledScoreboard.payload.totals).toMatchObject({
+      saleCount: 0,
+      quantity: 0,
+      salesCents: 0,
+      refundCents: 0,
+      netCents: 0,
+    });
 
     const goal = await callSales("/sales-goals", "PUT", {
       month: "2026-12",
@@ -662,8 +772,8 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
     expect(scoreboard.payload.totals).toMatchObject({
       quantity: 3,
       salesCents: 4_500,
-      refundCents: 500,
-      netCents: 4_000,
+      refundCents: 1_200,
+      netCents: 3_300,
     });
     const financialCharts = buildFinancialChartAnalytics(scoreboard.payload);
     expect(financialCharts.reconcilesByProduct).toBe(true);

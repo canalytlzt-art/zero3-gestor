@@ -299,6 +299,7 @@ export default function SalesManagement() {
   const [refundError, setRefundError] = useState('');
   const [historySale, setHistorySale] = useState<Sale | null>(null);
   const [editingPendingDraft, setEditingPendingDraft] = useState<SalesPendingDraft | null>(null);
+  const [cancellationStep, setCancellationStep] = useState(false);
   const [cancellationReason, setCancellationReason] = useState('');
   const [cancellationError, setCancellationError] = useState('');
   const [cancellationConflict, setCancellationConflict] = useState(false);
@@ -313,7 +314,7 @@ export default function SalesManagement() {
   const [historyWeekdays, setHistoryWeekdays] = useState<number[]>([]);
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'cancelled'>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'cancelled'>('active');
   const [filterCadastroStatus, setFilterCadastroStatus] = useState<'all' | 'needs-review' | 'complete'>('all');
   const [productsOpen, setProductsOpen] = useState(false);
   const [productSearch, setProductSearch] = useState('');
@@ -493,6 +494,13 @@ export default function SalesManagement() {
   }, [refunds]);
   const selectedRefundCandidate = refundCandidates?.find(({ saleId }) => saleId === refundSaleId);
   const refundAmountCents = parseBrlCents(refundAmount);
+  const cancellingRefundedCents = cancelling
+    ? activeRefundTotalsBySale.get(cancelling.id) ?? 0n
+    : 0n;
+  const cancellationHasActiveRefund = cancellingRefundedCents > 0n;
+  const cancellationRefundRemainingCents = cancelling
+    ? BigInt(cancelling.totalCents) - cancellingRefundedCents
+    : 0n;
 
   const productForm = useForm<ProductFormValues>({
     resolver: zodResolver(productFormSchema),
@@ -603,14 +611,20 @@ export default function SalesManagement() {
     }
   }
 
-  async function openRefundDialog() {
+  async function openRefundDialog(preselectedSaleId?: string) {
     setRefundError('');
     setRefundDate(todayLocal());
     setRefundAmount('');
     setRefundReason('');
     const result = await refetchRefundCandidates();
     const candidates = result.data ?? refundCandidates ?? [];
-    setRefundSaleId(candidates[0]?.saleId ?? '');
+    const selected = preselectedSaleId
+      ? candidates.find((candidate) => candidate.saleId === preselectedSaleId)
+      : candidates[0];
+    setRefundSaleId(selected?.saleId ?? '');
+    if (preselectedSaleId && !selected) {
+      setRefundError('Esta venda não tem saldo disponível para um novo estorno.');
+    }
     setRefundDialogOpen(true);
   }
 
@@ -1128,10 +1142,15 @@ export default function SalesManagement() {
       if (editing?.id === target.id) resetForm();
       setFeedback({ type: 'success', message: 'Venda cancelada. O registro continua disponível no histórico.' });
     } catch (error) {
-      setCancellationError(conflictAwareMessage(error, 'venda'));
+      const message = errorMessage(error);
+      const isRefundConflict = message.toLocaleLowerCase('pt-BR').includes('estorno ativo');
+      setCancellationError(isRefundConflict ? message : conflictAwareMessage(error, 'venda'));
       const isConflict = !!error && typeof error === 'object' && 'status' in error && error.status === 409;
-      setCancellationConflict(isConflict);
-      if (isConflict) void invalidateSalesRelated();
+      setCancellationConflict(isConflict && !isRefundConflict);
+      if (isConflict) {
+        pendingCancellationKey.current = null;
+        void invalidateSalesRelated();
+      }
     } finally {
       operationLock.current = false;
     }
@@ -1378,7 +1397,7 @@ export default function SalesManagement() {
           {isHistoryLoading ? <div className="space-y-3" aria-label="Carregando histórico" data-testid="status-sales-loading"><div className="skeleton h-16 rounded-2xl" /><div className="skeleton h-16 rounded-2xl" /><div className="skeleton h-16 rounded-2xl" /></div>
             : isHistoryError ? <div className="grid min-h-[220px] place-items-center rounded-2xl border border-dashed border-[#e6e1ea] bg-[#fbfafc] p-6 text-center" data-testid="status-sales-error"><div><CircleHelp className="mx-auto text-[#a6584b]" size={23} /><p className="mt-3 font-bold">Não foi possível carregar</p><p className="mt-1 text-sm text-[#827b8b]">Confira sua conexão e tente novamente.</p><button onClick={() => void refetchHistory()} className="mt-4 inline-flex items-center gap-2 rounded-full border border-[#ded8e5] bg-white px-4 py-2 text-xs font-bold text-[#5c506f] hover:bg-[#f8f6fa]" data-testid="button-retry-sales"><RefreshCw size={13} /> Tentar novamente</button></div></div>
             : filteredSales.length ? <div className="space-y-2" data-testid="list-sales">
-              {filteredSales.map((sale) => <SaleRow key={sale.id} sale={sale} onEdit={() => startEditing(sale)} onHistory={() => setHistorySale(sale)} onCancel={() => { setFeedback(null); setCancellationError(''); setCancellationConflict(false); setCancellationReason(''); setCancelling(sale); }} busy={busy} />)}
+              {filteredSales.map((sale) => <SaleRow key={sale.id} sale={sale} onEdit={() => startEditing(sale)} onHistory={() => setHistorySale(sale)} onCancel={() => { setFeedback(null); setCancellationError(''); setCancellationConflict(false); setCancellationReason(''); setCancellationStep(false); setCancelling(sale); }} busy={busy} />)}
               <p className="px-1 pt-2 text-[10px] font-medium text-[#938c99]" data-testid="text-sales-count">{filteredSales.length} {filteredSales.length === 1 ? 'lançamento' : 'lançamentos'} exibidos</p>
             </div> : <div className="grid min-h-[220px] place-items-center rounded-2xl border border-dashed border-[#e6e1ea] bg-[#fbfafc] p-6 text-center" data-testid="status-sales-empty"><div><div className="mx-auto grid h-12 w-12 place-items-center rounded-[17px] bg-[#f0ebf7] text-[#7656b8]"><ClipboardList size={21} /></div><h3 className="mt-4 font-bold tracking-[-.02em]">{(historySales?.length ?? 0) ? 'Nenhuma venda neste filtro' : 'Seu histórico começa aqui'}</h3><p className="mx-auto mt-1.5 max-w-[270px] text-xs leading-5 text-[#85808e]">{(historySales?.length ?? 0) ? 'Ajuste as datas, o produto ou a situação para encontrar lançamentos.' : 'Registre a primeira venda para acompanhar tudo por aqui.'}</p></div></div>}
           </div>
@@ -1848,7 +1867,7 @@ export default function SalesManagement() {
           </DialogHeader>
           {isRefundCandidatesLoading ? <div className="skeleton h-14 rounded-xl" aria-label="Carregando vendas com saldo" data-testid="status-refund-candidates-loading" />
             : isRefundCandidatesError ? <div className="rounded-xl border border-dashed border-[#ded7e7] p-4 text-center text-xs text-[#817b89]" role="alert" data-testid="status-refund-candidates-error"><p>Não foi possível buscar vendas com saldo disponível.</p><button type="button" onClick={() => void refetchRefundCandidates()} className="mt-2 font-bold text-[#6848a9] underline" data-testid="button-retry-refund-candidates">Tentar novamente</button></div>
-              : !refundCandidates?.length ? <p className="rounded-xl border border-dashed border-[#ded7e7] px-3.5 py-5 text-center text-xs text-[#817b89]" data-testid="status-refund-candidates-empty">Não há vendas ativas com saldo disponível para estorno.</p>
+              : !refundCandidates?.length ? <p className="rounded-xl border border-dashed border-[#ded7e7] px-3.5 py-5 text-center text-xs text-[#817b89]" data-testid="status-refund-candidates-empty">{refundError || 'Não há vendas ativas com saldo disponível para estorno.'}</p>
                 : <form onSubmit={(event) => void submitRefund(event)} className="space-y-3.5" data-testid="form-create-refund">
                   <label className="block text-[10px] font-bold text-[#665f70]">Venda original
                     <select value={refundSaleId} onChange={(event) => { setRefundSaleId(event.target.value); setRefundError(''); }} required data-testid="select-refund-sale" className="mt-1.5 h-11 w-full rounded-xl border border-[#e7e2ea] bg-[#fcfbfd] px-3 text-sm font-medium text-[#342d43] outline-none focus:border-[#9477bf]">
@@ -1885,28 +1904,65 @@ export default function SalesManagement() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!cancelling} onOpenChange={(open) => { if (!cancelSale.isPending && !open) { setCancelling(null); setCancellationReason(''); setCancellationError(''); setCancellationConflict(false); } }}>
+      <Dialog open={!!cancelling} onOpenChange={(open) => { if (!cancelSale.isPending && !open) { setCancelling(null); setCancellationStep(false); setCancellationReason(''); setCancellationError(''); setCancellationConflict(false); } }}>
         <DialogContent className="w-[calc(100vw-2rem)] max-w-lg max-h-[calc(100dvh-2rem)] min-w-0 overflow-y-auto border-[#e7e1e9] bg-[#fffefc] p-4 sm:rounded-[24px] sm:p-6">
           <DialogHeader className="text-left">
-            <DialogTitle className="text-lg font-extrabold tracking-[-.035em] text-[#332d40]">Cancelar venda</DialogTitle>
-            <DialogDescription className="text-xs leading-5 text-[#827b8b]">O cancelamento mantém o registro no histórico e não apaga seus dados.</DialogDescription>
+            <DialogTitle className="text-lg font-extrabold tracking-[-.035em] text-[#332d40]">{cancellationStep ? 'Confirmar cancelamento lógico' : 'Como deseja tratar esta venda?'}</DialogTitle>
+            <DialogDescription className="text-xs leading-5 text-[#827b8b]">{cancellationStep ? 'Esta exclusão lógica remove a venda do faturamento e mantém o registro e a auditoria.' : 'Para lançamento incorreto, cancele logicamente. Para uma venda realizada com devolução, registre um estorno vinculado.'}</DialogDescription>
           </DialogHeader>
           {cancelling && <div className="rounded-xl bg-[#f8f6fa] px-3.5 py-3" data-testid="panel-cancellation-sale">
             <p className="break-words text-sm font-bold text-[#40374e] [overflow-wrap:anywhere]">{cancelling.productName}</p>
             <p className="mt-1 text-xs text-[#817b89]">{formatDate(cancelling.saleDate)} · {cancelling.quantity} un. · {formatCents(cancelling.totalCents)}</p>
+            {cancelling.customerName && <p className="mt-1 text-xs text-[#817b89]">Cliente: {cancelling.customerName}</p>}
           </div>}
-          <label className="block text-[11px] font-bold text-[#665f70]">Motivo do cancelamento
-            <textarea value={cancellationReason} onChange={(event) => setCancellationReason(event.target.value)} maxLength={500} rows={4} placeholder="Descreva o motivo" data-testid="input-cancellation-reason" className="mt-1.5 block w-full max-w-full resize-y rounded-xl border border-[#e7e2ea] bg-[#fcfbfd] px-3.5 py-3 text-sm font-normal text-[#342d43] outline-none focus:border-[#9477bf]" />
-          </label>
-          <p className="break-words text-[10px] text-[#8a8491]">{cancellationReason.trim().length}/500 caracteres. O motivo ficará visível no histórico.</p>
-          {cancellationError && <p className="break-words rounded-xl bg-[#fff0ed] px-3.5 py-2.5 text-xs font-semibold text-[#9c483f]" role="alert" data-testid="status-cancellation-error">{cancellationError}</p>}
-          <DialogFooter className="w-full min-w-0 gap-2 sm:flex-row sm:space-x-0">
-            {cancellationConflict && <button type="button" onClick={async () => { await Promise.all([refetchHistory(), refetchSales()]); setCancelling(null); setCancellationError(''); setCancellationConflict(false); }} className="h-10 w-full rounded-xl border border-[#ded7e7] px-4 text-xs font-bold text-[#5d4a78] hover:bg-[#f7f4fa] sm:w-auto" data-testid="button-refresh-cancel-conflict">Atualizar venda</button>}
-            <button type="button" onClick={() => setCancelling(null)} disabled={cancelSale.isPending} className="h-10 w-full rounded-xl border border-[#e3dfe7] px-4 text-sm font-bold text-[#716a79] hover:bg-[#f8f6fa] sm:w-auto" data-testid="button-cancel-cancellation">Cancelar</button>
-            <button type="button" onClick={() => void confirmCancellation()} disabled={!cancellationReason.trim() || cancellationReason.trim().length > 500 || busy} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#a84940] px-4 text-sm font-bold text-white hover:bg-[#963c35] disabled:opacity-55 sm:w-auto" data-testid="button-confirm-cancellation">
-              {cancelSale.isPending ? 'Cancelando…' : <><X size={14} /> Confirmar cancelamento</>}
+          {!cancellationStep && cancelling && <div className="grid gap-3 sm:grid-cols-2" data-testid="panel-sale-action-choices">
+            <button
+              type="button"
+              onClick={() => { setCancellationError(''); setCancellationConflict(false); setCancellationReason(''); setCancellationStep(true); }}
+              disabled={isRefundsLoading || isRefundsError || cancellationHasActiveRefund}
+              className="rounded-2xl border border-[#ead9d7] bg-[#fffaf9] p-4 text-left transition hover:border-[#d9b9b5] hover:bg-[#fff3f1] disabled:cursor-not-allowed disabled:opacity-55"
+              data-testid="button-choose-sale-cancel"
+            >
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[#f8e8e6] text-[#a84940]"><X size={16} /></span>
+              <span className="mt-3 block text-sm font-extrabold text-[#583e3b]">Cancelar/Excluir lançamento incorreto</span>
+              <span className="mt-1 block text-[10px] leading-4 text-[#817b89]">Exclusão lógica: sai do faturamento, mas conserva o registro e a auditoria.</span>
             </button>
-          </DialogFooter>
+            <button
+              type="button"
+              onClick={() => { const target = cancelling; setCancelling(null); setCancellationStep(false); void openRefundDialog(target.id); }}
+              disabled={isRefundsLoading || isRefundsError || cancellationRefundRemainingCents <= 0n}
+              className="rounded-2xl border border-[#eadfca] bg-[#fffdf7] p-4 text-left transition hover:border-[#d6c49f] hover:bg-[#fff9ec] disabled:cursor-not-allowed disabled:opacity-55"
+              data-testid="button-choose-sale-refund"
+            >
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[#fff0d5] text-[#946a24]"><RotateCcw size={15} /></span>
+              <span className="mt-3 block text-sm font-extrabold text-[#584b34]">Registrar estorno de venda realizada</span>
+              <span className="mt-1 block text-[10px] leading-4 text-[#817b89]">
+                {cancellationRefundRemainingCents > 0n
+                  ? `Registra a devolução sem apagar a venda. Saldo para estornar: ${formatCents(Number(cancellationRefundRemainingCents))}.`
+                  : 'O saldo da venda já foi totalmente estornado.'}
+              </span>
+            </button>
+          </div>}
+          {!cancellationStep && cancelling && isRefundsLoading && <p className="rounded-xl bg-[#f7f4fa] px-3.5 py-2.5 text-xs text-[#716a79]" role="status" data-testid="status-cancellation-refund-check">Verificando estornos vinculados antes de permitir o cancelamento…</p>}
+          {!cancellationStep && cancelling && isRefundsError && <div className="rounded-xl bg-[#fff0ed] px-3.5 py-2.5 text-xs text-[#9c483f]" role="alert" data-testid="status-cancellation-refund-check-error"><p>Não foi possível confirmar se já há estornos. O cancelamento fica bloqueado para evitar desconto duplicado.</p><button type="button" onClick={() => void refetchRefunds()} className="mt-2 font-bold underline">Tentar novamente</button></div>}
+          {!cancellationStep && cancelling && cancellationHasActiveRefund && <p className="rounded-xl bg-[#fff7e8] px-3.5 py-2.5 text-xs leading-5 text-[#785d2c]" role="alert" data-testid="status-cancellation-active-refund">
+            Já há {formatCents(Number(cancellingRefundedCents))} em estornos ativos nesta venda. Para evitar descontar a venda duas vezes, o cancelamento está bloqueado. {cancellationRefundRemainingCents > 0n ? `Você ainda pode registrar estornos parciais até o saldo de ${formatCents(Number(cancellationRefundRemainingCents))}.` : 'O saldo já foi totalmente estornado.'}
+          </p>}
+          {cancellationStep && <>
+            <label className="block text-[11px] font-bold text-[#665f70]">Motivo do cancelamento
+              <textarea value={cancellationReason} onChange={(event) => setCancellationReason(event.target.value)} maxLength={500} rows={4} placeholder="Descreva o motivo" data-testid="input-cancellation-reason" className="mt-1.5 block w-full max-w-full resize-y rounded-xl border border-[#e7e2ea] bg-[#fcfbfd] px-3.5 py-3 text-sm font-normal text-[#342d43] outline-none focus:border-[#9477bf]" />
+            </label>
+            <p className="break-words text-[10px] text-[#8a8491]">{cancellationReason.trim().length}/500 caracteres. O motivo ficará visível no histórico.</p>
+            {cancellationError && <p className="break-words rounded-xl bg-[#fff0ed] px-3.5 py-2.5 text-xs font-semibold text-[#9c483f]" role="alert" data-testid="status-cancellation-error">{cancellationError}</p>}
+            <DialogFooter className="w-full min-w-0 gap-2 sm:flex-row sm:space-x-0">
+              {cancellationConflict && <button type="button" onClick={async () => { await Promise.all([refetchHistory(), refetchSales()]); setCancelling(null); setCancellationStep(false); setCancellationError(''); setCancellationConflict(false); }} className="h-10 w-full rounded-xl border border-[#ded7e7] px-4 text-xs font-bold text-[#5d4a78] hover:bg-[#f7f4fa] sm:w-auto" data-testid="button-refresh-cancel-conflict">Atualizar venda</button>}
+              <button type="button" onClick={() => { setCancellationStep(false); setCancellationError(''); setCancellationConflict(false); }} disabled={cancelSale.isPending} className="h-10 w-full rounded-xl border border-[#e3dfe7] px-4 text-sm font-bold text-[#716a79] hover:bg-[#f8f6fa] sm:w-auto" data-testid="button-cancel-cancellation">Voltar às opções</button>
+              <button type="button" onClick={() => void confirmCancellation()} disabled={!cancellationReason.trim() || cancellationReason.trim().length > 500 || busy} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#a84940] px-4 text-sm font-bold text-white hover:bg-[#963c35] disabled:opacity-55 sm:w-auto" data-testid="button-confirm-cancellation">
+                {cancelSale.isPending ? 'Cancelando…' : <><X size={14} /> Confirmar cancelamento</>}
+              </button>
+            </DialogFooter>
+          </>}
+          {!cancellationStep && <DialogFooter><button type="button" onClick={() => setCancelling(null)} disabled={cancelSale.isPending} className="h-10 w-full rounded-xl border border-[#e3dfe7] px-4 text-sm font-bold text-[#716a79] hover:bg-[#f8f6fa] sm:w-auto" data-testid="button-cancel-cancellation">Fechar</button></DialogFooter>}
         </DialogContent>
       </Dialog>
       {historySale && <SaleHistoryDialog sale={historySale} onClose={() => setHistorySale(null)} />}

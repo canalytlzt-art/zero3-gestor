@@ -600,6 +600,16 @@ async function cancelSale(
   if (previous) {
     const replayed = await getSale(env.DB, previous.resourceId);
     if (!replayed) throw new ApiFailure(409, "A venda cancelada não foi encontrada.");
+    if (replayed.status !== "cancelled") {
+      const activeRefund = await env.DB
+        .prepare("SELECT id FROM sales_refunds WHERE sale_id=? AND status='active' LIMIT 1")
+        .bind(previous.resourceId)
+        .first<{ id: string }>();
+      if (activeRefund) {
+        throw new ApiFailure(409, "Esta venda possui estorno ativo. Anule os estornos antes de cancelar.");
+      }
+      throw new ApiFailure(409, "A venda foi alterada. Atualize antes de cancelar.");
+    }
     return json(saleOut(replayed));
   }
   const current = await getSale(env.DB, id);
@@ -607,7 +617,15 @@ async function cancelSale(
   if (Number(current.version) !== input.expectedVersion) {
     throw new ApiFailure(409, "A venda foi alterada. Atualize antes de cancelar.");
   }
+  const activeRefund = await env.DB
+    .prepare("SELECT id FROM sales_refunds WHERE sale_id=? AND status='active' LIMIT 1")
+    .bind(id)
+    .first<{ id: string }>();
+  if (activeRefund) {
+    throw new ApiFailure(409, "Esta venda possui estorno ativo. Anule os estornos antes de cancelar.");
+  }
   const now = nowIso();
+  let operationIdForCleanup: string | undefined;
   const result = await runIdempotent(
     env.DB,
     actor,
@@ -615,12 +633,17 @@ async function cancelSale(
     input.idempotencyKey,
     requestData,
     id,
-    (operationId) => [
+    (operationId) => {
+      operationIdForCleanup = operationId;
+      return [
       env.DB.prepare(
-        `UPDATE sales SET status='cancelled', cancellation_reason=?, version=version+1,
-           updated_by=?, updated_at=? WHERE id=? AND status='active' AND version=?
-             AND EXISTS (SELECT 1 FROM idempotency_keys WHERE id=?)`,
-      ).bind(reason, actor.userId, now, id, input.expectedVersion, operationId),
+         `UPDATE sales SET status='cancelled', cancellation_reason=?, version=version+1,
+            updated_by=?, updated_at=? WHERE id=? AND status='active' AND version=?
+              AND EXISTS (SELECT 1 FROM idempotency_keys WHERE id=?)
+              AND NOT EXISTS (
+                SELECT 1 FROM sales_refunds WHERE sale_id=? AND status='active'
+              )`,
+      ).bind(reason, actor.userId, now, id, input.expectedVersion, operationId, id),
       env.DB.prepare(
         `INSERT INTO sales_history
           (id, entity_type, entity_id, operation, actor_id, before_data, after_data, created_at)
@@ -638,10 +661,25 @@ async function cancelSale(
         now,
         operationId,
       ),
-    ],
+      ];
+    },
   );
   const updated = await getSale(env.DB, result.resourceId);
-  if (!updated) throw new ApiFailure(409, "A venda foi alterada. Atualize antes de cancelar.");
+  if (!updated || updated.status !== "cancelled") {
+    const refundAfterRead = await env.DB
+      .prepare("SELECT id FROM sales_refunds WHERE sale_id=? AND status='active' LIMIT 1")
+      .bind(id)
+      .first<{ id: string }>();
+    if (operationIdForCleanup && !result.replayed) {
+      await env.DB.prepare("DELETE FROM idempotency_keys WHERE id=?")
+        .bind(operationIdForCleanup)
+        .run();
+    }
+    if (refundAfterRead) {
+      throw new ApiFailure(409, "Esta venda possui estorno ativo. Anule os estornos antes de cancelar.");
+    }
+    throw new ApiFailure(409, "A venda foi alterada. Atualize antes de cancelar.");
+  }
   return json(saleOut(updated));
 }
 
@@ -700,7 +738,7 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
        LEFT JOIN products p ON p.id=s.product_id
        LEFT JOIN occupancy_modalities m
          ON m.id=CASE WHEN s.modality_override=1 THEN s.modality_id ELSE p.modality_id END
-       WHERE r.status='active'`,
+        WHERE r.status='active' AND s.status='active'`,
     ),
   );
   const dateMatches = (value: string) => {

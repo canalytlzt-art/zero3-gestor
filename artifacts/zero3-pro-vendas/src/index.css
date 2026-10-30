@@ -550,8 +550,26 @@
   body[data-zero3-pdf-scope="occupancy-hour"] [data-pdf-panel="occupancy-hour"],
   body[data-zero3-pdf-scope="occupancy-weekday"] [data-pdf-panel="occupancy-weekday"],
   body[data-zero3-pdf-scope="occupancy-evolution"] [data-pdf-panel="occupancy-evolution"],
-  body[data-zero3-pdf-scope="contracts-monthly"] [data-pdf-panel="contracts-monthly"] {
+  body[data-zero3-pdf-scope="contracts-monthly"] [data-pdf-panel="contracts-monthly"],
+  body[data-zero3-pdf-scope="scoreboard"] [data-pdf-panel="scoreboard"],
+  body[data-zero3-pdf-scope="scoreboard-product"] [data-pdf-panel="scoreboard-product"] {
     display: block !important;
+  }
+  body[data-zero3-pdf-scope="scoreboard"] [data-testid="report-scoreboard"] > :not([data-pdf-panel]),
+  body[data-zero3-pdf-scope="scoreboard-product"] [data-testid="report-scoreboard"] > :not([data-pdf-panel]) {
+    display: none !important;
+  }
+  body[data-zero3-pdf-scope="scoreboard-product"] [role="dialog"],
+  body[data-zero3-pdf-scope="scoreboard-product"] [data-radix-dialog-overlay] {
+    display: none !important;
+  }
+  body[data-zero3-pdf-scope="scoreboard"][data-zero3-pdf-details="true"] [data-pdf-appendix="scoreboard"],
+  body[data-zero3-pdf-scope="scoreboard-product"][data-zero3-pdf-details="true"] [data-pdf-appendix="scoreboard-product"] {
+    display: block !important;
+  }
+  body[data-zero3-pdf-scope="scoreboard"][data-zero3-pdf-details="false"] [data-pdf-appendix="scoreboard"],
+  body[data-zero3-pdf-scope="scoreboard-product"][data-zero3-pdf-details="false"] [data-pdf-appendix="scoreboard-product"] {
+    display: none !important;
   }
   body[data-zero3-pdf-scope^="complete-"] .dashboard-print-page-group { display: none !important; }
   body[data-zero3-pdf-scope="complete-full"] .dashboard-print-page-group { display: grid !important; }

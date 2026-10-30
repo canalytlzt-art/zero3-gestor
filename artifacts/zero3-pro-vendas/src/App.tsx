@@ -4,7 +4,7 @@ import { publishableKeyFromHost } from '@clerk/react/internal';
 import { ptBR } from '@clerk/localizations';
 import { shadcn } from '@clerk/themes';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
-import { ArrowDownRight, ArrowRight, BarChart3, CalendarDays, Check, CircleHelp, ClipboardList, LockKeyhole, LogOut, RefreshCw, Sparkles } from 'lucide-react';
+import { ArrowDownRight, ArrowRight, BarChart3, CalendarDays, Check, CircleHelp, ClipboardList, FileText, LockKeyhole, LogOut, RefreshCw, Sparkles } from 'lucide-react';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { PurpleSelect } from '@/components/ui/purple-select';
@@ -14,23 +14,29 @@ import {
   getGetActiveContractsQueryKey,
   getGetAccessStatusQueryKey,
   getGetProductsQueryKey,
+  getGetSalesHistoryQueryKey,
+  getGetSalesRefundsQueryKey,
   getGetSalesGoalsQueryKey,
   getGetSalesScoreboardQueryKey,
   useGetActiveContracts,
   useGetAccessStatus,
   useGetProducts,
+  useGetSalesHistory,
+  useGetSalesRefunds,
   useGetSalesGoals,
   useGetSalesScoreboard,
 } from '@workspace/api-client-react';
-import type { GetSalesScoreboardParams } from '@workspace/api-client-react';
+import type { GetSalesScoreboardParams, SalesScoreboardProduct } from '@workspace/api-client-react';
 import NotFound from '@/pages/not-found';
 import { Link, Redirect, Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
 import SalesManagement from '@/components/sales-management';
 import ScoreboardGoals from '@/components/scoreboard-goals';
 import OccupancyManagement from '@/components/occupancy-management';
 import { buildScoreboardQueryParams, formatCents, formatMonthKey, getSaoPauloMonthKey, isCompleteCalendarMonthRange, monthKeysBetween, monthsForYearQuarter, productNameKey, type ScoreboardPeriodMode } from '@/lib/sales-utils';
-import { getWeekdayNameForIsoDay } from '@/lib/occupancy-calendar';
+import { getIsoWeekday, getWeekdayNameForIsoDay } from '@/lib/occupancy-calendar';
 import { buildActiveContractPeriodRows } from '@/lib/active-contracts';
+import { filterSalesForScoreboard } from '@/lib/scoreboard-sales-history';
+import { ScoreboardSalesHistory } from '@/components/scoreboard-sales-history';
 
 const queryClient = new QueryClient();
 const OccupancyChartsPage = lazy(() => import('@/components/occupancy-charts-page'));
@@ -204,6 +210,22 @@ function MetricCard({
   );
 }
 
+function scoreboardPeriodLabel(
+  mode: ScoreboardPeriodMode,
+  monthKeys: string[],
+  dateFrom: string,
+  dateTo: string,
+) {
+  if (mode === 'range' && dateFrom && dateTo) {
+    const dateLabel = (value: string) => new Date(`${value}T12:00:00`).toLocaleDateString('pt-BR');
+    return `${dateLabel(dateFrom)} a ${dateLabel(dateTo)}`;
+  }
+  const ordered = [...monthKeys].sort();
+  if (!ordered.length) return 'Período sem meses selecionados';
+  if (ordered.length === 1) return formatMonthKey(ordered[0]!);
+  return `${formatMonthKey(ordered[0]!)} a ${formatMonthKey(ordered[ordered.length - 1]!)}`;
+}
+
 function ScoreboardContent() {
   const {
     data: activeContracts,
@@ -231,6 +253,22 @@ function ScoreboardContent() {
   } = useGetSalesGoals({
     query: { queryKey: getGetSalesGoalsQueryKey(), refetchOnMount: 'always', refetchOnWindowFocus: true },
   });
+  const {
+    data: salesHistory,
+    isLoading: isSalesHistoryLoading,
+    isError: isSalesHistoryError,
+    refetch: refetchSalesHistory,
+  } = useGetSalesHistory({
+    query: { queryKey: getGetSalesHistoryQueryKey(), refetchOnMount: 'always', refetchOnWindowFocus: true },
+  });
+  const {
+    data: salesRefunds,
+    isFetching: areSalesRefundsFetching,
+    isError: isSalesRefundsError,
+    refetch: refetchSalesRefunds,
+  } = useGetSalesRefunds({
+    query: { queryKey: getGetSalesRefundsQueryKey(), refetchOnMount: 'always', refetchOnWindowFocus: true },
+  });
   const currentMonthKey = getSaoPauloMonthKey();
   const currentYear = currentMonthKey.slice(0, 4);
   const currentQuarter = String(Math.ceil(Number(currentMonthKey.slice(5, 7)) / 3));
@@ -241,6 +279,7 @@ function ScoreboardContent() {
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [selectedQuarter, setSelectedQuarter] = useState(currentQuarter);
   const [filterProduct, setFilterProduct] = useState('');
+  const [detailProduct, setDetailProduct] = useState<SalesScoreboardProduct | null>(null);
   const [weekdays, setWeekdays] = useState<number[]>([]);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -288,6 +327,7 @@ function ScoreboardContent() {
   const allMonthKeys = [...new Set([
     ...(scoreboardData?.months ?? []).map((month) => month.month),
     ...(activeContracts ?? []).map((record) => record.month),
+    ...(salesHistory ?? []).map((sale) => sale.saleDate.slice(0, 7)),
   ])].sort();
   const periodMonthKeys = useMemo(() => {
     switch (periodMode) {
@@ -330,11 +370,34 @@ function ScoreboardContent() {
   const selectedProductName = filterProduct
     ? products.find((product) => product.id === filterProduct)?.name ?? null
     : null;
+  const periodHistorySales = useMemo(() => filterSalesForScoreboard(salesHistory ?? [], {
+    months: periodMonthKeys,
+    fromDate: periodMode === 'range' && !invalidRange ? dateFrom : undefined,
+    toDate: periodMode === 'range' && !invalidRange ? dateTo : undefined,
+    productId: filterProduct || undefined,
+    weekdays,
+    weekdayForDate: getIsoWeekday,
+  }), [salesHistory, periodMonthKeys, periodMode, invalidRange, dateFrom, dateTo, filterProduct, weekdays]);
+  const periodRefunds = useMemo(() => (salesRefunds ?? []).filter((refund) => {
+    const date = refund.refundDate.slice(0, 10);
+    if (periodMode === 'range' && !invalidRange) {
+      if (date < dateFrom || date > dateTo) return false;
+    } else if (!periodMonthKeys.includes(date.slice(0, 7))) {
+      return false;
+    }
+    if (weekdays.length && !weekdays.includes(getIsoWeekday(date) ?? 0)) return false;
+    return true;
+  }), [salesRefunds, periodMode, invalidRange, dateFrom, dateTo, periodMonthKeys, weekdays]);
+  const periodLabel = scoreboardPeriodLabel(periodMode, periodMonthKeys, dateFrom, dateTo);
+  const scoreboardFilterLabel = [
+    selectedProductName ?? 'Todos os produtos',
+    weekdays.length ? `Dias: ${weekdays.map(getWeekdayNameForIsoDay).join(', ')}` : null,
+  ].filter(Boolean).join(' · ');
   const isLoading = isScoreboardLoading || isProductsLoading;
   const isError = isScoreboardError || isProductsError;
-  const isRefreshing = isScoreboardFetching || isProductsFetching || isGoalsFetching || isContractsFetching;
+  const isRefreshing = isScoreboardFetching || isProductsFetching || isGoalsFetching || isContractsFetching || areSalesRefundsFetching;
   const refreshScoreboard = () => {
-    void Promise.all([refetchScoreboard(), refetchProducts(), refetchSalesGoals(), refetchContracts()]);
+    void Promise.all([refetchScoreboard(), refetchProducts(), refetchSalesGoals(), refetchContracts(), refetchSalesHistory(), refetchSalesRefunds()]);
   };
   const changePeriodMode = (mode: ScoreboardPeriodMode) => {
     setPeriodMode(mode);
@@ -541,12 +604,12 @@ function ScoreboardContent() {
             <span className="text-[10px] font-semibold text-[#8a8491]" data-testid="text-scoreboard-product-groups">{report.products.length} {report.products.length === 1 ? 'produto' : 'produtos'}</span>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] border-collapse text-left text-xs">
-              <thead><tr className="bg-[#f8f6f9] text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]"><th className="px-4 py-3 sm:px-5">Plano / produto</th><th className="px-4 py-3 text-right">Quantidade</th><th className="px-4 py-3 text-right">Vendas</th><th className="px-4 py-3 text-right">Estornos</th><th className="px-4 py-3 text-right sm:px-5">Após estornos</th></tr></thead>
+              <table className="w-full min-w-[900px] border-collapse text-left text-xs">
+              <thead><tr className="bg-[#f8f6f9] text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]"><th className="px-4 py-3 sm:px-5">Plano / produto</th><th className="px-4 py-3 text-right">Quantidade</th><th className="px-4 py-3 text-right">Vendas</th><th className="px-4 py-3 text-right">Estornos</th><th className="px-4 py-3 text-right sm:px-5">Após estornos</th><th className="px-4 py-3 text-right">Detalhes</th></tr></thead>
               <tbody>
-                {report.products.map((product) => <tr key={product.productId} className="border-t border-[#f0edf1]" data-testid={`row-scoreboard-product-${product.productId}`}><th scope="row" className="max-w-[260px] truncate px-4 py-3.5 font-semibold text-[#494253] sm:px-5">{product.productName}</th><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{product.quantity.toLocaleString('pt-BR')}</td><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{formatCents(product.salesCents)}</td><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{formatCents(product.refundCents)}</td><td className="px-4 py-3.5 text-right font-bold tabular-nums text-[#463954] sm:px-5">{formatCents(product.netCents)}</td></tr>)}
+                {report.products.map((product) => <tr key={`${product.productId ?? 'unlinked'}-${product.productName}`} className="border-t border-[#f0edf1]" data-testid={`row-scoreboard-product-${product.productId ?? 'unlinked'}`}><th scope="row" className="max-w-[260px] truncate px-4 py-3.5 font-semibold text-[#494253] sm:px-5">{product.productName}</th><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{product.quantity.toLocaleString('pt-BR')}</td><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{formatCents(product.salesCents)}</td><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{formatCents(product.refundCents)}</td><td className="px-4 py-3.5 text-right font-bold tabular-nums text-[#463954] sm:px-5">{formatCents(product.netCents)}</td><td className="px-4 py-3.5 text-right"><button type="button" onClick={() => setDetailProduct(product)} className="inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-[#e6dfeb] px-2.5 text-[10px] font-bold text-[#65479c] transition hover:bg-[#f3eff8]" aria-label={`Ver detalhes de ${product.productName}`} data-testid={`button-scoreboard-product-details-${product.productId ?? 'unlinked'}`}><FileText size={12} aria-hidden="true" /> Ver detalhes</button></td></tr>)}
               </tbody>
-              <tfoot><tr className="border-t border-[#e5dfea] bg-[#f6f3f8] font-extrabold text-[#3e354b]" data-testid="row-scoreboard-products-total"><th scope="row" className="px-4 py-3.5 sm:px-5">Total</th><td className="px-4 py-3.5 text-right tabular-nums" data-testid="text-scoreboard-product-quantity-total">{report.totals.quantity.toLocaleString('pt-BR')}</td><td className="px-4 py-3.5 text-right tabular-nums">{formatCents(report.totals.salesCents)}</td><td className="px-4 py-3.5 text-right tabular-nums">{formatCents(report.totals.refundCents)}</td><td className="px-4 py-3.5 text-right tabular-nums sm:px-5" data-testid="text-scoreboard-product-net-total">{formatCents(report.totals.netCents)}</td></tr></tfoot>
+              <tfoot><tr className="border-t border-[#e5dfea] bg-[#f6f3f8] font-extrabold text-[#3e354b]" data-testid="row-scoreboard-products-total"><th scope="row" className="px-4 py-3.5 sm:px-5">Total</th><td className="px-4 py-3.5 text-right tabular-nums" data-testid="text-scoreboard-product-quantity-total">{report.totals.quantity.toLocaleString('pt-BR')}</td><td className="px-4 py-3.5 text-right tabular-nums">{formatCents(report.totals.salesCents)}</td><td className="px-4 py-3.5 text-right tabular-nums">{formatCents(report.totals.refundCents)}</td><td className="px-4 py-3.5 text-right tabular-nums sm:px-5" data-testid="text-scoreboard-product-net-total">{formatCents(report.totals.netCents)}</td><td className="px-4 py-3.5 text-right">—</td></tr></tfoot>
             </table>
           </div>
         </section>
@@ -569,6 +632,24 @@ function ScoreboardContent() {
           </div>
         </section>
       </div>
+
+      <ScoreboardSalesHistory
+        sales={periodHistorySales}
+        periodRefunds={periodRefunds}
+        isLoading={isSalesHistoryLoading}
+        isError={isSalesHistoryError}
+        pdfDisabled={invalidRange || isSalesRefundsError}
+        onRetry={() => { void refetchSalesHistory(); }}
+        refunds={salesRefunds ?? []}
+        productSummaries={report.products}
+        totals={report.totals}
+        months={report.months}
+        periodMonthKeys={periodMonthKeys}
+        periodLabel={periodLabel}
+        filterLabel={scoreboardFilterLabel}
+        selectedProduct={detailProduct}
+        onProductDialogClose={() => setDetailProduct(null)}
+      />
 
       <ScoreboardGoals
         actualRevenueCents={BigInt(report.totals.netCents)}
