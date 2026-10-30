@@ -21,7 +21,7 @@ import { PurpleSelect } from '@/components/ui/purple-select';
 import { buildFinancialChartAnalytics } from '@/lib/financial-chart-data';
 import { buildOccupancyChartAnalytics, type OccupancyChartSupportRow } from '@/lib/occupancy-chart-data';
 import { getWeekdayName, getWeekdayNameForIsoDay } from '@/lib/occupancy-calendar';
-import { formatCents, formatMonthKey, getSaoPauloMonthKey, getSalesGoalComparison, isCompleteCalendarMonthRange, monthKeysBetween, monthsForYearQuarter } from '@/lib/sales-utils';
+import { buildScoreboardQueryParams, formatCents, formatMonthKey, getSaoPauloMonthKey, getSalesGoalComparison, isCompleteCalendarMonthRange, monthKeysBetween, monthsForYearQuarter } from '@/lib/sales-utils';
 import {
   changeOccupancyPeriod,
   clearOccupancyFilters,
@@ -159,22 +159,19 @@ function FinancialCharts({ onOccupancy, onContracts, onComplete }: { onOccupancy
     || ((periodMode === 'quarter' || periodMode === 'year')
       && monthsForYearQuarter(selectedYear, periodMode === 'quarter' ? selectedQuarter : undefined).length === 0)
     || (periodMode === 'range' && (!fromDate || !toDate || fromDate > toDate));
-  const params = useMemo<GetSalesScoreboardParams>(() => {
-    const query: GetSalesScoreboardParams = {};
-    if (periodMode === 'current') query.months = [currentMonth];
-    if (periodMode === 'single' && singleMonth) query.months = [singleMonth];
-    if (periodMode === 'multiple' && months.length) query.months = [...new Set(months)].sort();
-    if (periodMode === 'quarter') query.months = monthsForYearQuarter(selectedYear, selectedQuarter);
-    if (periodMode === 'year') query.months = monthsForYearQuarter(selectedYear);
-    if (periodMode === 'range' && fromDate && toDate && fromDate <= toDate) {
-      query.fromDate = fromDate;
-      query.toDate = toDate;
-    }
-    if (productId) query.productId = productId;
-    if (modalityId) query.modalityId = modalityId;
-    if (weekdays.length) query.weekdays = [...weekdays].sort((a, b) => a - b);
-    return query;
-  }, [periodMode, currentMonth, singleMonth, months, selectedYear, selectedQuarter, fromDate, toDate, productId, modalityId, weekdays]);
+  const params = useMemo<GetSalesScoreboardParams>(() => buildScoreboardQueryParams({
+    periodMode,
+    currentMonthKey: currentMonth,
+    selectedMonth: singleMonth,
+    selectedMonths: months,
+    selectedYear,
+    selectedQuarter,
+    dateFrom: fromDate,
+    dateTo: toDate,
+    filterProduct: productId,
+    weekdays,
+    modalityId,
+  }), [periodMode, currentMonth, singleMonth, months, selectedYear, selectedQuarter, fromDate, toDate, productId, weekdays, modalityId]);
 
   const scoreboard = useGetSalesScoreboard(params, {
     query: {

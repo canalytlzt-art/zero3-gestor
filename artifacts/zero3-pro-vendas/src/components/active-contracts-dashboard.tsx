@@ -5,6 +5,7 @@ import {
 } from '@workspace/api-client-react';
 import { ChartContainer } from '@/components/ui/chart';
 import { DownloadPdfButton, PdfPrintHeader, PdfPrintTable } from '@/components/dashboard-pdf-tools';
+import { buildActiveContractPeriodRows } from '@/lib/active-contracts';
 import { formatMonthKey } from '@/lib/sales-utils';
 import {
   Bar,
@@ -55,13 +56,18 @@ export default function ActiveContractsDashboard({
     query: { queryKey, refetchOnMount: 'always' },
   });
   const records = [...(contractsQuery.data ?? [])].sort((left, right) => left.month.localeCompare(right.month));
-  const latest = records.at(-1);
+  const contractRows = buildActiveContractPeriodRows(records.map((record) => record.month), records);
+  const latestRow = contractRows.at(-1);
+  const latest = latestRow?.record ?? undefined;
   const previous = records.at(-2);
-  const targetDifference = latest?.targetCount == null ? null : latest.activeCount - latest.targetCount;
-  const achievement = latest?.targetCount && latest.targetCount > 0
-    ? latest.activeCount / latest.targetCount * 100
-    : null;
-  const chartRecords = records.slice(-24);
+  const targetDifference = latestRow?.difference ?? null;
+  const achievement = latestRow?.attainment ?? null;
+  const chartRows = contractRows.slice(-24);
+  const chartRecords = chartRows.map(({ month, record }) => ({
+    month,
+    activeCount: record?.activeCount ?? null,
+    targetCount: record?.targetCount ?? null,
+  }));
 
   return (
     <section className="pdf-report-root space-y-5" aria-label="Painel de contratos ativos" data-testid="page-active-contracts-dashboard">
@@ -144,10 +150,15 @@ export default function ActiveContractsDashboard({
             {records.length > 24 && <p className="mt-2 text-[10px] text-[#837b8b]" data-testid="status-active-contracts-chart-window">O gráfico mostra os 24 meses mais recentes; a tabela abaixo mantém todo o histórico.</p>}
             <PdfPrintTable
               headers={['Mês', 'Contratos ativos', 'Meta', 'Diferença', 'Atingimento']}
-              rows={chartRecords.map((record) => {
-                const difference = record.targetCount == null ? null : record.activeCount - record.targetCount;
-                const percentage = record.targetCount != null && record.targetCount > 0 ? record.activeCount / record.targetCount * 100 : null;
-                return [formatMonthKey(record.month), count(record.activeCount), count(record.targetCount), difference == null ? '—' : monthDifference(difference, 0), percentage == null ? '—' : `${percentage.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`];
+              rows={chartRows.map((row) => {
+                const record = row.record;
+                return [
+                  formatMonthKey(row.month),
+                  count(record?.activeCount),
+                  count(record?.targetCount),
+                  row.difference == null ? '—' : monthDifference(row.difference, 0),
+                  row.attainment == null ? '—' : `${row.attainment.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`,
+                ];
               })}
             />
           </section>
@@ -160,16 +171,15 @@ export default function ActiveContractsDashboard({
                   <tr><th className="px-3 py-2.5">Mês/ano</th><th className="px-3 py-2.5">Contratos ativos</th><th className="px-3 py-2.5">Meta</th><th className="px-3 py-2.5">Diferença</th><th className="px-3 py-2.5">Atingimento</th><th className="px-3 py-2.5">Observações</th><th className="px-3 py-2.5">Atualizado</th></tr>
                 </thead>
                 <tbody className="divide-y divide-[#f0edf1] bg-white">
-                  {[...records].reverse().map((record, index, descending) => {
-                    const prior = descending[index + 1];
-                    const difference = record.targetCount == null ? null : record.activeCount - record.targetCount;
-                    const percentage = record.targetCount != null && record.targetCount > 0 ? record.activeCount / record.targetCount * 100 : null;
+                  {[...contractRows].reverse().map((row) => {
+                    const record = row.record;
+                    if (!record) return null;
                     return <tr key={record.month} data-testid={`row-active-contracts-dashboard-${record.month}`}>
                       <td className="whitespace-nowrap px-3 py-3 font-bold capitalize text-[#4b4357]">{formatMonthKey(record.month)}</td>
-                      <td className="px-3 py-3 font-extrabold tabular-nums text-[#342d40]">{count(record.activeCount)}{prior ? <span className="ml-1.5 text-[9px] font-medium text-[#837b8b]">({monthDifference(record.activeCount, prior.activeCount)} vs. mês anterior registrado)</span> : null}</td>
+                      <td className="px-3 py-3 font-extrabold tabular-nums text-[#342d40]">{count(record.activeCount)}{row.changeFromPrevious == null ? null : <span className="ml-1.5 text-[9px] font-medium text-[#837b8b]">({monthDifference(row.changeFromPrevious, 0)} vs. mês anterior registrado)</span>}</td>
                       <td className="px-3 py-3 tabular-nums text-[#716879]">{record.targetCount == null ? 'Não definida' : count(record.targetCount)}</td>
-                      <td className="px-3 py-3 tabular-nums text-[#716879]">{difference == null ? '—' : monthDifference(difference, 0)}</td>
-                      <td className="px-3 py-3 tabular-nums text-[#65479c]">{percentage == null ? '—' : `${percentage.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`}</td>
+                      <td className="px-3 py-3 tabular-nums text-[#716879]">{row.difference == null ? '—' : monthDifference(row.difference, 0)}</td>
+                      <td className="px-3 py-3 tabular-nums text-[#65479c]">{row.attainment == null ? '—' : `${row.attainment.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`}</td>
                       <td className="max-w-56 truncate px-3 py-3 text-[#837b8b]" title={record.notes ?? undefined}>{record.notes || '—'}</td>
                       <td className="whitespace-nowrap px-3 py-3 text-[10px] text-[#837b8b]">{formatDateTime(record.updatedAt)}</td>
                     </tr>;

@@ -2505,6 +2505,10 @@ components:
     SalesScoreboardTotals:
       type: object
       properties:
+        saleCount:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
         quantity:
           type: integer
           minimum: 0
@@ -2521,7 +2525,7 @@ components:
           type: integer
           minimum: -9007199254740991
           maximum: 9007199254740991
-      required: [quantity, salesCents, refundCents, netCents]
+      required: [saleCount, quantity, salesCents, refundCents, netCents]
     SalesScoreboardProduct:
       allOf:
         - $ref: "#/components/schemas/SalesScoreboardTotals"

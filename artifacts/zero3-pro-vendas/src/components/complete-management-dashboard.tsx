@@ -5,6 +5,7 @@ import {
   getGetOccupancyModalitiesQueryKey,
   getGetOccupancyMonthlyGoalsQueryKey,
   getGetOccupancyRecordsQueryKey,
+  getGetProductsQueryKey,
   getGetSalesGoalsQueryKey,
   getGetSalesScoreboardQueryKey,
   type GetOccupancyRecordsParams,
@@ -13,6 +14,7 @@ import {
   useGetOccupancyModalities,
   useGetOccupancyMonthlyGoals,
   useGetOccupancyRecords,
+  useGetProducts,
   useGetSalesGoals,
   useGetSalesScoreboard,
   useUpsertOccupancyMonthlyGoal,
@@ -30,7 +32,8 @@ import { beginDashboardPdf, DownloadPdfButton, PdfPrintHeader, PdfPrintTable } f
 import { buildFinancialChartAnalytics } from '@/lib/financial-chart-data';
 import { buildOccupancyChartAnalytics } from '@/lib/occupancy-chart-data';
 import { buildActiveContractPeriodRows } from '@/lib/active-contracts';
-import { formatCents, formatMonthKey, getSaoPauloMonthKey, monthsForYearQuarter } from '@/lib/sales-utils';
+import { buildScoreboardQueryParams, formatCents, formatMonthKey, getSaoPauloMonthKey, getSalesGoalComparison, monthsForYearQuarter } from '@/lib/sales-utils';
+import { occupancyAnalyticsMonths, occupancyQueryParams, type OccupancyFilterState } from '@/lib/occupancy-filter-store';
 
 type PeriodMode = 'month' | 'year' | 'quarter' | 'range';
 type Props = { onOccupancy: () => void; onFinancial: () => void; onContracts: () => void };
@@ -44,7 +47,7 @@ function monthLabel(value: string) { return formatMonthKey(value); }
 function count(value: number | null | undefined) { return value == null ? '—' : value.toLocaleString('pt-BR'); }
 function money(value: number) { return formatCents(Math.round(value)); }
 function percentage(value: number | null | undefined) {
-  return value == null ? 'Não informado' : `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
+  return value == null ? 'Não informado' : `${value.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`;
 }
 function reportCount(value: number | null | undefined) {
   return value == null ? 'Não informado' : count(value);
@@ -151,6 +154,8 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
   const [fromDate, setFromDate] = useState(`${nowMonth}-01`);
   const [toDate, setToDate] = useState(toSaoPauloDate(new Date()));
   const [modalityId, setModalityId] = useState('');
+  const [productId, setProductId] = useState('');
+  const [aggregatorDisplay, setAggregatorDisplay] = useState<'quantity' | 'share'>('quantity');
   const [weekday, setWeekday] = useState('');
   const [startTime, setStartTime] = useState('');
   const [dark, setDark] = useState(false);
@@ -176,20 +181,40 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
     return monthRange(fromDate, toDate);
   }, [mode, month, year, quarter, fromDate, toDate]);
   const invalid = selectedMonths.length === 0 || (mode === 'range' && (!fromDate || !toDate || fromDate > toDate));
-  const salesParams = useMemo<GetSalesScoreboardParams>(() => mode === 'range'
-    ? { fromDate, toDate }
-    : { months: selectedMonths }, [mode, fromDate, toDate, selectedMonths]);
-  const occupancyParams = useMemo<GetOccupancyRecordsParams>(() => {
-    const params: GetOccupancyRecordsParams = { kind: 'all' };
-    if (mode === 'range') { params.fromDate = fromDate; params.toDate = toDate; }
-    else params.months = selectedMonths.join(',');
-    if (modalityId) params.modalityId = modalityId;
-    if (weekday) params.weekdays = weekday;
-    if (startTime) params.startTimes = startTime;
-    return params;
-  }, [mode, fromDate, toDate, selectedMonths, modalityId, weekday, startTime]);
+  const salesParams = useMemo<GetSalesScoreboardParams>(() => buildScoreboardQueryParams({
+    periodMode: mode === 'range' ? 'range' : 'multiple',
+    currentMonthKey: nowMonth,
+    selectedMonth: month,
+    selectedMonths,
+    selectedYear: year,
+    selectedQuarter: quarter,
+    dateFrom: fromDate,
+    dateTo: toDate,
+    filterProduct: productId,
+    weekdays: weekday ? [Number(weekday)] : [],
+    modalityId,
+  }), [mode, nowMonth, month, selectedMonths, year, quarter, fromDate, toDate, productId, weekday, modalityId]);
+  const occupancyFilterState = useMemo<OccupancyFilterState>(() => ({
+    periodMode: mode === 'range' ? 'range' : 'months',
+    day: '',
+    fromDate,
+    toDate,
+    months: selectedMonths,
+    year: mode === 'year' || mode === 'quarter' ? year : '',
+    quarter: mode === 'quarter' ? quarter : '',
+    modalityId,
+    className: '',
+    startTimes: startTime ? [startTime] : [],
+    weekdays: weekday ? [Number(weekday)] : [],
+    viewMode: mode === 'range' ? 'daily' : 'monthly',
+  }), [mode, fromDate, toDate, selectedMonths, year, quarter, modalityId, startTime, weekday]);
+  const occupancyParams = useMemo<GetOccupancyRecordsParams>(
+    () => occupancyQueryParams(occupancyFilterState, 'all'),
+    [occupancyFilterState],
+  );
 
   const salesQuery = useGetSalesScoreboard(salesParams, { query: { queryKey: getGetSalesScoreboardQueryKey(salesParams), enabled: !invalid, staleTime: 300_000 } });
+  const productsQuery = useGetProducts({ query: { queryKey: getGetProductsQueryKey(), staleTime: 300_000 } });
   const goalsQuery = useGetSalesGoals({ query: { queryKey: getGetSalesGoalsQueryKey(), staleTime: 300_000 } });
   const contractsQuery = useGetActiveContracts({ query: { queryKey: getGetActiveContractsQueryKey(), staleTime: 300_000, refetchOnMount: 'always', refetchOnWindowFocus: true } });
   const occupancyGoalsQuery = useGetOccupancyMonthlyGoals(undefined, { query: { queryKey: getGetOccupancyMonthlyGoalsQueryKey(), staleTime: 300_000 } });
@@ -198,26 +223,47 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
   const filterOptionsQuery = useGetOccupancyRecords({ kind: 'all' }, { query: { queryKey: getGetOccupancyRecordsQueryKey({ kind: 'all' }), staleTime: 300_000 } });
 
   const finance = useMemo(() => salesQuery.data ? buildFinancialChartAnalytics(salesQuery.data) : null, [salesQuery.data]);
+  const productOptions = productsQuery.data ?? [];
+  const modalities = [...(modalityQuery.data ?? [])].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  const selectedProductForGoal = productOptions.find((item) => item.id === productId);
+  const selectedProductNameForGoal = selectedProductForGoal?.name ?? null;
+  const selectedProductModalityId = selectedProductForGoal?.modalityId ?? null;
+  const revenueGoalScopeValid = !weekday && (!productId || Boolean(selectedProductForGoal))
+    && (!modalityId || Boolean(productId && selectedProductModalityId === modalityId));
   const periodEndMonth = selectedMonths.at(-1) ?? '';
   const contractRows = useMemo(() => buildActiveContractPeriodRows(selectedMonths, contractsQuery.data ?? []), [contractsQuery.data, selectedMonths]);
   const contracts = contractRows.flatMap((row) => row.record ? [row.record] : []);
+  const contractLastMonth = contractRows.at(-1) ?? null;
   const contractMonthsNotInformed = selectedMonths.filter((selectedMonth) => !contracts.some((record) => record.month === selectedMonth));
-  const goals = useMemo(() => (goalsQuery.data ?? []).filter((goal) => goal.productName === null && selectedMonths.includes(goal.month)), [goalsQuery.data, selectedMonths]);
-  const contractChart = contracts.map((record) => ({ month: record.month, activeCount: record.activeCount, targetCount: record.targetCount }));
+  const goals = useMemo(() => (goalsQuery.data ?? []).filter((goal) => (
+    goal.productId === (productId || null)
+    && (Boolean(productId) || goal.productName === null)
+    && selectedMonths.includes(goal.month)
+  )), [goalsQuery.data, selectedMonths, productId]);
+  const contractChart = contractRows.map(({ month: contractMonth, record }) => ({
+    month: contractMonth,
+    activeCount: record?.activeCount ?? null,
+    targetCount: record?.targetCount ?? null,
+  }));
   const revenueChart = (finance?.months ?? []).map((row) => ({
     ...row,
-    targetCents: mode === 'range' && !completeMonthInRange(row.month, fromDate, toDate)
+    targetCents: !revenueGoalScopeValid || (mode === 'range' && !completeMonthInRange(row.month, fromDate, toDate))
       ? null
       : goals.find((goal) => goal.month === row.month)?.targetCents ?? null,
   }));
 
+  const occupancySelectedMonths = useMemo(
+    () => occupancyAnalyticsMonths(occupancyFilterState),
+    [occupancyFilterState],
+  );
   const occupancyFilters = useMemo(() => ({
-    viewMode: mode === 'range' ? 'daily' as const : 'monthly' as const,
-    ...(mode === 'range' ? { fromDate, toDate } : { selectedMonths }),
-    modalityId: modalityId || undefined,
-    weekdays: weekday ? [Number(weekday)] : [],
-    startTimes: startTime ? [startTime] : [],
-  }), [mode, fromDate, toDate, selectedMonths, modalityId, weekday, startTime]);
+    viewMode: occupancyFilterState.viewMode,
+    ...(occupancySelectedMonths ? { selectedMonths: occupancySelectedMonths } : {}),
+    ...(occupancyFilterState.periodMode === 'range' ? { fromDate, toDate } : {}),
+    modalityId: occupancyFilterState.modalityId || undefined,
+    weekdays: occupancyFilterState.weekdays,
+    startTimes: occupancyFilterState.startTimes,
+  }), [occupancyFilterState, occupancySelectedMonths, fromDate, toDate]);
   const occupancy = useMemo(() => buildOccupancyChartAnalytics(occupancyQuery.data ?? [], occupancyFilters), [occupancyQuery.data, occupancyFilters]);
   const monthBuckets = useMemo(() => {
     if (mode !== 'range') return occupancy.evolution.map((point) => ({ month: point.period, percentage: point.percentage, presences: point.presences, capacity: point.capacity }));
@@ -238,6 +284,9 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
     })).sort((a, b) => a.month.localeCompare(b.month));
   }, [mode, occupancy.evolution, occupancy.supportRows]);
   const aggregatorRows = occupancy.aggregatorsByMonth;
+  const estimatedAggregatorMonths = new Set((occupancyQuery.data ?? [])
+    .filter((record) => record.aggregatorSource === 'monthly_estimated' && selectedMonths.includes(record.month))
+    .map((record) => record.month));
   const monthlyGoalRows = occupancyGoalsQuery.data ?? [];
   const goalForMonth = (selectedMonth: string) => {
     if (mode === 'range' && !completeMonthInRange(selectedMonth, fromDate, toDate)) return null;
@@ -249,46 +298,122 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
       ? goalForMonth(row.month)?.aggregatorTargetPresences ?? null
       : null,
   }));
+  const aggregatorDisplayRows = selectedMonths.map((selectedMonth) => aggregatorChartRows.find((row) => row.month === selectedMonth) ?? ({
+    month: selectedMonth,
+    totalPresences: null,
+    aggregatorPresences: null,
+    aggregatorInformedClassCount: 0,
+    measuredClassCount: 0,
+    sharePercentage: null,
+    aggregatorTargetPresences: null,
+  }));
+  const aggregatorPeriodSummary = {
+    totalPresences: occupancy.totals.presences,
+    aggregatorPresences: occupancy.totals.aggregatorPresences,
+    otherPresences: occupancy.totals.otherPresences,
+    sharePercentage: occupancy.totals.aggregatorSharePercentage,
+    otherSharePercentage: occupancy.totals.aggregatorSharePercentage == null
+      ? null
+      : occupancy.totals.presences === 0 ? 0 : 100 - occupancy.totals.aggregatorSharePercentage,
+    complete: occupancy.totals.aggregatorSharePercentage != null,
+  };
+  const aggregatorEmptyMessage = (occupancyQuery.data?.length ?? 0) > 0
+    ? 'Existem registros no período, mas sem contagens completas de presenças para calcular a participação. Os demais check-ins permanecem desconhecidos.'
+    : mode === 'range' || weekday || startTime
+      ? 'Sem dados por aula para este recorte. Resumos mensais não são distribuídos por intervalo, dia da semana ou horário.'
+      : 'Sem dados no período';
+  const aggregatorDonutRows = aggregatorPeriodSummary.sharePercentage == null
+    || aggregatorPeriodSummary.totalPresences == null
+    || aggregatorPeriodSummary.totalPresences === 0
+    || aggregatorPeriodSummary.otherPresences == null
+    ? []
+    : [
+      { name: 'Agregadores', value: aggregatorPeriodSummary.aggregatorPresences ?? 0 },
+      { name: 'Demais presenças', value: aggregatorPeriodSummary.otherPresences },
+    ];
+  const aggregatorModalityComparison = useMemo(() => modalities.map((modality) => {
+    const analytics = buildOccupancyChartAnalytics(filterOptionsQuery.data ?? [], {
+      ...occupancyFilters,
+      modalityId: modality.id,
+    });
+    return {
+      id: modality.id,
+      name: modality.name,
+      totalPresences: analytics.totals.presences,
+      aggregatorPresences: analytics.totals.aggregatorPresences,
+      otherPresences: analytics.totals.otherPresences,
+      share: analytics.totals.aggregatorSharePercentage,
+      otherShare: analytics.totals.aggregatorSharePercentage == null
+        ? null
+        : analytics.totals.presences === 0 ? 0 : 100 - analytics.totals.aggregatorSharePercentage,
+      coverageComplete: analytics.totals.aggregatorSharePercentage != null,
+      hasMeasuredData: analytics.totals.measuredClassCount > 0,
+    };
+  }).filter((row) => row.hasMeasuredData), [modalities, filterOptionsQuery.data, occupancyFilters]);
+  const maxAggregatorTotal = Math.max(1, ...aggregatorDisplayRows.map((row) => row.totalPresences ?? 0));
+  const maxModalityPresences = Math.max(1, ...aggregatorModalityComparison.map((row) => row.totalPresences ?? 0));
   const occupancyChartRows = monthBuckets.map((row) => ({
     ...row,
     occupancyTargetPercentage: goalForMonth(row.month)?.occupancyTargetPercentage ?? null,
   }));
-  const donutRows = occupancy.totals.aggregatorSharePercentage == null ? [] : [
-    { name: 'Agregadores', value: occupancy.totals.aggregatorPresences ?? 0 },
-    { name: 'Outras presenças', value: occupancy.totals.otherPresences ?? 0 },
-  ];
-  const revenueGoalsComplete = selectedMonths.length > 0
-    && selectedMonths.every((selectedMonth) => goals.some((goal) => goal.month === selectedMonth))
-    && (mode !== 'range' || selectedMonths.every((selectedMonth) => completeMonthInRange(selectedMonth, fromDate, toDate)));
-  const revenueGoalTotal = revenueGoalsComplete
-    ? selectedMonths.reduce((total, selectedMonth) => total + (goals.find((goal) => goal.month === selectedMonth)?.targetCents ?? 0), 0)
-    : 0;
+  const occupancyModalityRows = occupancy.comparison.filter((row) => row.coveredPeriods > 0);
+  const maxOccupancyModalityPercentage = Math.max(1, ...occupancyModalityRows.map((row) => row.percentage));
   const revenueActual = finance?.totals.netCents ?? 0;
+  const partialRevenueRange = mode === 'range'
+    && selectedMonths.some((selectedMonth) => !completeMonthInRange(selectedMonth, fromDate, toDate));
+  const revenueGoalComparisonMode = !revenueGoalScopeValid || invalid
+    ? 'invalid'
+    : partialRevenueRange ? 'partial-range' : 'complete';
+  const revenueGoalComparison = useMemo(() => getSalesGoalComparison(
+    BigInt(Math.round(revenueActual)),
+    selectedMonths,
+    revenueGoalComparisonMode,
+    productId ? selectedProductNameForGoal : null,
+    goals,
+  ), [revenueActual, selectedMonths, revenueGoalComparisonMode, productId, selectedProductNameForGoal, goals]);
+  const revenueGoalsComplete = revenueGoalComparison.status === 'complete';
+  const revenueGoalTotal = revenueGoalsComplete && revenueGoalComparison.status === 'complete'
+    ? Number(revenueGoalComparison.targetCents)
+    : 0;
+  const revenueGoalLabel = productId ? 'Meta do produto' : 'Meta geral';
+  const hasAnyRevenueGoal = revenueGoalComparison.configuredGoalCount > 0;
+  const revenueGoalSummary = goalsQuery.isError
+    ? 'Indisponível'
+    : revenueGoalComparison.status === 'invalid' || revenueGoalComparison.status === 'partial-range'
+      ? 'Não comparada'
+      : revenueGoalsComplete
+        ? money(revenueGoalTotal)
+        : revenueGoalComparison.status === 'partial' ? 'Cobertura parcial' : 'Não definida';
   const revenueProgress = revenueGoalTotal > 0 ? Math.min(100, Math.max(0, revenueActual / revenueGoalTotal * 100)) : null;
   const revenueDonutRows = revenueProgress == null ? [] : [
     { name: 'Realizado', value: revenueProgress },
     { name: 'Falta para a meta', value: 100 - revenueProgress },
   ];
   const filterOptions = filterOptionsQuery.data ?? [];
-  const modalities = [...(modalityQuery.data ?? [])].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
   const selectedModalityName = modalities.find((item) => item.id === modalityId)?.name ?? (modalityId ? 'Modalidade selecionada' : 'Todas as modalidades');
   const weekdayName = weekday ? ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo'][Number(weekday) - 1] ?? 'Todos os dias' : 'Todos os dias';
-  const printFilters = `Filtros de check-in e agregadores: modalidade ${selectedModalityName}; dia ${weekdayName}; horário inicial ${startTime ? startTime.slice(0, 5) : 'todos'}. Vendas e contratos usam somente o período global.`;
-  const contractReportRows = contractRows.map(({ month, record, difference, attainment }) => {
-    if (!record) return [monthLabel(month), 'Sem dados cadastrados', '—', '—', '—'];
+  const selectedProductName = selectedProductNameForGoal ?? (productId ? 'Produto selecionado' : 'Todos os produtos');
+  const printFilters = `Check-in e Agregadores: modalidade ${selectedModalityName}; dia ${weekdayName}; horário ${startTime ? startTime.slice(0, 5) : 'todos'}. Faturamento: ${selectedProductName}; dia ${weekdayName}${modalityId ? `; modalidade ${selectedModalityName} apenas em vendas com vínculo explícito` : ''}. Contratos usam somente o período global. Meta mensal não se compara a recortes parciais por dia da semana ou modalidade. Agregadores: “estimativa” identifica valor estimado; cobertura incompleta permanece desconhecida.`;
+  const contractReportRows = contractRows.map(({ month, record, difference, attainment, changeFromPrevious }) => {
+    if (!record) return [monthLabel(month), 'Sem dados cadastrados', '—', '—', '—', '—'];
     return [
       monthLabel(month),
       count(record.activeCount),
       record.targetCount == null ? 'Não definida' : count(record.targetCount),
       difference == null ? '—' : `${difference > 0 ? '+' : ''}${count(difference)}`,
       attainment == null ? '—' : `${attainment.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`,
+      changeFromPrevious == null ? '—' : `${changeFromPrevious > 0 ? '+' : ''}${count(changeFromPrevious)}`,
     ];
   });
   const aggregatorReportRows = selectedMonths.map((selectedMonth) => {
     const row = aggregatorChartRows.find((item) => item.month === selectedMonth);
-    if (!row) return [monthLabel(selectedMonth), 'Sem dados no período', '—', '—', '—', '—'];
+    if (!row) return [monthLabel(selectedMonth), 'Sem dados no período', '—', '—', '—', '—', '—'];
     const savedTarget = goalForMonth(selectedMonth)?.aggregatorTargetPresences ?? null;
     const coverageComplete = row.measuredClassCount > 0 && row.aggregatorInformedClassCount === row.measuredClassCount;
+    const otherPresences = coverageComplete && row.aggregatorPresences != null ? row.totalPresences - row.aggregatorPresences : null;
+    const otherSharePercentage = row.sharePercentage == null
+      ? null
+      : row.totalPresences === 0 ? 0 : 100 - row.sharePercentage;
     const target = occupancyGoalsQuery.isError
       ? 'Dados indisponíveis'
       : row.aggregatorTargetPresences == null
@@ -298,10 +423,12 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
       ? `${(row.aggregatorPresences / row.aggregatorTargetPresences * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`
       : savedTarget != null && !coverageComplete ? 'Cobertura incompleta' : '—';
     return [
-      monthLabel(selectedMonth),
+      `${monthLabel(selectedMonth)}${estimatedAggregatorMonths.has(selectedMonth) ? ' · estimativa' : ''}`,
       reportCount(row.aggregatorPresences),
       count(row.totalPresences),
+      otherPresences == null ? 'Desconhecido' : count(otherPresences),
       percentage(row.sharePercentage),
+      percentage(otherSharePercentage),
       target,
       attainment,
     ];
@@ -323,20 +450,29 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
   });
   const revenueReportRows = selectedMonths.map((selectedMonth) => {
     const row = revenueChart.find((item) => item.month === selectedMonth);
-    if (!row) return [monthLabel(selectedMonth), 'Sem movimentação', '—', '—', '—', '—', '—'];
+    if (!row) return [monthLabel(selectedMonth), 'Sem movimentação', '—', '—', '—', '—', '—', '—'];
     const attainment = row.targetCents != null && row.targetCents > 0
       ? `${(row.netCents / row.targetCents * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`
       : '—';
     return [
       monthLabel(selectedMonth),
+      count(row.saleCount),
       count(row.quantity),
       money(row.salesCents),
       money(row.refundCents),
       money(row.netCents),
-      goalsQuery.isError ? 'Dados indisponíveis' : row.targetCents == null ? 'Meta não definida' : money(row.targetCents),
+      goalsQuery.isError ? 'Dados indisponíveis' : row.targetCents == null ? modalityId ? 'Não comparada para modalidade' : 'Meta não definida' : money(row.targetCents),
       attainment,
     ];
   });
+  const revenueProductReportRows = (finance?.byProduct ?? []).map((row) => [
+    row.modalityName ? `${row.name} · ${row.modalityName}` : row.name,
+    count(row.saleCount),
+    count(row.quantity),
+    money(row.salesCents),
+    money(row.refundCents),
+    money(row.netCents),
+  ]);
   const goalReportRows = selectedMonths.flatMap((selectedMonth) => {
     const contract = contractRows.find((row) => row.month === selectedMonth);
     const activeValue = contract?.record?.activeCount ?? null;
@@ -385,14 +521,16 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
       [monthLabel(selectedMonth), 'Faturamento líquido', revenueActualMonth == null ? 'Sem movimentação' : money(revenueActualMonth), revenueGoal == null ? 'Não comparada' : money(revenueGoal), signedMoneyDifference(revenueActualMonth, revenueGoal), revenueAchievement],
     ];
   });
-  const revenueAttainment = revenueGoalsComplete && revenueGoalTotal > 0
-    ? `${(revenueActual / revenueGoalTotal * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`
+  const revenueAttainment = revenueGoalsComplete && revenueGoalComparison.status === 'complete'
+    && revenueGoalComparison.targetCents > 0n
+    ? `${(Number(revenueGoalComparison.achievementTenthsPercent) / 10).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`
     : 'Não comparado';
   const startTimes = [...new Set(filterOptions.map((item) => item.startTime).filter((item): item is string => Boolean(item)))].sort();
-  const refreshing = [salesQuery, goalsQuery, contractsQuery, occupancyGoalsQuery, occupancyQuery, modalityQuery, filterOptionsQuery].some((query) => query.isFetching);
-  const allError = [salesQuery, goalsQuery, contractsQuery, occupancyGoalsQuery, occupancyQuery, modalityQuery, filterOptionsQuery].some((query) => query.isError);
-  const initialLoading = [salesQuery, goalsQuery, contractsQuery, occupancyGoalsQuery, occupancyQuery, modalityQuery, filterOptionsQuery].some((query) => query.isLoading);
-  const updatedAt = Math.max(...[salesQuery, goalsQuery, contractsQuery, occupancyGoalsQuery, occupancyQuery, modalityQuery, filterOptionsQuery].map((query) => query.dataUpdatedAt || 0));
+  const queries = [salesQuery, productsQuery, goalsQuery, contractsQuery, occupancyGoalsQuery, occupancyQuery, modalityQuery, filterOptionsQuery];
+  const refreshing = queries.some((query) => query.isFetching);
+  const allError = queries.some((query) => query.isError);
+  const initialLoading = queries.some((query) => query.isLoading);
+  const updatedAt = Math.max(...queries.map((query) => query.dataUpdatedAt || 0));
 
   useEffect(() => {
     if (refreshing) {
@@ -415,7 +553,7 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
   useEffect(() => () => { document.documentElement.classList.remove('zero3-dashboard-dark'); }, []);
 
   const refresh = () => void Promise.all([
-    salesQuery.refetch(), goalsQuery.refetch(), contractsQuery.refetch(), occupancyGoalsQuery.refetch(), occupancyQuery.refetch(), modalityQuery.refetch(), filterOptionsQuery.refetch(),
+    salesQuery.refetch(), productsQuery.refetch(), goalsQuery.refetch(), contractsQuery.refetch(), occupancyGoalsQuery.refetch(), occupancyQuery.refetch(), modalityQuery.refetch(), filterOptionsQuery.refetch(),
   ]);
   const loadGoalDraft = (selectedMonth: string, selectedModalityId: string) => {
     const record = monthlyGoalRows.find((goal) => goal.month === selectedMonth && goal.modalityId === (selectedModalityId || null));
@@ -529,11 +667,11 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
         </div>
         {mode === 'range' && fromDate > toDate && <p className="mt-2 text-xs text-[#ad5955]" role="alert">A data inicial deve ser anterior ou igual à data final.</p>}
         <div className="mt-4 border-t border-[#eeeaf1] pt-3">
-          <p className="mb-2 text-[9px] font-bold uppercase tracking-[.13em] text-[#8a8491]">Filtros exclusivos de ocupação e agregadores</p>
+          <p className="mb-2 text-[9px] font-bold uppercase tracking-[.13em] text-[#8a8491]">Check-in e Agregadores · modalidade também filtra faturamento apenas quando há vínculo explícito</p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <label className="text-[10px] font-bold text-[#837b8b]">Modalidade<select value={modalityId} onChange={(event) => setModalityId(event.target.value)} className="mt-1 h-10 w-full rounded-xl border border-[#e9e4eb] bg-[#fffefc] px-3 text-xs font-semibold text-[#443d50]" data-testid="select-dashboard-modality"><option value="">Todas as modalidades</option>{modalities.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-            <label className="text-[10px] font-bold text-[#837b8b]">Dia da semana<select value={weekday} onChange={(event) => setWeekday(event.target.value)} className="mt-1 h-10 w-full rounded-xl border border-[#e9e4eb] bg-[#fffefc] px-3 text-xs font-semibold text-[#443d50]" data-testid="select-dashboard-weekday"><option value="">Todos os dias</option>{['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo'].map((label, index) => <option key={label} value={index + 1}>{label}</option>)}</select></label>
-            <label className="text-[10px] font-bold text-[#837b8b]">Horário inicial<select value={startTime} onChange={(event) => setStartTime(event.target.value)} className="mt-1 h-10 w-full rounded-xl border border-[#e9e4eb] bg-[#fffefc] px-3 text-xs font-semibold text-[#443d50]" data-testid="select-dashboard-start-time"><option value="">Todos os horários</option>{startTimes.map((value) => <option key={value} value={value}>{value.slice(0, 5)}</option>)}</select></label>
+            <label className="text-[10px] font-bold text-[#837b8b]">Dia da semana<select value={weekday} onChange={(event) => setWeekday(event.target.value)} className="mt-1 h-10 w-full rounded-xl border border-[#e9e4eb] bg-[#fffefc] px-3 text-xs font-semibold text-[#443d50]" data-testid="select-dashboard-weekday"><option value="">Todos os dias</option>{['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo'].map((label, index) => <option key={label} value={index + 1}>{label}</option>)}</select><span className="mt-1 block font-normal">Filtra vendas pela data e check-ins pela data da aula.</span></label>
+            <label className="text-[10px] font-bold text-[#837b8b]">Horário inicial (somente Check-in)<select value={startTime} onChange={(event) => setStartTime(event.target.value)} className="mt-1 h-10 w-full rounded-xl border border-[#e9e4eb] bg-[#fffefc] px-3 text-xs font-semibold text-[#443d50]" data-testid="select-dashboard-start-time"><option value="">Todos os horários</option>{startTimes.map((value) => <option key={value} value={value}>{value.slice(0, 5)}</option>)}</select></label>
           </div>
         </div>
         {allError && <div className="mt-3 flex items-center gap-2 rounded-xl border border-[#ecd5d4] bg-[#fff9f8] p-3 text-xs text-[#806462]" role="status" data-testid="status-partial-dashboard-error"><CircleAlert size={15} /> Parte dos indicadores pode estar indisponível. Atualize para tentar novamente.</div>}
@@ -546,7 +684,23 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
           <section className={`${panel} ${dark ? 'bg-[#332c3d] border-[#493f55]' : ''}`} data-testid="chart-complete-contracts" data-pdf-panel="complete-contracts">
             <PdfPrintHeader title="Contratos ativos" period={periodLabel} filters={printFilters} />
             <div className="mb-3 flex items-start justify-between gap-2"><div><p className="text-[9px] font-bold uppercase tracking-[.14em] text-[#8c73b4]">base ativa</p><h2 className="mt-1 font-[family-name:var(--app-font-serif)] text-xl font-extrabold tracking-[-.045em]">Contratos ativos</h2><p className="mt-1 text-[10px] text-[#837b8b]">Comparação mensal entre o saldo informado e a meta cadastrada.</p></div><DownloadPdfButton scope="complete-contracts" title="Contratos ativos" period={periodLabel} compact disabled={refreshing || contractsQuery.isError} /></div>
-             {contractsQuery.isLoading ? <div className="h-[280px] animate-pulse rounded-2xl bg-[#f1edf4]" /> : contractsQuery.isError ? <ChartEmpty text={`Não foi possível carregar contratos. ${errorMessage(contractsQuery.error)}`} /> : contractChart.length ? <ChartContainer role="img" aria-label="Barras horizontais agrupadas de contratos ativos e meta mensal" config={{ activeCount: { label: 'Contratos ativos', color: palette.purple }, targetCount: { label: 'Meta mensal', color: palette.lime } }} className="dashboard-pdf-chart h-[310px] w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={contractChart} layout="vertical" margin={{ left: 4, right: 12, top: 6, bottom: 6 }}><CartesianGrid horizontal={false} stroke={grid} /><XAxis type="number" allowDecimals={false} tick={{ fill: axis, fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis type="category" dataKey="month" width={90} tickFormatter={monthLabel} tick={{ fill: axis, fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip labelFormatter={(value) => monthLabel(String(value))} formatter={(value, name) => [count(Number(value)), String(name)]} /><Legend wrapperStyle={{ fontSize: 10 }} /><Bar dataKey="activeCount" name="Contratos ativos" fill={palette.purple} radius={[0, 5, 5, 0]} maxBarSize={10} /><Bar dataKey="targetCount" name="Meta mensal" fill={palette.lime} radius={[0, 5, 5, 0]} maxBarSize={10} /></BarChart></ResponsiveContainer></ChartContainer> : <ChartEmpty text="Sem dados cadastrados para os meses selecionados." />}
+            {!contractsQuery.isLoading && !contractsQuery.isError && contractLastMonth?.record && <div className="dashboard-pdf-full-hide rounded-xl border border-[#e4dced] bg-[#f8f5fb] px-3 py-3" data-testid="summary-contracts-last-month">
+              <p className="text-[9px] font-bold uppercase tracking-wide text-[#806aa0]">{mode === 'quarter' ? 'Saldo no encerramento do trimestre' : 'Saldo no fim do período'} · {monthLabel(contractLastMonth.month)}</p>
+              <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div><p className="text-[9px] text-[#837b8b]">Contratos ativos</p><p className="text-lg font-extrabold tabular-nums text-[#65479c]">{count(contractLastMonth.record.activeCount)}</p></div>
+                <div><p className="text-[9px] text-[#837b8b]">Meta</p><p className="text-lg font-extrabold tabular-nums">{count(contractLastMonth.record.targetCount)}</p></div>
+                <div><p className="text-[9px] text-[#837b8b]">Diferença para a meta</p><p className="text-lg font-extrabold tabular-nums">{contractLastMonth.difference == null ? '—' : `${contractLastMonth.difference > 0 ? '+' : ''}${count(contractLastMonth.difference)}`}</p></div>
+                <div><p className="text-[9px] text-[#837b8b]">Atingimento</p><p className="text-lg font-extrabold tabular-nums">{percentage(contractLastMonth.attainment)}</p></div>
+              </div>
+              <p className="mt-2 text-[9px] text-[#837b8b]">Variação vs. mês anterior: <b className="tabular-nums">{contractLastMonth.changeFromPrevious == null ? '—' : `${contractLastMonth.changeFromPrevious > 0 ? '+' : ''}${count(contractLastMonth.changeFromPrevious)}`}</b>. Contratos são saldos mensais; não some os meses do trimestre.</p>
+            </div>}
+             {contractsQuery.isLoading ? <div className="h-[280px] animate-pulse rounded-2xl bg-[#f1edf4]" /> : contractsQuery.isError ? <ChartEmpty text={`Não foi possível carregar contratos. ${errorMessage(contractsQuery.error)}`} /> : contractChart.some((row) => row.activeCount != null || row.targetCount != null) ? <ChartContainer role="img" aria-label="Barras horizontais agrupadas de contratos ativos e meta mensal; saldos não são somados" config={{ activeCount: { label: 'Contratos ativos', color: palette.purple }, targetCount: { label: 'Meta mensal', color: palette.lime } }} className="dashboard-pdf-chart h-[310px] w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={contractChart} layout="vertical" margin={{ left: 4, right: 12, top: 6, bottom: 6 }}><CartesianGrid horizontal={false} stroke={grid} /><XAxis type="number" allowDecimals={false} tick={{ fill: axis, fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis type="category" dataKey="month" width={90} tickFormatter={monthLabel} tick={{ fill: axis, fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip labelFormatter={(value) => monthLabel(String(value))} formatter={(value, name) => [count(value == null ? null : Number(value)), String(name)]} /><Legend wrapperStyle={{ fontSize: 10 }} /><Bar dataKey="activeCount" name="Contratos ativos" fill={palette.purple} radius={[0, 5, 5, 0]} maxBarSize={10} /><Bar dataKey="targetCount" name="Meta mensal" fill={palette.lime} radius={[0, 5, 5, 0]} maxBarSize={10} /></BarChart></ResponsiveContainer></ChartContainer> : <ChartEmpty text="Sem dados no período" />}
+             {!contractsQuery.isLoading && !contractsQuery.isError && contractChart.some((row) => row.activeCount != null || row.targetCount != null) && <div className="dashboard-pdf-full-hide overflow-x-auto rounded-xl border border-[#eeeaf1]">
+                <table className="w-full min-w-[470px] text-left text-[10px]" data-testid="table-contract-monthly-snapshots">
+                  <thead className="bg-[#f8f5fb] text-[#716879]"><tr><th className="px-3 py-2 font-bold">Mês</th><th className="px-3 py-2 font-bold">Saldo ativo</th><th className="px-3 py-2 font-bold">Meta</th><th className="px-3 py-2 font-bold">Atingimento</th><th className="px-3 py-2 font-bold">Variação vs mês anterior</th></tr></thead>
+                  <tbody>{contractRows.map((row) => <tr key={row.month} className="border-t border-[#eeeaf1]"><th scope="row" className="px-3 py-2 font-semibold">{monthLabel(row.month)}</th><td className="px-3 py-2 tabular-nums">{count(row.record?.activeCount)}</td><td className="px-3 py-2 tabular-nums">{count(row.record?.targetCount)}</td><td className="px-3 py-2 tabular-nums">{percentage(row.attainment)}</td><td className="px-3 py-2 tabular-nums">{row.changeFromPrevious == null ? '—' : `${row.changeFromPrevious > 0 ? '+' : ''}${count(row.changeFromPrevious)}`}</td></tr>)}</tbody>
+               </table>
+             </div>}
               {!contractsQuery.isLoading && !contractsQuery.isError && contractMonthsNotInformed.length > 0 && <div className="dashboard-pdf-full-hide mt-3 max-h-24 overflow-y-auto rounded-xl border border-dashed border-[#ded7e4] bg-[#fbf9fc] px-3 py-2.5" data-testid="status-contracts-uninformed"><p className="text-[10px] font-bold text-[#716879]">Sem dados cadastrados em {contractMonthsNotInformed.length} mês(es):</p><p className="mt-1 text-[10px] leading-4 text-[#837b8b]">{contractMonthsNotInformed.map(monthLabel).join(' · ')}</p></div>}
              <div className="dashboard-pdf-full-hide mt-2 rounded-xl bg-[#f8f5fb] px-3 py-2">
               <p className="text-[10px] text-[#716879]">Atingimento mensal das metas salvas</p>
@@ -556,7 +710,7 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
               })}</div> : <p className="mt-1 text-[10px] font-bold text-[#65479c]">Meta não definida</p>}
             </div>
             <ReportTable
-              headers={['Mês', 'Contratos ativos', 'Meta', 'Diferença', 'Atingimento']}
+              headers={['Mês', 'Contratos ativos', 'Meta', 'Diferença vs meta', 'Atingimento', 'Variação vs mês anterior']}
               rows={contractsQuery.isError ? [] : contractReportRows}
               emptyMessage={contractsQuery.isError ? 'Dados de contratos indisponíveis nesta exportação.' : 'Sem dados cadastrados no período'}
             />
@@ -565,29 +719,112 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
           <section className={`${panel} ${dark ? 'bg-[#332c3d] border-[#493f55]' : ''}`} data-testid="chart-complete-aggregators" data-pdf-panel="complete-aggregators">
             <PdfPrintHeader title="Agregadores" period={periodLabel} filters={printFilters} />
             <div className="mb-3 flex items-start justify-between gap-2"><div><p className="text-[9px] font-bold uppercase tracking-[.14em] text-[#8c73b4]">check-ins via plataformas</p><h2 className="mt-1 font-[family-name:var(--app-font-serif)] text-xl font-extrabold tracking-[-.045em]">Agregadores</h2><p className="mt-1 text-[10px] text-[#837b8b]">Presenças em aulas, não pessoas únicas.</p></div><DownloadPdfButton scope="complete-aggregators" title="Agregadores" period={periodLabel} compact disabled={refreshing || occupancyQuery.isError} /></div>
-            {occupancyQuery.isLoading ? <div className="h-[280px] animate-pulse rounded-2xl bg-[#f1edf4]" /> : occupancyQuery.isError ? <ChartEmpty text={`Não foi possível carregar as presenças. ${errorMessage(occupancyQuery.error)}`} /> : aggregatorChartRows.some((row) => row.aggregatorPresences !== null) ? <div className="grid gap-2">
-              <div className="dashboard-pdf-chart h-[230px] min-w-0"><ChartContainer role="img" aria-label="Barras horizontais de presenças agregadoras e meta mensal" config={{ aggregatorPresences: { label: 'Agregadores', color: palette.purple }, totalPresences: { label: 'Total de presenças', color: palette.lime }, aggregatorTargetPresences: { label: 'Meta mensal', color: palette.orange } }} className="h-full w-full"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={aggregatorChartRows} layout="vertical" margin={{ top: 5, right: 8, bottom: 2, left: 5 }}><CartesianGrid horizontal={false} stroke={grid} /><XAxis type="number" allowDecimals={false} tick={{ fill: axis, fontSize: 9 }} axisLine={false} tickLine={false} /><YAxis type="category" dataKey="month" width={84} tickFormatter={monthLabel} tick={{ fill: axis, fontSize: 9 }} axisLine={false} tickLine={false} /><Tooltip labelFormatter={(value) => monthLabel(String(value))} formatter={(value, name) => [count(Number(value)), String(name)]} /><Legend wrapperStyle={{ fontSize: 9 }} /><Bar dataKey="aggregatorPresences" name="Presenças agregadoras informadas" fill={palette.purple} radius={[0, 4, 4, 0]} maxBarSize={9} /><Bar dataKey="aggregatorTargetPresences" name="Meta mensal" fill={palette.orange} radius={[0, 4, 4, 0]} maxBarSize={9} /><Line dataKey="totalPresences" name="Presenças totais" stroke={palette.lime} strokeWidth={2} dot={{ r: 2 }} connectNulls={false} /></ComposedChart></ResponsiveContainer></ChartContainer></div>
-               <div className="dashboard-pdf-full-hide flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[#f8f5fb] px-3 py-2 text-[10px]"><span className="font-bold text-[#65479c]">{modalityId ? 'Meta da modalidade selecionada' : 'Meta geral'}: {aggregatorChartRows.some((row) => row.aggregatorTargetPresences != null) ? 'metas salvas por mês' : 'Meta não definida'}</span><span className="text-[#716879]">Participação total: {occupancy.totals.aggregatorSharePercentage == null ? 'cobertura incompleta' : `${occupancy.totals.aggregatorSharePercentage.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`}</span></div>
-               {aggregatorChartRows.some((row) => row.aggregatorTargetPresences != null) && <div className="dashboard-pdf-full-hide flex flex-wrap gap-2">{aggregatorChartRows.filter((row) => row.aggregatorTargetPresences != null).map((row) => {
-                const completeCoverage = row.measuredClassCount > 0 && row.aggregatorInformedClassCount === row.measuredClassCount;
-                const achievement = completeCoverage && row.aggregatorTargetPresences! > 0
-                  ? (row.aggregatorPresences ?? 0) / row.aggregatorTargetPresences! * 100
-                  : null;
-                return <span key={row.month} className="rounded-full border border-[#e9e4eb] bg-[#fffefc] px-2.5 py-1 text-[10px] text-[#65479c]" data-testid={`text-aggregator-goal-${row.month}`}>{monthLabel(row.month)} · {achievement == null ? 'cobertura insuficiente para comparar' : `${achievement.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% da meta`}</span>;
-              })}</div>}
-               {donutRows.length ? <div className="flex items-center gap-3 rounded-xl border border-[#eeeaf1] px-3 py-2"><div className="dashboard-pdf-donut h-[82px] w-[96px] shrink-0"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={donutRows} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={23} outerRadius={37} paddingAngle={2} cornerRadius={2} stroke="none" isAnimationActive={false}>{donutRows.map((_, index) => <Cell key={donutRows[index].name} fill={index === 0 ? palette.purple : palette.lime} />)}</Pie><Tooltip formatter={(value) => [count(Number(value)), 'Presenças']} /></PieChart></ResponsiveContainer></div><div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-[#716879]"><span className="w-full font-bold text-[#65479c]">Participação: {occupancy.totals.aggregatorSharePercentage?.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%</span>{donutRows.map((row, index) => <span key={row.name} className="flex items-center gap-1.5"><i className={`h-2 w-2 rounded-sm ${index ? 'bg-[#a9d75a]' : 'bg-[#7655a8]'}`} />{row.name}: <b>{count(row.value)}</b></span>)}</div></div> : <p className="rounded-xl bg-[#fbfafc] px-3 py-2 text-[10px] text-[#837b8b]">Sem dados no período para calcular a participação: falta cobertura de agregadores em todas as aulas medidas.</p>}
-            </div> : <ChartEmpty text="Sem dados no período. Não há presenças de agregadores informadas nas aulas selecionadas." />}
+              {occupancyQuery.isLoading ? <div className="h-[280px] animate-pulse rounded-2xl bg-[#f1edf4]" /> : occupancyQuery.isError ? <ChartEmpty text={`Não foi possível carregar as presenças. ${errorMessage(occupancyQuery.error)}`} /> : aggregatorRows.length ? <div className="grid gap-4">
+                <div className="dashboard-pdf-full-hide grid grid-cols-2 gap-2 rounded-xl border border-[#eeeaf1] bg-[#fbf9fc] p-3 sm:grid-cols-5" aria-label="Resumo de presenças de agregadores">
+                 <div><p className="text-[9px] font-bold uppercase tracking-wide text-[#837b8b]">Presenças totais</p><p className="mt-1 text-lg font-extrabold tabular-nums">{reportCount(aggregatorPeriodSummary.totalPresences)}</p></div>
+                 <div><p className="text-[9px] font-bold uppercase tracking-wide text-[#837b8b]">Agregadores{aggregatorPeriodSummary.complete ? '' : ' informados'}</p><p className="mt-1 text-lg font-extrabold tabular-nums text-[#7655a8]">{reportCount(aggregatorPeriodSummary.aggregatorPresences)}</p></div>
+                 <div><p className="text-[9px] font-bold uppercase tracking-wide text-[#837b8b]">Demais presenças</p><p className="mt-1 text-lg font-extrabold tabular-nums text-[#648d38]">{reportCount(aggregatorPeriodSummary.otherPresences)}</p></div>
+                  <div><p className="text-[9px] font-bold uppercase tracking-wide text-[#837b8b]">Agregadores %</p><p className="mt-1 text-lg font-extrabold tabular-nums">{percentage(aggregatorPeriodSummary.sharePercentage)}</p></div>
+                  <div><p className="text-[9px] font-bold uppercase tracking-wide text-[#837b8b]">Demais %</p><p className="mt-1 text-lg font-extrabold tabular-nums">{percentage(aggregatorPeriodSummary.otherSharePercentage)}</p></div>
+               </div>
+                <p className="text-[9px] text-[#837b8b]">Participação = agregadores ÷ presenças totais. Atingimento = agregadores ÷ meta mensal; são percentuais diferentes.</p>
+               <div className="dashboard-pdf-full-hide flex flex-wrap items-center justify-between gap-2">
+                 <div className="inline-flex rounded-lg border border-[#e8e2ec] bg-[#f8f5fb] p-1" role="group" aria-label="Unidade das barras de agregadores">
+                   <button type="button" onClick={() => setAggregatorDisplay('quantity')} aria-pressed={aggregatorDisplay === 'quantity'} className={`rounded-md px-2.5 py-1.5 text-[10px] font-bold ${aggregatorDisplay === 'quantity' ? 'bg-white text-[#65479c] shadow-sm' : 'text-[#837b8b]'}`} data-testid="button-aggregators-quantity">Quantidade</button>
+                   <button type="button" onClick={() => setAggregatorDisplay('share')} aria-pressed={aggregatorDisplay === 'share'} className={`rounded-md px-2.5 py-1.5 text-[10px] font-bold ${aggregatorDisplay === 'share' ? 'bg-white text-[#65479c] shadow-sm' : 'text-[#837b8b]'}`} data-testid="button-aggregators-share">Participação %</button>
+                 </div>
+                 <span className="text-[10px] text-[#716879]">{aggregatorDisplay === 'quantity' ? 'Presenças' : 'Proporção das presenças'}</span>
+               </div>
+               <div className="dashboard-pdf-chart min-w-0" role="img" aria-label="Barras mensais empilhadas de agregadores e demais presenças, com valores e percentuais apresentados">
+                 <div className="space-y-3">
+                   {aggregatorDisplayRows.map((row) => {
+                     const total = row.totalPresences;
+                     const agg = row.aggregatorPresences;
+                     const covered = row.measuredClassCount > 0 && row.aggregatorInformedClassCount === row.measuredClassCount && agg != null;
+                     const other = covered && total != null ? total - agg : null;
+                      const knownShare = total != null && total > 0 && agg != null ? agg / total * 100 : null;
+                      const barWidth = aggregatorDisplay === 'quantity'
+                        ? total == null ? 0 : total / maxAggregatorTotal * 100
+                        : total == null || total === 0 ? 0 : 100;
+                      const aggWidth = covered && row.sharePercentage != null
+                        ? row.sharePercentage
+                        : knownShare ?? 0;
+                      const otherWidth = covered && row.sharePercentage != null
+                        ? 100 - row.sharePercentage
+                        : Math.max(0, 100 - aggWidth);
+                     const goal = row.aggregatorTargetPresences;
+                     const attainment = covered && goal != null && goal > 0 ? (agg ?? 0) / goal * 100 : null;
+                     return <div key={row.month} className="rounded-xl border border-[#eeeaf1] bg-white px-3 py-2.5" data-testid={`row-aggregators-month-${row.month}`}>
+                       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-[10px]"><strong className="min-w-[5rem] text-[#51465f]">{monthLabel(row.month)}{estimatedAggregatorMonths.has(row.month) && <span className="ml-1 font-medium text-[#837b8b]">· estimativa</span>}</strong>
+                         <span className="tabular-nums text-[#51465f]">Total <b>{reportCount(total)}</b></span>
+                         <span className="tabular-nums text-[#7655a8]">Agregadores <b>{reportCount(agg)}</b></span>
+                         <span className="tabular-nums text-[#648d38]">Demais <b>{reportCount(other)}</b></span>
+                         <span className="tabular-nums text-[#51465f]">Participação <b>{percentage(row.sharePercentage)}</b></span>
+                       </div>
+                        <div className="mt-2 h-3 rounded-full bg-[#f3f0f5]" aria-hidden="true">
+                          <div className="flex h-full overflow-hidden rounded-full" style={{ width: `${Math.max(0, Math.min(100, barWidth))}%` }}>
+                            <span className="bg-[#9c80c2]" style={{ width: `${Math.max(0, Math.min(100, aggWidth))}%` }} />
+                            {covered
+                              ? <span className="bg-[#a9d75a]" style={{ width: `${Math.max(0, Math.min(100, otherWidth))}%` }} />
+                              : <span className="flex-1 bg-[repeating-linear-gradient(135deg,#e7e2eb_0,#e7e2eb_3px,#f5f2f6_3px,#f5f2f6_6px)]" />}
+                          </div>
+                        </div>
+                       <div className="mt-1.5 flex flex-wrap justify-between gap-2 text-[9px] text-[#837b8b]">
+                         <span>{covered ? `Agregadores ${percentage(row.sharePercentage)} · demais ${percentage(other != null && total ? other / total * 100 : 0)}` : row.measuredClassCount ? 'Cobertura incompleta: demais presenças e participação desconhecidas' : 'Sem dados no período'}</span>
+                         <span>{goal == null ? (goalForMonth(row.month)?.aggregatorTargetPresences != null ? 'Meta não comparada · cobertura incompleta' : 'Meta não definida') : `Meta ${count(goal)} · ${attainment == null ? 'sem comparação' : `${attainment.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% atingida`}`}</span>
+                       </div>
+                     </div>;
+                   })}
+                 </div>
+               </div>
+                {aggregatorDonutRows.length > 0
+                  ? <div className="dashboard-pdf-full-hide flex flex-wrap items-center gap-3 rounded-xl border border-[#eeeaf1] px-3 py-2" data-testid="chart-aggregator-share-donut">
+                    <div className="dashboard-pdf-donut h-[96px] w-[104px] shrink-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie data={aggregatorDonutRows} dataKey="value" nameKey="name" innerRadius={25} outerRadius={41} paddingAngle={2} stroke="none" isAnimationActive={false}>
+                            {aggregatorDonutRows.map((row, index) => <Cell key={row.name} fill={index === 0 ? palette.purple : palette.lime} />)}
+                          </Pie>
+                          <Tooltip formatter={(value) => [count(Number(value)), 'Presenças']} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                     <div className="text-[10px] text-[#716879]">
+                       <p className="font-bold">Participação nas presenças</p>
+                       <p className="mt-2 flex items-center gap-2"><i className="h-2.5 w-2.5 rounded-full bg-[#9c80c2]" />Agregadores</p>
+                       <p className="mt-1 flex items-center gap-2"><i className="h-2.5 w-2.5 rounded-full bg-[#a9d75a]" />Demais presenças</p>
+                    </div>
+                  </div>
+                  : <p className="dashboard-pdf-full-hide rounded-xl bg-[#fbfafc] px-3 py-2 text-[10px] text-[#837b8b]">Rosca de participação indisponível: cobertura incompleta ou nenhum check-in no período.</p>}
+               {aggregatorModalityComparison.length > 0 && <div className="dashboard-pdf-full-hide rounded-xl border border-[#eeeaf1] p-3" data-testid="list-aggregators-modality-comparison">
+                 <h3 className="text-[10px] font-extrabold text-[#51465f]">Comparação por modalidade</h3>
+                 <p className="mt-1 text-[9px] text-[#837b8b]">Barras separadas; participação somente com cobertura completa.</p>
+                  <div className="mt-3 space-y-3">{aggregatorModalityComparison.map((item) => <div key={item.id} className="grid gap-1.5 sm:grid-cols-[7rem_1fr] sm:items-center">
+                   <span className="truncate text-[10px] font-semibold" title={item.name}>{item.name}</span>
+                    <div className="grid gap-1">
+                       <div className="flex items-center gap-2 text-[9px]"><span className="w-20 shrink-0 text-[#51465f]">Total</span><span className="h-2 flex-1 overflow-hidden rounded-full bg-[#eeeaf1]"><i className="block h-full rounded-full bg-[#bcb3c7]" style={{ width: `${Math.min(100, item.totalPresences == null ? 0 : item.totalPresences / maxModalityPresences * 100)}%` }} /></span><b className="min-w-12 text-right tabular-nums">{reportCount(item.totalPresences)}</b></div>
+                       <div className="flex items-center gap-2 text-[9px]"><span className="w-20 shrink-0 text-[#7655a8]">{item.coverageComplete ? 'Agregadores' : 'Agreg. informados'}</span><span className="h-2 flex-1 overflow-hidden rounded-full bg-[#eeeaf1]"><i className="block h-full rounded-full bg-[#9c80c2]" style={{ width: `${Math.min(100, item.aggregatorPresences == null ? 0 : item.aggregatorPresences / maxModalityPresences * 100)}%` }} /></span><b className="min-w-12 text-right tabular-nums">{reportCount(item.aggregatorPresences)}</b></div>
+                       <div className="flex items-center gap-2 text-[9px]"><span className="w-20 shrink-0 text-[#648d38]">Demais</span><span className="h-2 flex-1 overflow-hidden rounded-full bg-[#eeeaf1]">{item.coverageComplete ? <i className="block h-full rounded-full bg-[#a9d75a]" style={{ width: `${Math.min(100, item.otherPresences == null ? 0 : item.otherPresences / maxModalityPresences * 100)}%` }} /> : <i className="block h-full rounded-full bg-[repeating-linear-gradient(135deg,#e7e2eb_0,#e7e2eb_3px,#f5f2f6_3px,#f5f2f6_6px)]" />}</span><b className="min-w-12 text-right tabular-nums">{reportCount(item.otherPresences)}</b></div>
+                       <p className="text-right text-[9px] tabular-nums text-[#716879]">{item.coverageComplete ? `Agregadores ${percentage(item.share)} · demais ${percentage(item.otherShare)}` : 'Participação desconhecida · cobertura incompleta'}</p>
+                   </div>
+                 </div>)}</div>
+               </div>}
+                <p className="text-[9px] text-[#837b8b]">{mode === 'quarter' ? 'Resumo do trimestre' : 'Resumo do período'} = soma dos meses com dados; meses sem dados permanecem desconhecidos. Metas não são somadas. Cobertura parcial mantém “demais presenças” e participação como desconhecidas.</p>
+               {estimatedAggregatorMonths.size > 0 && <p className="text-[9px] text-[#837b8b]" data-testid="note-aggregator-estimate">Estimativa mensal sinalizada nos meses correspondentes.</p>}
+              </div> : <ChartEmpty text={aggregatorEmptyMessage} />}
             <ReportTable
-              headers={['Mês', 'Agregadores', 'Presenças totais', 'Participação', 'Meta', 'Atingimento']}
+              headers={['Mês', 'Agregadores', 'Presenças totais', 'Demais presenças', 'Agregadores %', 'Demais %', 'Meta', 'Atingimento']}
               rows={occupancyQuery.isError ? [] : aggregatorReportRows}
               emptyMessage={occupancyQuery.isError ? 'Dados de check-in indisponíveis nesta exportação.' : 'Sem dados no período'}
               summary={occupancyQuery.isError || occupancyGoalsQuery.isError ? undefined : [
-                'Total do período',
-                reportCount(occupancy.totals.aggregatorPresences),
-                reportCount(occupancy.totals.presences),
-                percentage(occupancy.totals.aggregatorSharePercentage),
+                mode === 'quarter' ? 'Total do trimestre' : 'Total do período',
+                reportCount(aggregatorPeriodSummary.aggregatorPresences),
+                reportCount(aggregatorPeriodSummary.totalPresences),
+                aggregatorPeriodSummary.otherPresences == null ? 'Desconhecido' : count(aggregatorPeriodSummary.otherPresences),
+                percentage(aggregatorPeriodSummary.sharePercentage),
+                percentage(aggregatorPeriodSummary.otherSharePercentage),
                 'Metas mensais',
-                occupancy.totals.aggregatorSharePercentage == null ? 'Cobertura incompleta' : 'Não somar metas',
+                aggregatorPeriodSummary.sharePercentage == null ? 'Cobertura incompleta' : 'Não somar metas',
               ]}
             />
           </section>
@@ -598,7 +835,32 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
           <section className={`${panel} ${dark ? 'bg-[#332c3d] border-[#493f55]' : ''}`} data-testid="chart-complete-occupancy" data-pdf-panel="complete-occupancy">
             <PdfPrintHeader title="Check-in e Ocupação" period={periodLabel} filters={printFilters} />
             <div className="mb-3 flex items-start justify-between gap-2"><div><p className="text-[9px] font-bold uppercase tracking-[.14em] text-[#8c73b4]">check-ins e utilização das aulas</p><h2 className="mt-1 font-[family-name:var(--app-font-serif)] text-xl font-extrabold tracking-[-.045em]">Check-in e Ocupação</h2><p className="mt-1 text-[10px] text-[#837b8b]">Presenças, capacidade e taxa de ocupação por mês.</p></div><DownloadPdfButton scope="complete-occupancy" title="Check-in e Ocupação" period={periodLabel} compact disabled={refreshing || occupancyQuery.isError} /></div>
+            {!occupancyQuery.isLoading && !occupancyQuery.isError && occupancy.totals.classes > 0 && <div className="dashboard-pdf-full-hide grid grid-cols-2 gap-2 rounded-xl border border-[#eeeaf1] bg-[#fbf9fc] p-3 sm:grid-cols-4" data-testid="summary-checkin">
+              <div><p className="text-[9px] font-bold uppercase tracking-wide text-[#837b8b]">Ocupação ponderada</p><p className="mt-1 text-lg font-extrabold tabular-nums">{percentage(occupancy.totals.percentage)}</p><p className="text-[9px] text-[#837b8b]">presenças ÷ capacidade</p></div>
+              <div><p className="text-[9px] font-bold uppercase tracking-wide text-[#837b8b]">Presenças</p><p className="mt-1 text-lg font-extrabold tabular-nums">{reportCount(occupancy.totals.presences)}</p></div>
+              <div><p className="text-[9px] font-bold uppercase tracking-wide text-[#837b8b]">Capacidade</p><p className="mt-1 text-lg font-extrabold tabular-nums">{reportCount(occupancy.totals.capacity)}</p></div>
+              <div><p className="text-[9px] font-bold uppercase tracking-wide text-[#837b8b]">Aulas</p><p className="mt-1 text-lg font-extrabold tabular-nums">{count(occupancy.totals.classes)}</p></div>
+            </div>}
             {occupancyQuery.isLoading ? <div className="h-[280px] animate-pulse rounded-2xl bg-[#f1edf4]" /> : occupancyQuery.isError ? <ChartEmpty text={`Não foi possível carregar ocupação. ${errorMessage(occupancyQuery.error)}`} /> : occupancyChartRows.some((row) => row.percentage != null || row.presences != null || row.capacity != null) ? <ChartContainer role="img" aria-label="Check-ins mensais, capacidade, taxa de ocupação e meta" config={{ presences: { label: 'Presenças', color: palette.purple }, capacity: { label: 'Capacidade', color: palette.lime }, percentage: { label: 'Taxa de ocupação', color: palette.purple }, occupancyTargetPercentage: { label: 'Meta de ocupação', color: palette.orange } }} className="dashboard-pdf-chart h-[300px] w-full"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={occupancyChartRows} margin={{ top: 8, right: 8, bottom: 8, left: 3 }}><CartesianGrid vertical={false} stroke={grid} /><XAxis dataKey="month" tickFormatter={monthLabel} tick={{ fill: axis, fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis yAxisId="count" allowDecimals={false} tick={{ fill: axis, fontSize: 9 }} axisLine={false} tickLine={false} /><YAxis yAxisId="rate" orientation="right" domain={[0, 'auto']} tickFormatter={(value) => `${Number(value).toLocaleString('pt-BR')}%`} tick={{ fill: axis, fontSize: 9 }} axisLine={false} tickLine={false} /><Tooltip labelFormatter={(value) => monthLabel(String(value))} formatter={(value, name) => [value == null ? 'Não informado' : name === 'Taxa de ocupação' || name === 'Meta de ocupação' ? `${Number(value).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%` : count(Number(value)), String(name)]} /><Legend wrapperStyle={{ fontSize: 9 }} /><Bar yAxisId="count" dataKey="presences" name="Presenças" fill={palette.purple} radius={[4, 4, 0, 0]} maxBarSize={22} /><Bar yAxisId="count" dataKey="capacity" name="Capacidade" fill={palette.lime} radius={[4, 4, 0, 0]} maxBarSize={22} /><Line yAxisId="rate" dataKey="percentage" name="Taxa de ocupação" stroke={palette.purple} strokeWidth={2} connectNulls={false} dot={false} /><Line yAxisId="rate" dataKey="occupancyTargetPercentage" name="Meta de ocupação" stroke={palette.orange} strokeWidth={2} strokeDasharray="5 4" connectNulls={false} dot={false} /></ComposedChart></ResponsiveContainer></ChartContainer> : <ChartEmpty text="Sem dados no período. Não há check-ins com informações de presenças ou ocupação." />}
+             {!occupancyQuery.isLoading && !occupancyQuery.isError && occupancyChartRows.some((row) => row.percentage != null || row.presences != null || row.capacity != null) && <div className="dashboard-pdf-full-hide overflow-x-auto rounded-xl border border-[#eeeaf1]" data-testid="table-checkin-monthly">
+               <table className="w-full min-w-[520px] text-left text-[10px]">
+                 <thead className="bg-[#f8f5fb] text-[#716879]"><tr><th className="px-3 py-2 font-bold">Mês</th><th className="px-3 py-2 font-bold">Aulas</th><th className="px-3 py-2 font-bold">Presenças</th><th className="px-3 py-2 font-bold">Capacidade</th><th className="px-3 py-2 font-bold">Ocupação</th><th className="px-3 py-2 font-bold">Meta / atingimento</th></tr></thead>
+                 <tbody>{occupancyChartRows.map((row) => {
+                   const classes = occupancy.evolution.filter((point) => dateMonth(point.period) === row.month).reduce((sum, point) => sum + point.recordCount, 0);
+                   const attainment = row.percentage != null && row.occupancyTargetPercentage != null && row.occupancyTargetPercentage > 0 ? row.percentage / row.occupancyTargetPercentage * 100 : null;
+                   return <tr key={row.month} className="border-t border-[#eeeaf1]"><th scope="row" className="px-3 py-2 font-semibold">{monthLabel(row.month)}</th><td className="px-3 py-2 tabular-nums">{count(classes || null)}</td><td className="px-3 py-2 tabular-nums">{reportCount(row.presences)}</td><td className="px-3 py-2 tabular-nums">{reportCount(row.capacity)}</td><td className="px-3 py-2 tabular-nums">{percentage(row.percentage)}</td><td className="px-3 py-2 tabular-nums">{row.occupancyTargetPercentage == null ? 'Meta não definida' : `${percentage(row.occupancyTargetPercentage)} · ${attainment == null ? 'sem comparação' : `${attainment.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`}`}</td></tr>;
+                 })}</tbody>
+               </table>
+             </div>}
+              {!occupancyQuery.isLoading && !occupancyQuery.isError && occupancyModalityRows.length > 0 && <div className="dashboard-pdf-full-hide rounded-xl border border-[#eeeaf1] p-3" data-testid="chart-occupancy-by-modality">
+                <h3 className="text-[10px] font-extrabold text-[#51465f]">Ocupação por modalidade</h3>
+                <p className="mt-1 text-[9px] text-[#837b8b]">Taxas ponderadas por presenças e capacidade quando disponíveis; taxas históricas informadas permanecem separadas.</p>
+                <div className="mt-3 space-y-2.5">{occupancyModalityRows.map((row) => <div key={row.modalityId} className="grid grid-cols-[minmax(5rem,8rem)_1fr_auto] items-center gap-2 text-[10px]">
+                  <span className="truncate font-semibold" title={row.modalityName}>{row.modalityName}</span>
+                  <span className="h-2 overflow-hidden rounded-full bg-[#eeeaf1]" aria-hidden="true"><i className="block h-full rounded-full bg-[#9c80c2]" style={{ width: `${Math.max(0, Math.min(100, row.percentage / maxOccupancyModalityPercentage * 100))}%` }} /></span>
+                  <span className="min-w-[4.5rem] text-right font-bold tabular-nums">{percentage(row.percentage)}</span>
+                </div>)}</div>
+              </div>}
              {occupancyChartRows.some((row) => row.occupancyTargetPercentage != null) && <div className="dashboard-pdf-full-hide flex flex-wrap gap-2">{occupancyChartRows.filter((row) => row.occupancyTargetPercentage != null).map((row) => {
               const attainment = row.percentage != null && row.occupancyTargetPercentage! > 0
                 ? row.percentage / row.occupancyTargetPercentage! * 100
@@ -623,25 +885,63 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
 
           <section className={`${panel} ${dark ? 'bg-[#332c3d] border-[#493f55]' : ''}`} data-testid="chart-complete-revenue" data-pdf-panel="complete-revenue">
             <PdfPrintHeader title="Faturamento e meta" period={periodLabel} filters={printFilters} />
-            <div className="mb-3 flex items-start justify-between gap-2"><div><p className="text-[9px] font-bold uppercase tracking-[.14em] text-[#8c73b4]">scoreboard oficial</p><h2 className="mt-1 font-[family-name:var(--app-font-serif)] text-xl font-extrabold tracking-[-.045em]">Faturamento e meta</h2><p className="mt-1 text-[10px] text-[#837b8b]">Bruto, estornos e líquido conforme os totais do Scoreboard.</p></div><DownloadPdfButton scope="complete-revenue" title="Faturamento e meta" period={periodLabel} compact disabled={refreshing || salesQuery.isError} /></div>
-            {salesQuery.isLoading ? <div className="h-[280px] animate-pulse rounded-2xl bg-[#f1edf4]" /> : salesQuery.isError ? <ChartEmpty text={`Não foi possível carregar o Scoreboard. ${errorMessage(salesQuery.error)}`} /> : revenueChart.length ? <ChartContainer role="img" aria-label="Barras horizontais mensais de faturamento, estornos, líquido e meta geral em reais" config={{ salesCents: { label: 'Vendas', color: palette.purple }, refundCents: { label: 'Estornos', color: palette.orange }, netCents: { label: 'Líquido', color: palette.green }, targetCents: { label: 'Meta geral', color: palette.lime } }} className="dashboard-pdf-chart h-[360px] w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={revenueChart} layout="vertical" margin={{ top: 8, right: 12, bottom: 8, left: 6 }}><CartesianGrid horizontal={false} stroke={grid} /><XAxis type="number" tickFormatter={(value) => money(Number(value))} tick={{ fill: axis, fontSize: 9 }} axisLine={false} tickLine={false} /><YAxis type="category" dataKey="month" width={84} tickFormatter={monthLabel} tick={{ fill: axis, fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip labelFormatter={(value) => monthLabel(String(value))} formatter={(value, name) => [money(Number(value)), String(name)]} /><Legend wrapperStyle={{ fontSize: 9 }} /><Bar dataKey="salesCents" name="Vendas brutas" fill={palette.purple} radius={[0, 4, 4, 0]} maxBarSize={7} /><Bar dataKey="refundCents" name="Estornos" fill={palette.orange} radius={[0, 4, 4, 0]} maxBarSize={7} /><Bar dataKey="netCents" name="Líquido" fill={palette.green} radius={[0, 4, 4, 0]} maxBarSize={7} /><Bar dataKey="targetCents" name="Meta mensal" fill={palette.lime} radius={[0, 4, 4, 0]} maxBarSize={7} /></BarChart></ResponsiveContainer></ChartContainer> : <ChartEmpty text="Sem dados no período. Não há faturamento retornado pelo Scoreboard." />}
-             {revenueDonutRows.length > 0 && <div className="mt-2 flex flex-wrap items-center gap-3 rounded-xl border border-[#eeeaf1] px-3 py-2"><div className="dashboard-pdf-donut h-[96px] w-[104px] shrink-0"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={revenueDonutRows} dataKey="value" nameKey="name" innerRadius={25} outerRadius={41} paddingAngle={2} stroke="none" isAnimationActive={false}>{revenueDonutRows.map((row, index) => <Cell key={row.name} fill={index === 0 ? palette.purple : palette.lime} />)}</Pie><Tooltip formatter={(value) => [`${Number(value).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`, 'Meta']} /></PieChart></ResponsiveContainer></div><div className="text-[10px] text-[#716879]"><p className="font-bold text-[#65479c]">Atingimento da meta geral: {(revenueActual / revenueGoalTotal * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%</p><p className="mt-1">Realizado líquido: {money(revenueActual)} · Meta: {money(revenueGoalTotal)}</p><p className="mt-1">{revenueActual >= revenueGoalTotal ? `Excedente: ${money(revenueActual - revenueGoalTotal)}` : `Falta: ${money(revenueGoalTotal - revenueActual)}`}</p></div></div>}
-            {!revenueDonutRows.length && <p className="mt-2 rounded-xl bg-[#f8f5fb] px-3 py-2 text-[10px] text-[#716879]">{mode === 'range' && !revenueGoalsComplete ? 'Meta mensal não comparada: o período inclui meses parciais ou sem meta geral cadastrada.' : 'Meta geral não definida para todos os meses deste recorte.'}</p>}
+             <div className="mb-3 flex items-start justify-between gap-2"><div><p className="text-[9px] font-bold uppercase tracking-[.14em] text-[#8c73b4]">scoreboard oficial</p><h2 className="mt-1 font-[family-name:var(--app-font-serif)] text-xl font-extrabold tracking-[-.045em]">Faturamento e meta</h2><p className="mt-1 text-[10px] text-[#837b8b]">Vendas são transações; unidades, bruto, estornos e líquido são apresentados separadamente.</p></div><DownloadPdfButton scope="complete-revenue" title="Faturamento e meta" period={periodLabel} compact disabled={refreshing || salesQuery.isError} /></div>
+             <div className="dashboard-pdf-hide mb-3 grid gap-3 rounded-xl border border-[#eeeaf1] bg-[#fbf9fc] p-3 sm:grid-cols-[minmax(0,1fr)_minmax(180px,.7fr)] sm:items-end" data-testid="filters-complete-revenue">
+               <p className="text-[10px] leading-relaxed text-[#716879]">Este filtro altera apenas o Faturamento. A modalidade restringe vendas com vínculo explícito; não redistribui vendas sem vínculo.</p>
+               <label className="text-[10px] font-bold text-[#837b8b]">Produto / plano
+                  <select value={productId} onChange={(event) => setProductId(event.target.value)} className="mt-1 h-10 w-full rounded-xl border border-[#e9e4eb] bg-[#fffefc] px-3 text-xs font-semibold text-[#443d50]" data-testid="select-dashboard-product"><option value="">Todos os produtos</option>{productOptions.map((item) => <option key={item.id} value={item.id}>{item.name}{item.isActive ? '' : ' · inativo'}</option>)}</select>
+               </label>
+             </div>
+             {finance && !salesQuery.isError && <div className="dashboard-pdf-full-hide mb-3 grid grid-cols-2 gap-2 rounded-xl border border-[#eeeaf1] bg-[#fbf9fc] p-3 sm:grid-cols-3" data-testid="summary-revenue">
+                <div><p className="text-[9px] font-bold uppercase tracking-wide text-[#837b8b]">Vendas</p><p className="mt-1 text-lg font-extrabold tabular-nums">{count(finance.totals.saleCount)}</p><p className="text-[9px] text-[#837b8b]">{count(finance.totals.quantity)} unidades vendidas</p></div>
+               <div><p className="text-[9px] font-bold uppercase tracking-wide text-[#837b8b]">Bruto</p><p className="mt-1 text-lg font-extrabold tabular-nums">{money(finance.totals.salesCents)}</p></div>
+               <div><p className="text-[9px] font-bold uppercase tracking-wide text-[#837b8b]">Estornos</p><p className="mt-1 text-lg font-extrabold tabular-nums">{money(finance.totals.refundCents)}</p></div>
+               <div><p className="text-[9px] font-bold uppercase tracking-wide text-[#837b8b]">Líquido</p><p className="mt-1 text-lg font-extrabold tabular-nums">{money(finance.totals.netCents)}</p></div>
+                <div><p className="text-[9px] font-bold uppercase tracking-wide text-[#837b8b]">{revenueGoalLabel}</p><p className="mt-1 text-lg font-extrabold tabular-nums">{revenueGoalSummary}</p></div>
+               <div><p className="text-[9px] font-bold uppercase tracking-wide text-[#837b8b]">Atingimento</p><p className="mt-1 text-lg font-extrabold tabular-nums">{revenueAttainment}</p></div>
+             </div>}
+              {salesQuery.isLoading ? <div className="h-[280px] animate-pulse rounded-2xl bg-[#f1edf4]" /> : salesQuery.isError ? <ChartEmpty text={`Não foi possível carregar o Scoreboard. ${errorMessage(salesQuery.error)}`} /> : revenueChart.length ? <ChartContainer role="img" aria-label={`Barras horizontais mensais de valores em reais: faturamento bruto, estornos, líquido e ${revenueGoalLabel.toLocaleLowerCase('pt-BR')}`} config={{ salesCents: { label: 'Faturamento bruto', color: palette.purple }, refundCents: { label: 'Estornos', color: palette.orange }, netCents: { label: 'Líquido', color: palette.green }, targetCents: { label: revenueGoalLabel, color: palette.lime } }} className="dashboard-pdf-chart h-[360px] w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={revenueChart} layout="vertical" margin={{ top: 8, right: 12, bottom: 8, left: 6 }}><CartesianGrid horizontal={false} stroke={grid} /><XAxis type="number" tickFormatter={(value) => money(Number(value))} tick={{ fill: axis, fontSize: 9 }} axisLine={false} tickLine={false} /><YAxis type="category" dataKey="month" width={84} tickFormatter={monthLabel} tick={{ fill: axis, fontSize: 10 }} axisLine={false} tickLine={false} /><Tooltip labelFormatter={(value) => monthLabel(String(value))} formatter={(value, name) => [money(Number(value)), String(name)]} /><Legend wrapperStyle={{ fontSize: 9 }} /><Bar dataKey="salesCents" name="Faturamento bruto" fill={palette.purple} radius={[0, 4, 4, 0]} maxBarSize={7} /><Bar dataKey="refundCents" name="Estornos" fill={palette.orange} radius={[0, 4, 4, 0]} maxBarSize={7} /><Bar dataKey="netCents" name="Líquido" fill={palette.green} radius={[0, 4, 4, 0]} maxBarSize={7} /><Bar dataKey="targetCents" name={revenueGoalLabel} fill={palette.lime} radius={[0, 4, 4, 0]} maxBarSize={7} /></BarChart></ResponsiveContainer></ChartContainer> : <ChartEmpty text="Sem dados no período" />}
+             {!salesQuery.isLoading && !salesQuery.isError && revenueChart.length > 0 && <div className="dashboard-pdf-full-hide overflow-x-auto rounded-xl border border-[#eeeaf1]" data-testid="table-revenue-monthly">
+                <table className="w-full min-w-[700px] text-left text-[10px]">
+                  <thead className="bg-[#f8f5fb] text-[#716879]"><tr><th className="px-3 py-2 font-bold">Mês</th><th className="px-3 py-2 font-bold">Vendas</th><th className="px-3 py-2 font-bold">Unidades</th><th className="px-3 py-2 font-bold">Bruto</th><th className="px-3 py-2 font-bold">Estornos</th><th className="px-3 py-2 font-bold">Líquido</th><th className="px-3 py-2 font-bold">Meta</th><th className="px-3 py-2 font-bold">Atingimento</th></tr></thead>
+                 <tbody>{revenueChart.map((row) => {
+                   const attainment = row.targetCents != null && row.targetCents > 0 ? row.netCents / row.targetCents * 100 : null;
+                    return <tr key={row.month} className="border-t border-[#eeeaf1]"><th scope="row" className="px-3 py-2 font-semibold">{monthLabel(row.month)}</th><td className="px-3 py-2 tabular-nums">{count(row.saleCount)}</td><td className="px-3 py-2 tabular-nums">{count(row.quantity)}</td><td className="px-3 py-2 tabular-nums">{money(row.salesCents)}</td><td className="px-3 py-2 tabular-nums">{money(row.refundCents)}</td><td className="px-3 py-2 tabular-nums">{money(row.netCents)}</td><td className="px-3 py-2 tabular-nums">{row.targetCents == null ? (modalityId ? 'Não comparada' : 'Não definida') : money(row.targetCents)}</td><td className="px-3 py-2 tabular-nums">{percentage(attainment)}</td></tr>;
+                 })}</tbody>
+               </table>
+             </div>}
+              {!salesQuery.isLoading && !salesQuery.isError && <details className="dashboard-pdf-full-hide rounded-xl border border-[#eeeaf1] px-3 py-2" data-testid="details-revenue-products">
+                <summary className="cursor-pointer text-[10px] font-bold text-[#65479c]">Detalhar vendas e faturamento por produto</summary>
+                {revenueProductReportRows.length > 0 ? <div className="mt-2 overflow-x-auto rounded-lg border border-[#eeeaf1]">
+                  <table className="w-full min-w-[650px] text-left text-[9px]" data-testid="table-revenue-products">
+                    <thead className="bg-[#f8f5fb] text-[#716879]"><tr><th className="px-2.5 py-2 font-bold">Plano/produto</th><th className="px-2.5 py-2 font-bold">Vendas</th><th className="px-2.5 py-2 font-bold">Unidades</th><th className="px-2.5 py-2 font-bold">Bruto</th><th className="px-2.5 py-2 font-bold">Estornos</th><th className="px-2.5 py-2 font-bold">Líquido</th></tr></thead>
+                    <tbody>{revenueProductReportRows.map((row, index) => <tr key={`${row[0]}-${index}`} className="border-t border-[#eeeaf1]">{row.map((value, cellIndex) => <td key={cellIndex} className={`px-2.5 py-2 ${cellIndex ? 'tabular-nums' : 'font-semibold'}`}>{value}</td>)}</tr>)}</tbody>
+                  </table>
+                </div> : <p className="mt-2 text-[10px] text-[#837b8b]">Sem dados de produtos no período.</p>}
+              </details>}
+            {revenueDonutRows.length > 0 && <div className="mt-2 flex flex-wrap items-center gap-3 rounded-xl border border-[#eeeaf1] px-3 py-2"><div className="dashboard-pdf-donut h-[96px] w-[104px] shrink-0"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={revenueDonutRows} dataKey="value" nameKey="name" innerRadius={25} outerRadius={41} paddingAngle={2} stroke="none" isAnimationActive={false}>{revenueDonutRows.map((row, index) => <Cell key={row.name} fill={index === 0 ? palette.purple : palette.lime} />)}</Pie><Tooltip formatter={(value) => [`${Number(value).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`, 'Meta']} /></PieChart></ResponsiveContainer></div><div className="text-[10px] text-[#716879]"><p className="font-bold">Líquido comparado à meta</p><p className="mt-1">{revenueActual >= revenueGoalTotal ? `Excedente: ${money(revenueActual - revenueGoalTotal)}` : `Falta: ${money(revenueGoalTotal - revenueActual)}`}</p><p className="mt-1 flex items-center gap-2"><i className="h-2.5 w-2.5 rounded-full bg-[#7655a8]" />Realizado</p><p className="mt-1 flex items-center gap-2"><i className="h-2.5 w-2.5 rounded-full bg-[#a9d75a]" />Parte restante da meta</p></div></div>}
+            {!revenueDonutRows.length && <p className="mt-2 rounded-xl bg-[#f8f5fb] px-3 py-2 text-[10px] text-[#716879]">{weekday ? 'Meta mensal não comparada: o faturamento está filtrado por dia da semana.' : !revenueGoalScopeValid ? 'Meta não comparada: modalidade sem vínculo explícito com o produto selecionado.' : partialRevenueRange ? 'Meta mensal não comparada: o intervalo contém meses parciais.' : hasAnyRevenueGoal ? `Cobertura incompleta de ${revenueGoalLabel.toLocaleLowerCase('pt-BR')} neste recorte.` : `${revenueGoalLabel} não definida para todos os meses deste recorte.`}</p>}
              <p className="dashboard-pdf-full-hide mt-2 rounded-xl bg-[#f8f5fb] px-3 py-2 text-[10px] text-[#716879]">Metas exibidas somente quando há meta geral salva para o mês. {mode === 'range' ? `No intervalo personalizado, o faturamento usa as datas exatas; os valores mensais abrangem ${periodEndMonth ? 'os meses sobrepostos' : 'o período'}.` : 'Vendas, estornos e líquido permanecem medidas independentes.'}</p>
-            <ReportTable
-              headers={['Mês', 'Vendas', 'Faturamento bruto', 'Estornos', 'Líquido', 'Meta geral', 'Atingimento']}
+             <ReportTable
+               headers={['Mês', 'Vendas', 'Unidades', 'Faturamento bruto', 'Estornos', 'Líquido', revenueGoalLabel, 'Atingimento']}
               rows={salesQuery.isError ? [] : revenueReportRows}
               emptyMessage={salesQuery.isError ? 'Dados do Scoreboard indisponíveis nesta exportação.' : 'Sem dados no período'}
               summary={salesQuery.isError || !finance || goalsQuery.isError ? undefined : [
                 'Total do período',
+                 count(finance.totals.saleCount),
                 count(finance.totals.quantity),
                 money(finance.totals.salesCents),
                 money(finance.totals.refundCents),
                 money(revenueActual),
-                revenueGoalsComplete ? money(revenueGoalTotal) : 'Meta não comparada',
+                revenueGoalSummary,
                 revenueAttainment,
               ]}
             />
+             <ReportTable
+               headers={['Plano/produto', 'Vendas', 'Unidades', 'Bruto', 'Estornos', 'Líquido']}
+               rows={salesQuery.isError ? [] : revenueProductReportRows}
+               emptyMessage={salesQuery.isError ? 'Dados do Scoreboard indisponíveis nesta exportação.' : 'Sem produtos no período'}
+             />
           </section>
           </div>
         </div>
@@ -652,7 +952,7 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
           <section className="dashboard-pdf-appendix-card">
             <h2>Contratos ativos</h2>
             <ReportTable
-              headers={['Mês', 'Contratos ativos', 'Meta', 'Diferença', 'Atingimento']}
+              headers={['Mês', 'Contratos ativos', 'Meta', 'Diferença vs meta', 'Atingimento', 'Variação vs mês anterior']}
               rows={contractsQuery.isError ? [] : contractReportRows}
               emptyMessage={contractsQuery.isError ? 'Dados de contratos indisponíveis nesta exportação.' : 'Sem dados cadastrados no período'}
             />
@@ -660,16 +960,18 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
           <section className="dashboard-pdf-appendix-card">
             <h2>Agregadores</h2>
             <ReportTable
-              headers={['Mês', 'Agregadores', 'Presenças totais', 'Participação', 'Meta', 'Atingimento']}
+              headers={['Mês', 'Agregadores', 'Presenças totais', 'Demais presenças', 'Agregadores %', 'Demais %', 'Meta', 'Atingimento']}
               rows={occupancyQuery.isError ? [] : aggregatorReportRows}
-              emptyMessage={occupancyQuery.isError ? 'Dados de check-in indisponíveis nesta exportação.' : 'Sem dados no período'}
+              emptyMessage={occupancyQuery.isError ? 'Dados de check-in indisponíveis nesta exportação.' : aggregatorEmptyMessage}
               summary={occupancyQuery.isError || occupancyGoalsQuery.isError ? undefined : [
-                'Total do período',
-                reportCount(occupancy.totals.aggregatorPresences),
-                reportCount(occupancy.totals.presences),
-                percentage(occupancy.totals.aggregatorSharePercentage),
+                mode === 'quarter' ? 'Total do trimestre' : 'Total do período',
+                reportCount(aggregatorPeriodSummary.aggregatorPresences),
+                reportCount(aggregatorPeriodSummary.totalPresences),
+                aggregatorPeriodSummary.otherPresences == null ? 'Desconhecido' : count(aggregatorPeriodSummary.otherPresences),
+                percentage(aggregatorPeriodSummary.sharePercentage),
+                percentage(aggregatorPeriodSummary.otherSharePercentage),
                 'Metas mensais',
-                occupancy.totals.aggregatorSharePercentage == null ? 'Cobertura incompleta' : 'Não somar metas',
+                aggregatorPeriodSummary.sharePercentage == null ? 'Cobertura incompleta' : 'Não somar metas',
               ]}
             />
           </section>
@@ -692,11 +994,12 @@ export default function CompleteManagementDashboard({ onOccupancy, onFinancial, 
           <section className="dashboard-pdf-appendix-card">
             <h2>Faturamento</h2>
             <ReportTable
-              headers={['Mês', 'Vendas', 'Faturamento bruto', 'Estornos', 'Líquido', 'Meta geral', 'Atingimento']}
+              headers={['Mês', 'Vendas', 'Unidades', 'Faturamento bruto', 'Estornos', 'Líquido', revenueGoalLabel, 'Atingimento']}
               rows={salesQuery.isError ? [] : revenueReportRows}
               emptyMessage={salesQuery.isError ? 'Dados do Scoreboard indisponíveis nesta exportação.' : 'Sem dados no período'}
               summary={salesQuery.isError || !finance || goalsQuery.isError ? undefined : [
                 'Total do período',
+                count(finance.totals.saleCount),
                 count(finance.totals.quantity),
                 money(finance.totals.salesCents),
                 money(finance.totals.refundCents),

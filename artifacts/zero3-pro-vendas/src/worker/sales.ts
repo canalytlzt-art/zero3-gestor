@@ -717,6 +717,7 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
     productName: string;
     modalityId: string | null;
     modalityName: string | null;
+    saleCount: bigint;
     quantity: bigint;
     salesCents: bigint;
     refundCents: bigint;
@@ -724,9 +725,9 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
   const products = new Map<string, Aggregate>();
   const monthly = new Map<
     string,
-    { month: string; quantity: bigint; salesCents: bigint; refundCents: bigint }
+    { month: string; saleCount: bigint; quantity: bigint; salesCents: bigint; refundCents: bigint }
   >();
-  type CalendarAggregate = { quantity: bigint; salesCents: bigint; refundCents: bigint };
+  type CalendarAggregate = { saleCount: bigint; quantity: bigint; salesCents: bigint; refundCents: bigint };
   const daily = new Map<string, CalendarAggregate & { weekday: number }>();
   const weekly = new Map<string, CalendarAggregate>();
   const getProduct = (row: Row) => {
@@ -743,6 +744,7 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
         productName: String(row.current_product_name ?? row.product_name ?? "Não categorizado"),
         modalityId,
         modalityName: row.modality_name === null ? null : String(row.modality_name),
+        saleCount: 0n,
         quantity: 0n,
         salesCents: 0n,
         refundCents: 0n,
@@ -754,7 +756,7 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
   const getMonth = (month: string) => {
     let value = monthly.get(month);
     if (!value) {
-      value = { month, quantity: 0n, salesCents: 0n, refundCents: 0n };
+      value = { month, saleCount: 0n, quantity: 0n, salesCents: 0n, refundCents: 0n };
       monthly.set(month, value);
     }
     return value;
@@ -762,7 +764,7 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
   const getDay = (date: string) => {
     let value = daily.get(date);
     if (!value) {
-      value = { weekday: getIsoWeekday(date) ?? 0, quantity: 0n, salesCents: 0n, refundCents: 0n };
+      value = { weekday: getIsoWeekday(date) ?? 0, saleCount: 0n, quantity: 0n, salesCents: 0n, refundCents: 0n };
       daily.set(date, value);
     }
     return value;
@@ -772,7 +774,7 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
     if (!weekStart) throw new ApiFailure(500, "Não foi possível agrupar a data da movimentação.");
     let value = weekly.get(weekStart);
     if (!value) {
-      value = { quantity: 0n, salesCents: 0n, refundCents: 0n };
+      value = { saleCount: 0n, quantity: 0n, salesCents: 0n, refundCents: 0n };
       weekly.set(weekStart, value);
     }
     return value;
@@ -783,15 +785,19 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
     const cents = BigInt(String(sale.total_cents));
     const month = String(sale.sale_date).slice(0, 7);
     const product = getProduct(sale);
+    product.saleCount += 1n;
     product.quantity += quantity;
     product.salesCents += cents;
     const monthTotal = getMonth(month);
+    monthTotal.saleCount += 1n;
     monthTotal.quantity += quantity;
     monthTotal.salesCents += cents;
     const dayTotal = getDay(String(sale.sale_date));
+    dayTotal.saleCount += 1n;
     dayTotal.quantity += quantity;
     dayTotal.salesCents += cents;
     const weekTotal = getWeek(String(sale.sale_date));
+    weekTotal.saleCount += 1n;
     weekTotal.quantity += quantity;
     weekTotal.salesCents += cents;
   }
@@ -835,6 +841,7 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
       productName: item.productName,
       modalityId: item.modalityId,
       modalityName: item.modalityName,
+      saleCount: safeNumber(item.saleCount, "vendas"),
       quantity: safeNumber(item.quantity, "quantidade"),
       salesCents: safeNumber(item.salesCents, "vendas"),
       refundCents: safeNumber(item.refundCents, "estornos"),
@@ -883,12 +890,14 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
     .map((month) => {
       const item = monthly.get(month) ?? {
         month,
+        saleCount: 0n,
         quantity: 0n,
         salesCents: 0n,
         refundCents: 0n,
       };
       return {
         month,
+        saleCount: safeNumber(item.saleCount, "vendas mensais"),
         quantity: safeNumber(item.quantity, "quantidade mensal"),
         salesCents: safeNumber(item.salesCents, "vendas mensais"),
         refundCents: safeNumber(item.refundCents, "estornos mensais"),
@@ -901,6 +910,7 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
     .map(([date, item]) => ({
       date,
       weekday: item.weekday,
+      saleCount: safeNumber(item.saleCount, "vendas diárias"),
       quantity: safeNumber(item.quantity, "quantidade diária"),
       salesCents: safeNumber(item.salesCents, "vendas diárias"),
       refundCents: safeNumber(item.refundCents, "estornos diários"),
@@ -910,17 +920,20 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([weekStart, item]) => ({
       weekStart,
+      saleCount: safeNumber(item.saleCount, "vendas semanais"),
       quantity: safeNumber(item.quantity, "quantidade semanal"),
       salesCents: safeNumber(item.salesCents, "vendas semanais"),
       refundCents: safeNumber(item.refundCents, "estornos semanais"),
       netCents: safeNumber(item.salesCents - item.refundCents, "faturamento líquido semanal"),
     }));
   const totalQuantity = [...products.values()].reduce((sum, item) => sum + item.quantity, 0n);
+  const totalSaleCount = [...products.values()].reduce((sum, item) => sum + item.saleCount, 0n);
   const totalSales = [...products.values()].reduce((sum, item) => sum + item.salesCents, 0n);
   const totalRefunds = [...products.values()].reduce((sum, item) => sum + item.refundCents, 0n);
   return json(
     GetSalesScoreboardResponse.parse({
       totals: {
+        saleCount: safeNumber(totalSaleCount, "vendas totais"),
         quantity: safeNumber(totalQuantity, "quantidade total"),
         salesCents: safeNumber(totalSales, "vendas totais"),
         refundCents: safeNumber(totalRefunds, "estornos totais"),

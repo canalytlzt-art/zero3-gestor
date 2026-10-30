@@ -319,7 +319,7 @@ function ScoreboardContent() {
           ? 'complete'
           : 'invalid';
   const emptyScoreboard = {
-    totals: { quantity: 0, salesCents: 0, refundCents: 0, netCents: 0 },
+    totals: { saleCount: 0, quantity: 0, salesCents: 0, refundCents: 0, netCents: 0 },
     products: [],
     months: [],
     days: [],

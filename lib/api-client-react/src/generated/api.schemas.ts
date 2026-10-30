@@ -1266,6 +1266,11 @@ export interface SalesScoreboardTotals {
      * @minimum 0
      * @maximum 9007199254740991
      */
+  saleCount: number;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     */
   quantity: number;
   /**
      * @minimum 0

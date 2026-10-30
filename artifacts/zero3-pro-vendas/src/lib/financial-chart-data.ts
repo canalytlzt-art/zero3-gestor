@@ -5,6 +5,8 @@ export interface FinancialChartRow {
   name: string;
   productId: string | null;
   modalityId: string | null;
+  modalityName: string | null;
+  saleCount: number;
   quantity: number;
   salesCents: number;
   refundCents: number;
@@ -13,6 +15,7 @@ export interface FinancialChartRow {
 
 export interface FinancialMonthRow {
   month: string;
+  saleCount: number;
   quantity: number;
   salesCents: number;
   refundCents: number;
@@ -22,6 +25,7 @@ export interface FinancialMonthRow {
 export interface FinancialDayRow {
   date: string;
   weekday: number;
+  saleCount: number;
   quantity: number;
   salesCents: number;
   refundCents: number;
@@ -30,6 +34,7 @@ export interface FinancialDayRow {
 
 export interface FinancialWeekRow {
   weekStart: string;
+  saleCount: number;
   quantity: number;
   salesCents: number;
   refundCents: number;
@@ -52,6 +57,8 @@ export function buildFinancialChartAnalytics(report: SalesScoreboard) {
     name: product.productName,
     productId: product.productId,
     modalityId: product.modalityId,
+    modalityName: product.modalityName,
+    saleCount: product.saleCount,
     quantity: product.quantity,
     salesCents: product.salesCents,
     refundCents: product.refundCents,
@@ -67,11 +74,14 @@ export function buildFinancialChartAnalytics(report: SalesScoreboard) {
       name,
       productId: null,
       modalityId: product.modalityId,
+      modalityName: name,
+      saleCount: 0,
       quantity: 0,
       salesCents: 0,
       refundCents: 0,
       netCents: 0,
     };
+    current.saleCount += product.saleCount;
     current.quantity += product.quantity;
     current.salesCents += product.salesCents;
     current.refundCents += product.refundCents;
@@ -90,6 +100,7 @@ export function buildFinancialChartAnalytics(report: SalesScoreboard) {
     .map(({ key, name, salesCents }) => ({ key, name, salesCents }));
   const months: FinancialMonthRow[] = report.months.map((month) => ({
     month: month.month,
+    saleCount: month.saleCount,
     quantity: month.quantity,
     salesCents: month.salesCents,
     refundCents: month.refundCents,
@@ -98,6 +109,7 @@ export function buildFinancialChartAnalytics(report: SalesScoreboard) {
   const days: FinancialDayRow[] = report.days.map((day) => ({
     date: day.date,
     weekday: day.weekday,
+    saleCount: day.saleCount,
     quantity: day.quantity,
     salesCents: day.salesCents,
     refundCents: day.refundCents,
@@ -105,6 +117,7 @@ export function buildFinancialChartAnalytics(report: SalesScoreboard) {
   }));
   const weeks: FinancialWeekRow[] = report.weeks.map((week) => ({
     weekStart: week.weekStart,
+    saleCount: week.saleCount,
     quantity: week.quantity,
     salesCents: week.salesCents,
     refundCents: week.refundCents,
@@ -113,24 +126,27 @@ export function buildFinancialChartAnalytics(report: SalesScoreboard) {
 
   const productTotals = byProduct.reduce(
     (total, row) => ({
+      saleCount: total.saleCount + row.saleCount,
       quantity: total.quantity + row.quantity,
       salesCents: total.salesCents + row.salesCents,
       refundCents: total.refundCents + row.refundCents,
       netCents: total.netCents + row.netCents,
     }),
-    { quantity: 0, salesCents: 0, refundCents: 0, netCents: 0 },
+    { saleCount: 0, quantity: 0, salesCents: 0, refundCents: 0, netCents: 0 },
   );
   const monthTotals = months.reduce(
     (total, row) => ({
+      saleCount: total.saleCount + row.saleCount,
       quantity: total.quantity + row.quantity,
       salesCents: total.salesCents + row.salesCents,
       refundCents: total.refundCents + row.refundCents,
       netCents: total.netCents + row.netCents,
     }),
-    { quantity: 0, salesCents: 0, refundCents: 0, netCents: 0 },
+    { saleCount: 0, quantity: 0, salesCents: 0, refundCents: 0, netCents: 0 },
   );
   const matchesTotals = (value: typeof productTotals) => (
-    value.quantity === report.totals.quantity
+    value.saleCount === report.totals.saleCount
+    && value.quantity === report.totals.quantity
     && value.salesCents === report.totals.salesCents
     && value.refundCents === report.totals.refundCents
     && value.netCents === report.totals.netCents

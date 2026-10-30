@@ -340,6 +340,9 @@ test("synthetic workbook import reconciles through Worker, Scoreboard, charts, a
   );
 
   const octoberSale = imported.sales.find((sale) => sale.saleDate === "2026-10-31")!;
+  const multiUnitSale = imported.sales.find((sale) => sale.saleDate === "2026-10-31" && sale.id !== octoberSale.id)!;
+  const storedMultiUnitSale = database.sales.get(multiUnitSale.id)!;
+  database.sales.set(multiUnitSale.id, { ...storedMultiUnitSale, quantity: 2, total_cents: 20_000 });
   database.refunds.push({
     id: "synthetic-refund-1",
     sale_id: octoberSale.id,
@@ -372,32 +375,35 @@ test("synthetic workbook import reconciles through Worker, Scoreboard, charts, a
   assert.equal(scoreboardResponse.status, 200);
   const scoreboard = await scoreboardResponse.json() as SalesScoreboard;
   assert.deepEqual(scoreboard.totals, {
-    quantity: 3,
-    salesCents: 27_505,
+    saleCount: 3,
+    quantity: 4,
+    salesCents: 37_505,
     refundCents: 2_000,
-    netCents: 25_505,
+    netCents: 35_505,
   });
   assert.deepEqual(scoreboard.months, [
-    { month: "2026-10", quantity: 2, salesCents: 20_000, refundCents: 0, netCents: 20_000 },
-    { month: "2026-11", quantity: 1, salesCents: 7_505, refundCents: 2_000, netCents: 5_505 },
+    { month: "2026-10", saleCount: 2, quantity: 3, salesCents: 30_000, refundCents: 0, netCents: 30_000 },
+    { month: "2026-11", saleCount: 1, quantity: 1, salesCents: 7_505, refundCents: 2_000, netCents: 5_505 },
   ]);
   assert.deepEqual(scoreboard.days, [
-    { date: "2026-10-31", weekday: 6, quantity: 2, salesCents: 20_000, refundCents: 0, netCents: 20_000 },
-    { date: "2026-11-01", weekday: 7, quantity: 1, salesCents: 7_505, refundCents: 0, netCents: 7_505 },
-    { date: "2026-11-05", weekday: 4, quantity: 0, salesCents: 0, refundCents: 2_000, netCents: -2_000 },
+    { date: "2026-10-31", weekday: 6, saleCount: 2, quantity: 3, salesCents: 30_000, refundCents: 0, netCents: 30_000 },
+    { date: "2026-11-01", weekday: 7, saleCount: 1, quantity: 1, salesCents: 7_505, refundCents: 0, netCents: 7_505 },
+    { date: "2026-11-05", weekday: 4, saleCount: 0, quantity: 0, salesCents: 0, refundCents: 2_000, netCents: -2_000 },
   ]);
   assert.deepEqual(scoreboard.weeks, [
-    { weekStart: "2026-10-26", quantity: 3, salesCents: 27_505, refundCents: 0, netCents: 27_505 },
-    { weekStart: "2026-11-02", quantity: 0, salesCents: 0, refundCents: 2_000, netCents: -2_000 },
+    { weekStart: "2026-10-26", saleCount: 3, quantity: 4, salesCents: 37_505, refundCents: 0, netCents: 37_505 },
+    { weekStart: "2026-11-02", saleCount: 0, quantity: 0, salesCents: 0, refundCents: 2_000, netCents: -2_000 },
   ]);
 
   const charts = buildFinancialChartAnalytics(scoreboard);
   assert.equal(charts.reconcilesByProduct, true);
   assert.equal(charts.reconcilesByMonth, true);
   assert.equal(charts.days.reduce((sum, row) => sum + row.quantity, 0), scoreboard.totals.quantity);
+  assert.equal(charts.months.reduce((sum, row) => sum + row.saleCount, 0), scoreboard.totals.saleCount);
   assert.equal(charts.weeks.reduce((sum, row) => sum + row.netCents, 0), scoreboard.totals.netCents);
-  assert.equal(charts.byProduct[0]?.quantity, 3);
-  assert.equal(charts.byProduct[0]?.netCents, 25_505);
+  assert.equal(charts.byProduct.reduce((sum, row) => sum + row.saleCount, 0), 3);
+  assert.equal(charts.byProduct[0]?.quantity, 4);
+  assert.equal(charts.byProduct[0]?.netCents, 35_505);
 
   const weekdayResponse = await requestWorkerSales(
     database,
@@ -406,10 +412,11 @@ test("synthetic workbook import reconciles through Worker, Scoreboard, charts, a
   assert.equal(weekdayResponse.status, 200);
   const saturdayScoreboard = await weekdayResponse.json() as SalesScoreboard;
   assert.deepEqual(saturdayScoreboard.totals, {
-    quantity: 2,
-    salesCents: 20_000,
+    saleCount: 2,
+    quantity: 3,
+    salesCents: 30_000,
     refundCents: 0,
-    netCents: 20_000,
+    netCents: 30_000,
   });
   assert.deepEqual(saturdayScoreboard.days.map(({ date, weekday }) => ({ date, weekday })), [
     { date: "2026-10-31", weekday: 6 },
@@ -422,6 +429,7 @@ test("synthetic workbook import reconciles through Worker, Scoreboard, charts, a
   assert.equal(thursdayRefundResponse.status, 200);
   const thursdayScoreboard = await thursdayRefundResponse.json() as SalesScoreboard;
   assert.deepEqual(thursdayScoreboard.totals, {
+    saleCount: 0,
     quantity: 0,
     salesCents: 0,
     refundCents: 2_000,

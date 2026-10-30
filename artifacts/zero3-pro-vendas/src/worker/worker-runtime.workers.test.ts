@@ -230,6 +230,7 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
     expect(response?.status).toBe(200);
     const scoreboard = await response!.json() as {
       totals: {
+        saleCount: number;
         quantity: number;
         salesCents: number;
         refundCents: number;
@@ -237,6 +238,7 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
       };
       months: Array<{
         month: string;
+        saleCount: number;
         quantity: number;
         salesCents: number;
         refundCents: number;
@@ -244,6 +246,7 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
       }>;
     };
     expect(scoreboard.totals).toEqual({
+      saleCount: 2,
       quantity: 3,
       salesCents: 31_500,
       refundCents: 0,
@@ -252,6 +255,7 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
     expect(scoreboard.months).toEqual([
       {
         month: "2026-10",
+        saleCount: 1,
         quantity: 2,
         salesCents: 24_000,
         refundCents: 0,
@@ -259,6 +263,7 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
       },
       {
         month: "2026-11",
+        saleCount: 1,
         quantity: 1,
         salesCents: 7_500,
         refundCents: 0,
@@ -280,6 +285,7 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
     expect(quarterScoreboard.months).toHaveLength(3);
     expect(quarterScoreboard.months[2]).toEqual({
       month: "2026-12",
+      saleCount: 0,
       quantity: 0,
       salesCents: 0,
       refundCents: 0,

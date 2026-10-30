@@ -349,3 +349,21 @@ test('aggregator metrics preserve unknown coverage and compare month-by-month wi
     { month: '2026-11', totalPresences: 2, aggregatorPresences: 1, sharePercentage: 50, coverage: '1/1' },
   ]);
 });
+
+test('quarter aggregator share uses summed attendance, not the mean of monthly percentages', () => {
+  const analytics = buildOccupancyChartAnalytics([
+    { ...record('oct-quarter', 'daily', '2026-10-01', 'crossfit', 'CrossFit', 100), presences: 1100, capacity: 1200, aggregatorPresences: 1000 },
+    { ...record('nov-quarter', 'daily', '2026-11-01', 'crossfit', 'CrossFit', 100), presences: 1000, capacity: 1200, aggregatorPresences: 230 },
+  ], { viewMode: 'monthly', selectedMonths: ['2026-10', '2026-11', '2026-12'] });
+
+  assert.deepEqual(analytics.aggregatorsByMonth.map(({ month, totalPresences, aggregatorPresences, sharePercentage }) => ({
+    month, totalPresences, aggregatorPresences, sharePercentage,
+  })), [
+    { month: '2026-10', totalPresences: 1100, aggregatorPresences: 1000, sharePercentage: 1000 / 1100 * 100 },
+    { month: '2026-11', totalPresences: 1000, aggregatorPresences: 230, sharePercentage: 23 },
+  ]);
+  assert.equal(analytics.totals.presences, 2100);
+  assert.equal(analytics.totals.aggregatorPresences, 1230);
+  assert.equal(analytics.totals.aggregatorSharePercentage, 1230 / 2100 * 100);
+  assert.notEqual(analytics.totals.aggregatorSharePercentage, (1000 / 1100 * 100 + 23) / 2);
+});

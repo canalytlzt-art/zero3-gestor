@@ -73,6 +73,27 @@ test('creates calendar months for a year or quarter and rejects invalid selectio
   assert.deepEqual(monthsForYearQuarter('2028', '5'), []);
 });
 
+test('normalizes sales filters consistently for product, modality and weekday scopes', () => {
+  assert.deepEqual(buildScoreboardQueryParams({
+    periodMode: 'quarter',
+    currentMonthKey: '2026-10',
+    selectedMonth: '',
+    selectedMonths: [],
+    selectedYear: '2026',
+    selectedQuarter: '4',
+    dateFrom: '',
+    dateTo: '',
+    filterProduct: 'product-id',
+    modalityId: 'modality-id',
+    weekdays: [3, 1, 3],
+  }), {
+    months: ['2026-10', '2026-11', '2026-12'],
+    productId: 'product-id',
+    weekdays: [1, 3],
+    modalityId: 'modality-id',
+  });
+});
+
 const singleMonth = ['2026-01'];
 const twoMonths = ['2026-01', '2026-02'];
 

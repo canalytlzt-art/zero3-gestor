@@ -1746,6 +1746,9 @@ export const GetSalesScoreboardQueryParams = zod.object({
   "modalityId": zod.coerce.string().uuid().optional()
 })
 
+export const getSalesScoreboardResponseTotalsSaleCountMin = 0;
+export const getSalesScoreboardResponseTotalsSaleCountMax = 9007199254740991;
+
 export const getSalesScoreboardResponseTotalsQuantityMin = 0;
 export const getSalesScoreboardResponseTotalsQuantityMax = 9007199254740991;
 
@@ -1758,6 +1761,9 @@ export const getSalesScoreboardResponseTotalsRefundCentsMax = 9007199254740991;
 export const getSalesScoreboardResponseTotalsNetCentsMin = -9007199254740991;
 export const getSalesScoreboardResponseTotalsNetCentsMax = 9007199254740991;
 
+export const getSalesScoreboardResponseProductsItemOneSaleCountMin = 0;
+export const getSalesScoreboardResponseProductsItemOneSaleCountMax = 9007199254740991;
+
 export const getSalesScoreboardResponseProductsItemOneQuantityMin = 0;
 export const getSalesScoreboardResponseProductsItemOneQuantityMax = 9007199254740991;
 
@@ -1769,6 +1775,9 @@ export const getSalesScoreboardResponseProductsItemOneRefundCentsMax = 900719925
 
 export const getSalesScoreboardResponseProductsItemOneNetCentsMin = -9007199254740991;
 export const getSalesScoreboardResponseProductsItemOneNetCentsMax = 9007199254740991;
+
+export const getSalesScoreboardResponseMonthsItemOneSaleCountMin = 0;
+export const getSalesScoreboardResponseMonthsItemOneSaleCountMax = 9007199254740991;
 
 export const getSalesScoreboardResponseMonthsItemOneQuantityMin = 0;
 export const getSalesScoreboardResponseMonthsItemOneQuantityMax = 9007199254740991;
@@ -1783,6 +1792,9 @@ export const getSalesScoreboardResponseMonthsItemOneNetCentsMin = -9007199254740
 export const getSalesScoreboardResponseMonthsItemOneNetCentsMax = 9007199254740991;
 
 export const getSalesScoreboardResponseMonthsItemTwoMonthRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])$');
+export const getSalesScoreboardResponseDaysItemOneSaleCountMin = 0;
+export const getSalesScoreboardResponseDaysItemOneSaleCountMax = 9007199254740991;
+
 export const getSalesScoreboardResponseDaysItemOneQuantityMin = 0;
 export const getSalesScoreboardResponseDaysItemOneQuantityMax = 9007199254740991;
 
@@ -1797,6 +1809,9 @@ export const getSalesScoreboardResponseDaysItemOneNetCentsMax = 9007199254740991
 
 export const getSalesScoreboardResponseDaysItemTwoDateRegExp = new RegExp('^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$');
 export const getSalesScoreboardResponseDaysItemTwoWeekdayMax = 7;
+
+export const getSalesScoreboardResponseWeeksItemOneSaleCountMin = 0;
+export const getSalesScoreboardResponseWeeksItemOneSaleCountMax = 9007199254740991;
 
 export const getSalesScoreboardResponseWeeksItemOneQuantityMin = 0;
 export const getSalesScoreboardResponseWeeksItemOneQuantityMax = 9007199254740991;
@@ -1815,12 +1830,14 @@ export const getSalesScoreboardResponseWeeksItemTwoWeekStartRegExp = new RegExp(
 
 export const GetSalesScoreboardResponse = zod.object({
   "totals": zod.object({
+  "saleCount": zod.number().int().min(getSalesScoreboardResponseTotalsSaleCountMin).max(getSalesScoreboardResponseTotalsSaleCountMax),
   "quantity": zod.number().int().min(getSalesScoreboardResponseTotalsQuantityMin).max(getSalesScoreboardResponseTotalsQuantityMax),
   "salesCents": zod.number().int().min(getSalesScoreboardResponseTotalsSalesCentsMin).max(getSalesScoreboardResponseTotalsSalesCentsMax),
   "refundCents": zod.number().int().min(getSalesScoreboardResponseTotalsRefundCentsMin).max(getSalesScoreboardResponseTotalsRefundCentsMax),
   "netCents": zod.number().int().min(getSalesScoreboardResponseTotalsNetCentsMin).max(getSalesScoreboardResponseTotalsNetCentsMax)
 }),
   "products": zod.array(zod.object({
+  "saleCount": zod.number().int().min(getSalesScoreboardResponseProductsItemOneSaleCountMin).max(getSalesScoreboardResponseProductsItemOneSaleCountMax),
   "quantity": zod.number().int().min(getSalesScoreboardResponseProductsItemOneQuantityMin).max(getSalesScoreboardResponseProductsItemOneQuantityMax),
   "salesCents": zod.number().int().min(getSalesScoreboardResponseProductsItemOneSalesCentsMin).max(getSalesScoreboardResponseProductsItemOneSalesCentsMax),
   "refundCents": zod.number().int().min(getSalesScoreboardResponseProductsItemOneRefundCentsMin).max(getSalesScoreboardResponseProductsItemOneRefundCentsMax),
@@ -1832,6 +1849,7 @@ export const GetSalesScoreboardResponse = zod.object({
   "modalityName": zod.string().nullable()
 }))),
   "months": zod.array(zod.object({
+  "saleCount": zod.number().int().min(getSalesScoreboardResponseMonthsItemOneSaleCountMin).max(getSalesScoreboardResponseMonthsItemOneSaleCountMax),
   "quantity": zod.number().int().min(getSalesScoreboardResponseMonthsItemOneQuantityMin).max(getSalesScoreboardResponseMonthsItemOneQuantityMax),
   "salesCents": zod.number().int().min(getSalesScoreboardResponseMonthsItemOneSalesCentsMin).max(getSalesScoreboardResponseMonthsItemOneSalesCentsMax),
   "refundCents": zod.number().int().min(getSalesScoreboardResponseMonthsItemOneRefundCentsMin).max(getSalesScoreboardResponseMonthsItemOneRefundCentsMax),
@@ -1840,6 +1858,7 @@ export const GetSalesScoreboardResponse = zod.object({
   "month": zod.string().regex(getSalesScoreboardResponseMonthsItemTwoMonthRegExp)
 }))),
   "days": zod.array(zod.object({
+  "saleCount": zod.number().int().min(getSalesScoreboardResponseDaysItemOneSaleCountMin).max(getSalesScoreboardResponseDaysItemOneSaleCountMax),
   "quantity": zod.number().int().min(getSalesScoreboardResponseDaysItemOneQuantityMin).max(getSalesScoreboardResponseDaysItemOneQuantityMax),
   "salesCents": zod.number().int().min(getSalesScoreboardResponseDaysItemOneSalesCentsMin).max(getSalesScoreboardResponseDaysItemOneSalesCentsMax),
   "refundCents": zod.number().int().min(getSalesScoreboardResponseDaysItemOneRefundCentsMin).max(getSalesScoreboardResponseDaysItemOneRefundCentsMax),
@@ -1849,6 +1868,7 @@ export const GetSalesScoreboardResponse = zod.object({
   "weekday": zod.number().int().min(1).max(getSalesScoreboardResponseDaysItemTwoWeekdayMax)
 }))),
   "weeks": zod.array(zod.object({
+  "saleCount": zod.number().int().min(getSalesScoreboardResponseWeeksItemOneSaleCountMin).max(getSalesScoreboardResponseWeeksItemOneSaleCountMax),
   "quantity": zod.number().int().min(getSalesScoreboardResponseWeeksItemOneQuantityMin).max(getSalesScoreboardResponseWeeksItemOneQuantityMax),
   "salesCents": zod.number().int().min(getSalesScoreboardResponseWeeksItemOneSalesCentsMin).max(getSalesScoreboardResponseWeeksItemOneSalesCentsMax),
   "refundCents": zod.number().int().min(getSalesScoreboardResponseWeeksItemOneRefundCentsMin).max(getSalesScoreboardResponseWeeksItemOneRefundCentsMax),
