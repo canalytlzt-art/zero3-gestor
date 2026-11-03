@@ -366,6 +366,9 @@ function ScoreboardContent() {
     weeks: [],
   };
   const report = invalidRange || invalidMonthSelection || invalidYearSelection ? emptyScoreboard : scoreboardData ?? emptyScoreboard;
+  const scoreboardProductCount = new Set(report.products.map((product) => (
+    product.productId ?? product.productName.trim().replace(/\s+/g, ' ').toLocaleLowerCase('pt-BR')
+  ))).size;
   const activeContractRows = buildActiveContractPeriodRows(periodMonthKeys, activeContracts ?? []);
   const selectedProductName = filterProduct
     ? products.find((product) => product.id === filterProduct)?.name ?? null
@@ -601,13 +604,13 @@ function ScoreboardContent() {
         <section className="overflow-hidden rounded-[22px] border border-[#e7e1e9] bg-[#fffefc]" aria-labelledby="scoreboard-products-heading" data-testid="table-scoreboard-products">
           <div className="flex items-end justify-between border-b border-[#ece7ee] px-4 py-4 sm:px-5">
             <div><p className="eyebrow text-[9px] font-bold text-[#8a8491]">por produto</p><h2 id="scoreboard-products-heading" className="mt-1 text-base font-extrabold tracking-[-.035em] text-[#332d40]">Resultado por produto</h2></div>
-            <span className="text-[10px] font-semibold text-[#8a8491]" data-testid="text-scoreboard-product-groups">{report.products.length} {report.products.length === 1 ? 'produto' : 'produtos'}</span>
+            <span className="text-[10px] font-semibold text-[#8a8491]" data-testid="text-scoreboard-product-groups">{scoreboardProductCount} {scoreboardProductCount === 1 ? 'produto' : 'produtos'}</span>
           </div>
           <div className="overflow-x-auto">
               <table className="w-full min-w-[900px] border-collapse text-left text-xs">
               <thead><tr className="bg-[#f8f6f9] text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]"><th className="px-4 py-3 sm:px-5">Plano / produto</th><th className="px-4 py-3 text-right">Quantidade</th><th className="px-4 py-3 text-right">Vendas</th><th className="px-4 py-3 text-right">Estornos</th><th className="px-4 py-3 text-right sm:px-5">Após estornos</th><th className="px-4 py-3 text-right">Detalhes</th></tr></thead>
               <tbody>
-                {report.products.map((product) => <tr key={`${product.productId ?? 'unlinked'}-${product.productName}`} className="border-t border-[#f0edf1]" data-testid={`row-scoreboard-product-${product.productId ?? 'unlinked'}`}><th scope="row" className="max-w-[260px] truncate px-4 py-3.5 font-semibold text-[#494253] sm:px-5">{product.productName}</th><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{product.quantity.toLocaleString('pt-BR')}</td><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{formatCents(product.salesCents)}</td><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{formatCents(product.refundCents)}</td><td className="px-4 py-3.5 text-right font-bold tabular-nums text-[#463954] sm:px-5">{formatCents(product.netCents)}</td><td className="px-4 py-3.5 text-right"><button type="button" onClick={() => setDetailProduct(product)} className="inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-[#e6dfeb] px-2.5 text-[10px] font-bold text-[#65479c] transition hover:bg-[#f3eff8]" aria-label={`Ver detalhes de ${product.productName}`} data-testid={`button-scoreboard-product-details-${product.productId ?? 'unlinked'}`}><FileText size={12} aria-hidden="true" /> Ver detalhes</button></td></tr>)}
+                {report.products.map((product) => <tr key={`${product.productId ?? 'unlinked'}-${product.modalityId ?? 'unlinked'}-${product.productName}`} className="border-t border-[#f0edf1]" data-testid={`row-scoreboard-product-${product.productId ?? 'unlinked'}-${product.modalityId ?? 'unlinked'}`}><th scope="row" className="max-w-[260px] truncate px-4 py-3.5 font-semibold text-[#494253] sm:px-5">{product.productName}</th><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{product.quantity.toLocaleString('pt-BR')}</td><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{formatCents(product.salesCents)}</td><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{formatCents(product.refundCents)}</td><td className="px-4 py-3.5 text-right font-bold tabular-nums text-[#463954] sm:px-5">{formatCents(product.netCents)}</td><td className="px-4 py-3.5 text-right"><button type="button" onClick={() => setDetailProduct(product)} className="inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-[#e6dfeb] px-2.5 text-[10px] font-bold text-[#65479c] transition hover:bg-[#f3eff8]" aria-label={`Ver detalhes de ${product.productName}${product.modalityName ? ` · ${product.modalityName}` : ''}`} data-testid={`button-scoreboard-product-details-${product.productId ?? 'unlinked'}-${product.modalityId ?? 'unlinked'}`}><FileText size={12} aria-hidden="true" /> Ver detalhes</button></td></tr>)}
               </tbody>
               <tfoot><tr className="border-t border-[#e5dfea] bg-[#f6f3f8] font-extrabold text-[#3e354b]" data-testid="row-scoreboard-products-total"><th scope="row" className="px-4 py-3.5 sm:px-5">Total</th><td className="px-4 py-3.5 text-right tabular-nums" data-testid="text-scoreboard-product-quantity-total">{report.totals.quantity.toLocaleString('pt-BR')}</td><td className="px-4 py-3.5 text-right tabular-nums">{formatCents(report.totals.salesCents)}</td><td className="px-4 py-3.5 text-right tabular-nums">{formatCents(report.totals.refundCents)}</td><td className="px-4 py-3.5 text-right tabular-nums sm:px-5" data-testid="text-scoreboard-product-net-total">{formatCents(report.totals.netCents)}</td><td className="px-4 py-3.5 text-right">—</td></tr></tfoot>
             </table>
@@ -647,6 +650,10 @@ function ScoreboardContent() {
         periodMonthKeys={periodMonthKeys}
         periodLabel={periodLabel}
         filterLabel={scoreboardFilterLabel}
+        rangeFrom={periodMode === 'range' && !invalidRange ? dateFrom : undefined}
+        rangeTo={periodMode === 'range' && !invalidRange ? dateTo : undefined}
+        weekdays={weekdays}
+        weekdayForDate={getIsoWeekday}
         selectedProduct={detailProduct}
         onProductDialogClose={() => setDetailProduct(null)}
       />

@@ -14,6 +14,7 @@ import type {
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatCents } from "@/lib/sales-utils";
 import { buildProductMonthlySalesSummary, paginateSalesHistory, sortAndFilterSalesHistory } from "@/lib/scoreboard-sales-history";
+import { buildSalesChannelGroups, classifySalesChannel, sumSalesScoreboardProducts } from "@/lib/sales-channel-report";
 import { beginDashboardPdf, PdfPrintHeader, PdfPrintTable } from "./dashboard-pdf-tools";
 
 const PAGE_SIZE = 12;
@@ -40,6 +41,13 @@ function getActiveRefundTotal(refunds: SalesRefundRecord[]) {
     (total, refund) => total + (refund.status === "active" ? refund.amountCents : 0),
     0,
   );
+}
+
+function saleStatusLabel(sale: Sale, refundCents: number) {
+  if (sale.status === "cancelled") return "Cancelada";
+  if (refundCents >= sale.totalCents && refundCents > 0) return "Estornada";
+  if (refundCents > 0) return "Estorno parcial";
+  return "Ativa";
 }
 
 function SaleStatus({ sale, refundCents }: { sale: Sale; refundCents: number }) {
@@ -284,6 +292,10 @@ export function ScoreboardSalesHistory({
   periodMonthKeys,
   periodLabel,
   filterLabel,
+  rangeFrom,
+  rangeTo,
+  weekdays,
+  weekdayForDate,
   selectedProduct,
   onProductDialogClose,
 }: {
@@ -300,6 +312,10 @@ export function ScoreboardSalesHistory({
   periodMonthKeys: string[];
   periodLabel: string;
   filterLabel: string;
+  rangeFrom?: string;
+  rangeTo?: string;
+  weekdays: number[];
+  weekdayForDate: (date: string) => number | null;
   selectedProduct: SalesScoreboardProduct | null;
   onProductDialogClose: () => void;
 }) {
@@ -315,6 +331,23 @@ export function ScoreboardSalesHistory({
     }
     return map;
   }, [refunds]);
+  const productRowsById = useMemo(() => {
+    const map = new Map<string, SalesScoreboardProduct[]>();
+    for (const product of productSummaries) {
+      if (!product.productId) continue;
+      map.set(product.productId, [...(map.get(product.productId) ?? []), product]);
+    }
+    return map;
+  }, [productSummaries]);
+  const unlinkedProductRowsByName = useMemo(() => {
+    const map = new Map<string, SalesScoreboardProduct[]>();
+    for (const product of productSummaries) {
+      if (product.productId !== null) continue;
+      const key = product.productName.trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR");
+      map.set(key, [...(map.get(key) ?? []), product]);
+    }
+    return map;
+  }, [productSummaries]);
   const selectedProductSales = useMemo(
     () => selectedProduct
       ? sales.filter((sale) => selectedProduct.productId
@@ -323,31 +356,46 @@ export function ScoreboardSalesHistory({
       : [],
     [sales, selectedProduct],
   );
-  const activeSales = useMemo(() => sales.filter((sale) => sale.status === "active"), [sales]);
-  const activeProductSales = useMemo(() => selectedProductSales.filter((sale) => sale.status === "active"), [selectedProductSales]);
+  const selectedProductRows = useMemo(
+    () => selectedProduct
+      ? productSummaries.filter((product) => selectedProduct.productId
+        ? product.productId === selectedProduct.productId
+        : product.productId === null && product.productName === selectedProduct.productName)
+      : [],
+    [productSummaries, selectedProduct],
+  );
+  const selectedProductTotals = useMemo(
+    () => sumSalesScoreboardProducts(selectedProductRows),
+    [selectedProductRows],
+  );
+  const selectedProductChannelGroups = useMemo(
+    () => buildSalesChannelGroups(selectedProductRows),
+    [selectedProductRows],
+  );
+  const matchesSelectedPeriod = (date: string) => (
+    (!rangeFrom || date >= rangeFrom)
+    && (!rangeTo || date <= rangeTo)
+    && (!weekdays.length || weekdays.includes(weekdayForDate(date) ?? 0))
+  );
   const productMonthlyHistory = useMemo(
     () => selectedProduct
-      ? buildProductMonthlySalesSummary(sales, periodRefunds, selectedProduct, periodMonthKeys, () => true)
+      ? buildProductMonthlySalesSummary(sales, periodRefunds, selectedProduct, periodMonthKeys, matchesSelectedPeriod)
       : [],
-    [sales, periodRefunds, selectedProduct, periodMonthKeys],
+    [sales, periodRefunds, selectedProduct, periodMonthKeys, rangeFrom, rangeTo, weekdays, weekdayForDate],
   );
-  const activeProducts = useMemo(() => productSummaries, [productSummaries]);
+  const distinctProductCount = new Set(productSummaries.map((product) => (
+    product.productId
+      ?? product.productName.trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR")
+  ))).size;
   const summaryRows = [
     ["Vendas registradas", totals.saleCount.toLocaleString("pt-BR")],
     ["Unidades vendidas", totals.quantity.toLocaleString("pt-BR")],
     ["Faturamento bruto", formatCents(totals.salesCents)],
     ["Estornos", formatCents(totals.refundCents)],
     ["Faturamento líquido", formatCents(totals.netCents)],
-    ["Produtos com movimentação", productSummaries.length.toLocaleString("pt-BR")],
+    ["Produtos com movimentação", distinctProductCount.toLocaleString("pt-BR")],
   ];
-  const productRows = productSummaries.map((product) => [
-    product.productName,
-    product.saleCount.toLocaleString("pt-BR"),
-    product.quantity.toLocaleString("pt-BR"),
-    formatCents(product.salesCents),
-    formatCents(product.refundCents),
-    formatCents(product.netCents),
-  ]);
+  const salesChannelGroups = useMemo(() => buildSalesChannelGroups(productSummaries), [productSummaries]);
   const monthRows = months.map((month) => [
     month.month,
     month.saleCount.toLocaleString("pt-BR"),
@@ -356,21 +404,54 @@ export function ScoreboardSalesHistory({
     formatCents(month.refundCents),
     formatCents(month.netCents),
   ]);
-  const historyRows = activeSales.map((sale) => [
+  const saleChannelForHistory = (sale: Sale) => {
+    const productRows = sale.productId
+      ? productRowsById.get(sale.productId) ?? []
+      : unlinkedProductRowsByName.get(sale.productName.trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR")) ?? [];
+    const matchingProductRows = sale.modalityOverride
+      ? productRows.filter((row) => row.modalityId === sale.modalityId)
+      : productRows;
+    const knownModalities = new Set(matchingProductRows.map((row) => row.modalityName ?? ""));
+    const product = matchingProductRows.length && knownModalities.size === 1
+      ? matchingProductRows[0]
+      : undefined;
+    return classifySalesChannel({
+      productName: sale.productName,
+      modalityName: product?.modalityName ?? null,
+    });
+  };
+  const historyRows = sales.map((sale) => [
     formatDate(sale.saleDate),
+    saleChannelForHistory(sale) === "presencial" ? "Presencial" : saleChannelForHistory(sale) === "online" ? "Online" : "Outros / Sem classificação",
     sale.productName,
     ...(includeCustomerNames ? [sale.customerName || "Não informado"] : []),
     sale.quantity.toLocaleString("pt-BR"),
     formatCents(sale.totalCents),
+    saleStatusLabel(sale, getActiveRefundTotal(refundsBySale.get(sale.id) ?? [])),
   ]);
-  const productHistoryRows = activeProductSales.map((sale) => [
+  const productHistoryRows = selectedProductSales.map((sale) => [
     formatDate(sale.saleDate),
+    saleChannelForHistory(sale) === "presencial" ? "Presencial" : saleChannelForHistory(sale) === "online" ? "Online" : "Outros / Sem classificação",
     sale.productName,
     ...(includeCustomerNames ? [sale.customerName || "Não informado"] : []),
     sale.quantity.toLocaleString("pt-BR"),
     formatCents(sale.totalCents),
+    saleStatusLabel(sale, getActiveRefundTotal(refundsBySale.get(sale.id) ?? [])),
   ]);
-  const headerFilters = `${filterLabel} · ${activeProducts.length} ${activeProducts.length === 1 ? "produto" : "produtos"}`;
+  const headerFilters = `${filterLabel} · ${distinctProductCount} ${distinctProductCount === 1 ? "produto" : "produtos"}`;
+  const activeSaleCount = sales.filter((sale) => sale.status === "active").length;
+  const activeSaleCents = sales.reduce(
+    (sum, sale) => sum + (sale.status === "active" ? sale.totalCents : 0),
+    0,
+  );
+  const activeProductSaleCount = selectedProductSales.filter((sale) => sale.status === "active").length;
+  const activeProductSaleCents = selectedProductSales.reduce(
+    (sum, sale) => sum + (sale.status === "active" ? sale.totalCents : 0),
+    0,
+  );
+  const productChannelLabels = [...new Set(selectedProductChannelGroups
+    .filter((group) => group.products.length > 0)
+    .map((group) => group.label))];
 
   return (
     <>
@@ -420,11 +501,41 @@ export function ScoreboardSalesHistory({
         <p className="mt-2 text-[9pt] text-[#77717f]">Gerado em {formatGeneratedAt()}</p>
         <h2 className="mt-4 text-[12pt] font-extrabold text-[#40374e]">Resumo do período</h2>
         <PdfPrintTable headers={["Indicador", "Resultado"]} rows={summaryRows} />
-        <h2 className="mt-5 text-[12pt] font-extrabold text-[#40374e]">Resultado por produto</h2>
+        {salesChannelGroups.map((group) => (
+          <section key={group.key} className="dashboard-pdf-channel-section">
+            <h2 className="mt-5 text-[12pt] font-extrabold text-[#40374e]">{group.label}</h2>
+            {group.key === "other" && group.products.some((product) => product.sportModalityName) && (
+              <p className="mb-2 text-[8pt] text-[#77717f]">
+                A modalidade esportiva cadastrada é mostrada separadamente; ela não determina o canal de venda.
+              </p>
+            )}
+            <PdfPrintTable
+              headers={["Produto", "Modalidade cadastrada", "Vendas", "Unidades", "Bruto", "Estornos", "Líquido"]}
+              rows={group.products.map((product) => [
+                product.productName,
+                product.sportModalityName || "—",
+                product.saleCount.toLocaleString("pt-BR"),
+                product.quantity.toLocaleString("pt-BR"),
+                formatCents(product.salesCents),
+                formatCents(product.refundCents),
+                formatCents(product.netCents),
+              ])}
+              summary={[
+                "Subtotal",
+                "",
+                group.totals.saleCount.toLocaleString("pt-BR"),
+                group.totals.quantity.toLocaleString("pt-BR"),
+                formatCents(group.totals.salesCents),
+                formatCents(group.totals.refundCents),
+                formatCents(group.totals.netCents),
+              ]}
+            />
+          </section>
+        ))}
+        <h2 className="mt-5 text-[12pt] font-extrabold text-[#40374e]">Total geral consolidado</h2>
         <PdfPrintTable
-          headers={["Produto", "Vendas", "Quantidade", "Vendas brutas", "Estornos", "Líquido"]}
-          rows={productRows}
-          summary={["Total", totals.saleCount.toLocaleString("pt-BR"), totals.quantity.toLocaleString("pt-BR"), formatCents(totals.salesCents), formatCents(totals.refundCents), formatCents(totals.netCents)]}
+          headers={["Vendas", "Unidades", "Faturamento bruto", "Estornos", "Faturamento líquido"]}
+          rows={[[totals.saleCount.toLocaleString("pt-BR"), totals.quantity.toLocaleString("pt-BR"), formatCents(totals.salesCents), formatCents(totals.refundCents), formatCents(totals.netCents)]]}
         />
         {includeMonthlyHistory && months.length > 0 && <>
           <h2 className="mt-5 text-[12pt] font-extrabold text-[#40374e]">Resumo mensal</h2>
@@ -433,11 +544,11 @@ export function ScoreboardSalesHistory({
         <div className="dashboard-pdf-appendix" data-pdf-appendix="scoreboard">
           <h2 className="mt-5 text-[12pt] font-extrabold text-[#40374e]">Detalhamento das vendas</h2>
           <PdfPrintTable
-            headers={["Data", "Produto", ...(includeCustomerNames ? ["Cliente"] : []), "Quantidade", "Valor"]}
+            headers={["Data", "Canal", "Produto", ...(includeCustomerNames ? ["Cliente"] : []), "Quantidade", "Valor bruto", "Situação"]}
             rows={historyRows}
             summary={includeCustomerNames
-              ? ["Total de vendas", "", "", activeSales.length.toLocaleString("pt-BR"), formatCents(activeSales.reduce((sum, sale) => sum + sale.totalCents, 0))]
-              : ["Total de vendas", "", activeSales.length.toLocaleString("pt-BR"), formatCents(activeSales.reduce((sum, sale) => sum + sale.totalCents, 0))]}
+              ? ["Vendas ativas", "", "", "", activeSaleCount.toLocaleString("pt-BR"), formatCents(activeSaleCents), ""]
+              : ["Vendas ativas", "", "", activeSaleCount.toLocaleString("pt-BR"), formatCents(activeSaleCents), ""]}
           />
         </div>
       </section>
@@ -451,14 +562,18 @@ export function ScoreboardSalesHistory({
             </DialogHeader>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6" data-testid="scoreboard-product-detail-summary">
               {[
-                ["Vendas", selectedProduct.saleCount.toLocaleString("pt-BR")],
-                ["Unidades", selectedProduct.quantity.toLocaleString("pt-BR")],
-                ["Bruto", formatCents(selectedProduct.salesCents)],
-                ["Estornos", formatCents(selectedProduct.refundCents)],
-                ["Líquido", formatCents(selectedProduct.netCents)],
+                ["Vendas", selectedProductTotals.saleCount.toLocaleString("pt-BR")],
+                ["Unidades", selectedProductTotals.quantity.toLocaleString("pt-BR")],
+                ["Bruto", formatCents(selectedProductTotals.salesCents)],
+                ["Estornos", formatCents(selectedProductTotals.refundCents)],
+                ["Líquido", formatCents(selectedProductTotals.netCents)],
                 ["Período", periodLabel],
               ].map(([label, value]) => <article key={label} className="min-w-0 rounded-xl bg-[#f8f6fa] px-3 py-3"><p className="text-[9px] font-bold uppercase tracking-[.08em] text-[#81798b]">{label}</p><p className="mt-1 break-words text-xs font-extrabold text-[#40374e]">{value}</p></article>)}
             </div>
+            <p className="rounded-xl bg-[#f8f5fb] px-3.5 py-2.5 text-[10px] text-[#716879]" data-testid="scoreboard-product-detail-channel">
+              Canal no período: {productChannelLabels.length ? productChannelLabels.join(", ") : "Sem dados classificados"}
+              {selectedProduct.modalityName ? ` · Modalidade cadastrada: ${selectedProduct.modalityName}` : ""}
+            </p>
             <section>
               <h3 className="mb-2 text-xs font-extrabold text-[#40374e]">Histórico do produto no período</h3>
               {isLoading ? <div className="skeleton h-40 rounded-xl" role="status" aria-label="Carregando vendas do produto" />
@@ -482,8 +597,19 @@ export function ScoreboardSalesHistory({
           <p className="mt-2 text-[9pt] text-[#77717f]">Gerado em {formatGeneratedAt()}</p>
           <h2 className="mt-4 text-[12pt] font-extrabold text-[#40374e]">Resumo do produto</h2>
           <PdfPrintTable
-            headers={["Vendas", "Unidades", "Faturamento bruto", "Estornos", "Faturamento líquido"]}
-            rows={[[selectedProduct.saleCount.toLocaleString("pt-BR"), selectedProduct.quantity.toLocaleString("pt-BR"), formatCents(selectedProduct.salesCents), formatCents(selectedProduct.refundCents), formatCents(selectedProduct.netCents)]]}
+            headers={["Canal", "Modalidade cadastrada", "Vendas", "Unidades", "Faturamento bruto", "Estornos", "Faturamento líquido"]}
+            rows={selectedProductChannelGroups
+              .filter((group) => group.products.length > 0)
+              .map((group) => [
+                group.label,
+                group.products.map((product) => product.sportModalityName).filter(Boolean).join(", ") || "—",
+                group.totals.saleCount.toLocaleString("pt-BR"),
+                group.totals.quantity.toLocaleString("pt-BR"),
+                formatCents(group.totals.salesCents),
+                formatCents(group.totals.refundCents),
+                formatCents(group.totals.netCents),
+              ])}
+            summary={["Total do produto", "", selectedProductTotals.saleCount.toLocaleString("pt-BR"), selectedProductTotals.quantity.toLocaleString("pt-BR"), formatCents(selectedProductTotals.salesCents), formatCents(selectedProductTotals.refundCents), formatCents(selectedProductTotals.netCents)]}
           />
           {includeMonthlyHistory && <>
             <h2 className="mt-5 text-[12pt] font-extrabold text-[#40374e]">Histórico mensal do produto</h2>
@@ -497,17 +623,17 @@ export function ScoreboardSalesHistory({
                 formatCents(month.refundCents),
                 formatCents(month.netCents),
               ])}
-              summary={["Total", selectedProduct.saleCount.toLocaleString("pt-BR"), selectedProduct.quantity.toLocaleString("pt-BR"), formatCents(selectedProduct.salesCents), formatCents(selectedProduct.refundCents), formatCents(selectedProduct.netCents)]}
+              summary={["Total", selectedProductTotals.saleCount.toLocaleString("pt-BR"), selectedProductTotals.quantity.toLocaleString("pt-BR"), formatCents(selectedProductTotals.salesCents), formatCents(selectedProductTotals.refundCents), formatCents(selectedProductTotals.netCents)]}
             />
           </>}
           <div className="dashboard-pdf-appendix" data-pdf-appendix="scoreboard-product">
             <h2 className="mt-5 text-[12pt] font-extrabold text-[#40374e]">Histórico de vendas</h2>
             <PdfPrintTable
-              headers={["Data", "Produto", ...(includeCustomerNames ? ["Cliente"] : []), "Quantidade", "Valor"]}
+              headers={["Data", "Canal", "Produto", ...(includeCustomerNames ? ["Cliente"] : []), "Quantidade", "Valor bruto", "Situação"]}
               rows={productHistoryRows}
               summary={includeCustomerNames
-                ? ["Total de vendas", "", "", activeProductSales.length.toLocaleString("pt-BR"), formatCents(activeProductSales.reduce((sum, sale) => sum + sale.totalCents, 0))]
-                : ["Total de vendas", "", activeProductSales.length.toLocaleString("pt-BR"), formatCents(activeProductSales.reduce((sum, sale) => sum + sale.totalCents, 0))]}
+                ? ["Vendas ativas", "", "", "", activeProductSaleCount.toLocaleString("pt-BR"), formatCents(activeProductSaleCents), ""]
+                : ["Vendas ativas", "", "", activeProductSaleCount.toLocaleString("pt-BR"), formatCents(activeProductSaleCents), ""]}
             />
           </div>
         </section>
