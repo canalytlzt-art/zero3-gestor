@@ -90,6 +90,7 @@ export * from './product';
 export * from './productInput';
 export * from './sale';
 export * from './saleInput';
+export * from './saleProductResolution';
 export * from './salesBackupFinancialTotals';
 export * from './salesBackupRecordCounts';
 export * from './salesBackupRecordEnvelope';

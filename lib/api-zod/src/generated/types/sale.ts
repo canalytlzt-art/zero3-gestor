@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { SaleProductResolution } from './saleProductResolution';
 import type { SaleStatus } from './saleStatus';
 
 export interface Sale {
@@ -14,6 +15,25 @@ export interface Sale {
   /** @nullable */
   modalityId: string | null;
   modalityOverride: boolean;
+  /**
+     * Current product resolved by stored ID or an exact normalized legacy-name match. This does not change productId in storage.
+     * @nullable
+     */
+  resolvedProductId?: string | null;
+  /**
+     * Current effective modality. An explicit sale-level modality, including explicit null, takes precedence over the current product modality.
+     * @nullable
+     */
+  effectiveModalityId?: string | null;
+  /** @nullable */
+  effectiveModalityName?: string | null;
+  /**
+     * Current linked product name used for read-only classification; productName remains the original sale snapshot.
+     * @nullable
+     */
+  effectiveProductName?: string | null;
+  /** Read-only classification status for the current product link. */
+  productResolution?: SaleProductResolution;
   saleDate: string;
   productName: string;
   quantity: number;

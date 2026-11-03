@@ -38,10 +38,15 @@ export function buildProductMonthlySalesSummary(
   for (const month of [...new Set(monthKeys)].sort()) {
     monthTotals.set(month, { month, saleCount: 0, quantity: 0, salesCents: 0, refundCents: 0, netCents: 0 });
   }
-  const isProduct = (row: { productId: string | null; productName: string }) =>
+  const isProduct = (row: { productId: string | null; resolvedProductId?: string | null; productName: string }) =>
     product.productId !== null
-      ? row.productId === product.productId
+      ? (row.resolvedProductId ?? row.productId) === product.productId
       : row.productId === null && row.productName === product.productName;
+  const matchingSaleIds = new Set(
+    sales
+      .filter((sale) => sale.status === "active" && isProduct(sale))
+      .map((sale) => sale.id),
+  );
 
   for (const sale of sales) {
     const month = sale.saleDate.slice(0, 7);
@@ -58,7 +63,7 @@ export function buildProductMonthlySalesSummary(
     if (
       refund.status !== "active"
       || refund.saleStatus !== "active"
-      || !isProduct(refund)
+      || !matchingSaleIds.has(refund.saleId)
       || !dateMatches(refund.refundDate.slice(0, 10))
     ) continue;
     const summary = monthTotals.get(month);
@@ -86,7 +91,7 @@ export function filterSalesForScoreboard(
     if (scope.fromDate && date < scope.fromDate) continue;
     if (scope.toDate && date > scope.toDate) continue;
     if (!scope.fromDate && !scope.toDate && !scope.months.includes(date.slice(0, 7))) continue;
-    if (scope.productId && sale.productId !== scope.productId) continue;
+    if (scope.productId && (sale.resolvedProductId ?? sale.productId) !== scope.productId) continue;
     if (scope.weekdays?.length) {
       const weekday = scope.weekdayForDate(date);
       if (weekday === null || !scope.weekdays.includes(weekday)) continue;

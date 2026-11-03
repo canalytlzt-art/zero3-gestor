@@ -51,6 +51,7 @@ import { getIsoWeekday, getWeekdayName, getWeekdayNameForIsoDay } from '@/lib/oc
 import { mapSalesImportRow, parseImportDate, parseSalesSpreadsheet, type SalesImportField, type SalesImportSheet } from '@/lib/sales-import';
 import { findPossibleSaleDuplicates, findSalesImportDuplicateNotices, saleDuplicateFieldLabels } from '@/lib/sales-duplicates';
 import type { SaleDuplicateField } from '@/lib/sales-duplicates';
+import { classifySaleSector } from '@/lib/sales-channel-report';
 import { ImportSourceDetails } from './import-source-details';
 import ActiveContractsDialog from './active-contracts-dialog';
 
@@ -154,14 +155,22 @@ function conflictAwareMessage(error: unknown, context: 'venda' | 'produto') {
 }
 
 function filterSalesForExport(sales: Sale[], fromDate: string, toDate: string, filterProduct: string, products: Product[] = []) {
-  const productIds = new Set([
-    ...products.filter(({ name }) => productNameKey(name) === productNameKey(filterProduct)).map(({ id }) => id),
-    ...sales.filter(({ productName }) => productNameKey(productName) === productNameKey(filterProduct)).map(({ productId }) => productId),
-  ]);
+  const matchingProductIds = new Set(
+    products
+      .filter(({ name }) => productNameKey(name) === productNameKey(filterProduct))
+      .map(({ id }) => id),
+  );
   return sales
     .filter((sale) => !fromDate || sale.saleDate >= fromDate)
     .filter((sale) => !toDate || sale.saleDate <= toDate)
-    .filter((sale) => !filterProduct || productIds.has(sale.productId))
+    .filter((sale) => {
+      if (!filterProduct) return true;
+      const resolvedId = sale.resolvedProductId ?? sale.productId;
+      if (matchingProductIds.size) return Boolean(resolvedId && matchingProductIds.has(resolvedId));
+      return sale.productResolution !== 'ambiguous-name'
+        && sale.productResolution !== 'missing-product'
+        && productNameKey(sale.productName) === productNameKey(filterProduct);
+    })
     .slice()
     .sort((a, b) => b.saleDate.localeCompare(a.saleDate) || b.createdAt.localeCompare(a.createdAt));
 }
@@ -236,10 +245,10 @@ export default function SalesManagement() {
   const { user } = useUser();
   const queryClient = useQueryClient();
   const { data: sales, isLoading, isFetching, isError, refetch: refetchSales } = useGetSales({
-    query: { queryKey: getGetSalesQueryKey(), refetchOnMount: 'always' },
+    query: { queryKey: getGetSalesQueryKey(), refetchOnMount: 'always', refetchOnWindowFocus: true },
   });
   const { data: historySales, isLoading: isHistoryLoading, isError: isHistoryError, refetch: refetchHistory } = useGetSalesHistory({
-    query: { queryKey: getGetSalesHistoryQueryKey(), refetchOnMount: 'always' },
+    query: { queryKey: getGetSalesHistoryQueryKey(), refetchOnMount: 'always', refetchOnWindowFocus: true },
   });
   const {
     data: pendingDrafts,
@@ -250,10 +259,10 @@ export default function SalesManagement() {
     query: { queryKey: getGetSalesPendingDraftsQueryKey(), refetchOnMount: 'always' },
   });
   const { data: productRecords, isLoading: isProductsLoading, isError: isProductsError, refetch: refetchProducts } = useGetProducts({
-    query: { queryKey: getGetProductsQueryKey(), refetchOnMount: 'always' },
+    query: { queryKey: getGetProductsQueryKey(), refetchOnMount: 'always', refetchOnWindowFocus: true },
   });
   const { data: occupancyModalities, isLoading: areModalitiesLoading, isError: areModalitiesError, refetch: refetchModalities } = useGetOccupancyModalities({
-    query: { queryKey: getGetOccupancyModalitiesQueryKey(), refetchOnMount: 'always' },
+    query: { queryKey: getGetOccupancyModalitiesQueryKey(), refetchOnMount: 'always', refetchOnWindowFocus: true },
   });
   const {
     data: salesGoals,
@@ -305,6 +314,7 @@ export default function SalesManagement() {
   const [cancellationConflict, setCancellationConflict] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [filterProduct, setFilterProduct] = useState('');
+  const [filterModalityId, setFilterModalityId] = useState('all');
   const [historyPeriodMode, setHistoryPeriodMode] = useState<ScoreboardPeriodMode>('all');
   const [historyMonth, setHistoryMonth] = useState(getSaoPauloMonthKey());
   const [historyMonths, setHistoryMonths] = useState<string[]>([getSaoPauloMonthKey()]);
@@ -415,6 +425,14 @@ export default function SalesManagement() {
     }
     return [...names.values()].sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
   }, [products, historySales]);
+  const prefixSectorOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    for (const sale of historySales ?? []) {
+      const sector = classifySaleSector(sale);
+      if (sector.key.startsWith('prefix:')) options.set(sector.key, sector.label);
+    }
+    return [...options].map(([value, label]) => ({ value, label: `${label} · nome do produto` }));
+  }, [historySales]);
   const reportSales = periodReportSnapshot?.sales ?? historySales ?? [];
   const reportRefunds = periodReportSnapshot?.refunds ?? refunds ?? [];
   const reportProducts = periodReportSnapshot?.products ?? products;
@@ -462,12 +480,19 @@ export default function SalesManagement() {
     () => invalidHistoryRange || invalidHistoryYear ? [] : filterSalesForExport(historySales ?? [], historyPeriodMode === 'range' ? fromDate : '', historyPeriodMode === 'range' ? toDate : '', filterProduct, products)
       .filter((sale) => !historyMonthFilter || historyMonthFilter.includes(sale.saleDate.slice(0, 7)))
       .filter((sale) => !historyWeekdays.length || historyWeekdays.includes(getIsoWeekday(sale.saleDate) ?? 0))
+      .filter((sale) => {
+        if (filterModalityId === 'all') return true;
+        const sector = classifySaleSector(sale);
+        if (filterModalityId === 'unclassified') return sector.key === 'unclassified';
+        if (filterModalityId.startsWith('prefix:')) return sector.key === filterModalityId;
+        return sector.key === `modality:${filterModalityId}`;
+      })
       .filter((sale) => filterStatus === 'all' || sale.status === filterStatus)
       .filter((sale) => filterCadastroStatus === 'all'
         || (filterCadastroStatus === 'needs-review'
           ? getSaleVerificationIssues(sale).length > 0
           : getSaleVerificationIssues(sale).length === 0)),
-    [historySales, invalidHistoryRange, invalidHistoryYear, historyPeriodMode, historyMonthFilter, historyWeekdays, fromDate, toDate, filterProduct, filterStatus, filterCadastroStatus, products],
+    [historySales, invalidHistoryRange, invalidHistoryYear, historyPeriodMode, historyMonthFilter, historyWeekdays, fromDate, toDate, filterProduct, filterModalityId, filterStatus, filterCadastroStatus, products],
   );
   const visiblePendingDrafts = useMemo(() => (pendingDrafts ?? [])
     .filter((draft) => filterCadastroStatus !== 'complete')
@@ -1057,15 +1082,22 @@ export default function SalesManagement() {
     pendingSaleKey.current = null;
     setFeedback(null);
     setEditing(sale);
+    const exactProductMatches = (products ?? []).filter(
+      (product) => productNameKey(product.name) === productNameKey(sale.productName),
+    );
+    const currentProduct = (sale.resolvedProductId
+      ? products?.find((product) => product.id === sale.resolvedProductId)
+      : sale.productId
+        ? products?.find((product) => product.id === sale.productId)
+        : exactProductMatches.length === 1
+          ? exactProductMatches[0]
+          : undefined);
     form.reset({
       saleDate: sale.saleDate,
       productName: sale.productName,
       modalityId: sale.modalityOverride
         ? sale.modalityId ?? ''
-        : products?.find((product) =>
-            product.id === sale.productId ||
-            productNameKey(product.name) === productNameKey(sale.productName),
-          )?.modalityId ?? '',
+        : currentProduct?.modalityId ?? '',
       quantity: String(sale.quantity),
       unitAmount: `${Math.floor(sale.unitAmountCents / 100)},${String(sale.unitAmountCents % 100).padStart(2, '0')}`,
       customerName: sale.customerName ?? '',
@@ -1334,6 +1366,15 @@ export default function SalesManagement() {
                   ]}
                 />
               </label>
+              <label className="col-span-2 min-w-0 text-[10px] font-semibold text-[#817b89]">Setor / modalidade atual
+                <select value={filterModalityId} onChange={(event) => setFilterModalityId(event.target.value)} data-testid="filter-sale-modality" className="mt-1 h-10 w-full rounded-lg border border-[#e7e2ea] bg-white px-2.5 text-xs text-[#443d50] outline-none focus:border-[#9477bf]">
+                  <option value="all">Todos os setores</option>
+                  <option value="unclassified">Sem classificação</option>
+                  {(occupancyModalities ?? []).map((modality) => <option key={modality.id} value={modality.id}>{modality.name}</option>)}
+                  {prefixSectorOptions.map((sector) => <option key={sector.value} value={sector.value}>{sector.label}</option>)}
+                </select>
+                <span className="mt-1 block text-[9px] font-normal leading-4 text-[#91899a]">Vendas sem escolha manual usam a modalidade atual do produto.</span>
+              </label>
               <label className="col-span-2 min-w-0 text-[10px] font-semibold text-[#817b89]">Situação
                 <select value={filterStatus} onChange={(event) => setFilterStatus(event.target.value as typeof filterStatus)} data-testid="filter-sale-status" className="mt-1 h-10 w-full rounded-lg border border-[#e7e2ea] bg-white px-2.5 text-xs text-[#443d50] outline-none focus:border-[#9477bf]">
                   <option value="all">Todas as situações</option>
@@ -1355,7 +1396,7 @@ export default function SalesManagement() {
                   return <label key={weekday} className={`inline-flex cursor-pointer items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold ${selected ? 'border-[#7656b8] bg-[#eee8f7] text-[#5d4a78]' : 'border-[#e7e2ea] bg-white text-[#746c7e]'}`}><input type="checkbox" checked={selected} onChange={() => setHistoryWeekdays((items) => selected ? items.filter((item) => item !== weekday) : [...items, weekday].sort())} className="accent-[#7656b8]" data-testid={`filter-history-weekday-${weekday}`} />{getWeekdayNameForIsoDay(weekday)}</label>;
                 })}</div>
               </fieldset>
-              <button type="button" onClick={() => { setHistoryPeriodMode('all'); setFromDate(''); setToDate(''); setHistoryWeekdays([]); setFilterProduct(''); setFilterStatus('all'); setFilterCadastroStatus('all'); }} className="col-span-2 justify-self-start rounded-lg px-2 py-1.5 text-[10px] font-semibold text-[#766d83] hover:bg-white" data-testid="button-clear-history-filters">Limpar filtros</button>
+              <button type="button" onClick={() => { setHistoryPeriodMode('all'); setFromDate(''); setToDate(''); setHistoryWeekdays([]); setFilterProduct(''); setFilterModalityId('all'); setFilterStatus('all'); setFilterCadastroStatus('all'); }} className="col-span-2 justify-self-start rounded-lg px-2 py-1.5 text-[10px] font-semibold text-[#766d83] hover:bg-white" data-testid="button-clear-history-filters">Limpar filtros</button>
             </div>
             {invalidHistoryRange && <p className="mt-2 text-[10px] font-semibold text-[#a24f45]" role="alert" data-testid="status-history-date-range">{!fromDate || !toDate ? 'Informe as datas inicial e final.' : 'A data inicial deve ser anterior ou igual à data final.'}</p>}
             {invalidHistoryYear && <p className="mt-2 text-[10px] font-semibold text-[#a24f45]" role="alert" data-testid="status-history-year">Informe um ano válido entre 1000 e 9999.</p>}
@@ -1980,6 +2021,9 @@ function SaleRow({ sale, onEdit, onHistory, onCancel, busy }: { sale: Sale; onEd
   const cancelled = sale.status === 'cancelled';
   const verificationIssues = getSaleVerificationIssues(sale);
   const needsVerification = verificationIssues.length > 0;
+  const sectorLabel = sale.modalityOverride && !sale.effectiveModalityId
+    ? 'Sem classificação · definida na venda'
+    : classifySaleSector(sale).label;
   const labelClass = 'mb-1 block text-[9px] font-bold uppercase tracking-[.09em] text-[#91899a]';
   return <article className={`min-w-0 rounded-2xl border px-3 py-3 transition sm:px-4 ${cancelled ? 'border-[#ede8e9] bg-[#fcfafa]' : 'border-[#f0edf2] hover:border-[#e5dfeb] hover:bg-[#fdfcfe]'}`} data-testid={`row-sale-${sale.id}`}>
     <div className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
@@ -1995,6 +2039,12 @@ function SaleRow({ sale, onEdit, onHistory, onCancel, busy }: { sale: Sale; onEd
       <div className="col-span-2 min-w-0">
         <span className={labelClass}>Produto</span>
         <p className={`break-words [overflow-wrap:anywhere] text-sm font-bold ${cancelled ? 'text-[#77717f]' : 'text-[#353044]'}`} data-testid={`text-sale-product-${sale.id}`}>{sale.productName}</p>
+      </div>
+      <div className="col-span-2 min-w-0">
+        <span className={labelClass}>Setor / modalidade atual</span>
+        <p className="break-words [overflow-wrap:anywhere] text-[11px] font-semibold text-[#5d4a78]" data-testid={`text-sale-modality-${sale.id}`}>
+          {sectorLabel}
+        </p>
       </div>
       <div className="col-span-2 min-w-0">
         <span className={labelClass}>Cliente</span>
@@ -2014,6 +2064,7 @@ function SaleRow({ sale, onEdit, onHistory, onCancel, busy }: { sale: Sale; onEd
       </div>
     </div>
     {needsVerification && <p className="mt-3 inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-lg bg-[#fff5e8] px-2.5 py-1.5 text-[10px] font-semibold text-[#805824]" role="status" data-testid={`status-sale-review-${sale.id}`}><CircleHelp size={12} /> Informações pendentes de verificação: {verificationIssues.join(' e ')}{!cancelled && ' · use Editar para completar.'}</p>}
+    {(sale.productResolution === 'ambiguous-name' || sale.productResolution === 'missing-product') && <p className="mt-2 inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-lg bg-[#fff5e8] px-2.5 py-1.5 text-[10px] font-semibold text-[#805824]" role="status" data-testid={`status-sale-product-link-${sale.id}`}><CircleHelp size={12} /> Produto sem vínculo seguro; a classificação não foi inferida automaticamente.</p>}
     {(sale.notes || (cancelled && sale.cancellationReason)) && <div className="mt-3 space-y-1 border-t border-[#efebf0] pt-2.5">
       {sale.notes && <p className="break-words [overflow-wrap:anywhere] text-[10px] leading-4 text-[#81798b]"><span className="font-bold">Observação:</span> {sale.notes}</p>}
       {cancelled && sale.cancellationReason && <p className="break-words [overflow-wrap:anywhere] text-[10px] leading-4 text-[#9a625b]" data-testid={`text-sale-cancellation-reason-${sale.id}`}><span className="font-bold">Motivo:</span> {sale.cancellationReason}</p>}
@@ -2044,6 +2095,9 @@ function SaleHistoryDialog({ sale, onClose }: { sale: Sale; onClose: () => void 
     restore: 'Restaurada do backup',
     'restore-update': 'Dados do backup restaurados',
   };
+  const sectorLabel = sale.modalityOverride && !sale.effectiveModalityId
+    ? 'Sem classificação · definida na venda'
+    : classifySaleSector(sale).label;
 
   return <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
     <DialogContent className="max-w-lg border-[#e7e1e9] bg-[#fffefc] p-6 sm:rounded-[24px]">
@@ -2053,6 +2107,10 @@ function SaleHistoryDialog({ sale, onClose }: { sale: Sale; onClose: () => void 
       </DialogHeader>
       <div className="rounded-xl bg-[#f8f6fa] px-3.5 py-3" data-testid={`panel-sale-history-${sale.id}`}>
         <p className="text-sm font-bold text-[#40374e]">{sale.productName}</p>
+        <p className="mt-1 text-[10px] font-semibold text-[#6d6278]" data-testid={`text-sale-history-modality-${sale.id}`}>
+          Setor / modalidade atual: {sectorLabel}
+          {sale.productResolution === 'ambiguous-name' && ' · vínculo ambíguo para revisão'}
+        </p>
         {sale.customerName && <p className="mt-1 text-xs font-semibold text-[#5d4a78]" data-testid="text-sale-history-customer-name">Nome: {sale.customerName}</p>}
         <p className="mt-1 text-xs text-[#817b89]">{formatDate(sale.saleDate)} · {sale.quantity} un. · {formatCents(sale.totalCents)}</p>
         {sale.status === 'cancelled' && sale.cancellationReason && <p className="mt-2 text-xs text-[#9a625b]">Motivo do cancelamento: {sale.cancellationReason}</p>}

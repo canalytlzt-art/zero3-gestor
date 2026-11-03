@@ -27,7 +27,7 @@ test('groups modality totals without dropping unclassified sales', () => {
     { name, saleCount, quantity, salesCents, refundCents, netCents }
   )), [
     { name: 'Pilates', saleCount: 3, quantity: 3, salesCents: 40000, refundCents: 25000, netCents: 15000 },
-    { name: 'Não classificado', saleCount: 0, quantity: 3, salesCents: 0, refundCents: 2000, netCents: -2000 },
+    { name: 'Outros / sem classificação', saleCount: 0, quantity: 3, salesCents: 0, refundCents: 2000, netCents: -2000 },
   ]);
 });
 
@@ -58,4 +58,26 @@ test('preserves negative monthly net values for the evolution chart', () => {
     months: [{ month: '2026-10', saleCount: 0, quantity: 0, salesCents: 1000, refundCents: 2500, netCents: -1500 }],
   });
   assert.equal(result.months[0]?.netCents, -1500);
+});
+
+test('charts use current sector labels, preserve explicit unclassified sales, and avoid duplicate product slices', () => {
+  const result = buildFinancialChartAnalytics({
+    ...report,
+    totals: { saleCount: 3, quantity: 3, salesCents: 6_000, refundCents: 0, netCents: 6_000 },
+    products: [
+      { productId: 'shared', productName: 'Presencial · Plano X', modalityId: null, modalityName: null, saleCount: 1, quantity: 1, salesCents: 2_000, refundCents: 0, netCents: 2_000 },
+      { productId: 'shared', productName: 'Presencial · Plano X', modalityId: 'online', modalityName: 'Online', saleCount: 1, quantity: 1, salesCents: 3_000, refundCents: 0, netCents: 3_000 },
+      { productId: 'unclassified', productName: 'Online · Plano Y', modalityId: null, modalityName: null, explicitlyUnclassified: true, saleCount: 1, quantity: 1, salesCents: 1_000, refundCents: 0, netCents: 1_000 },
+    ],
+  });
+
+  assert.deepEqual(result.byModality.map(({ name, salesCents }) => ({ name, salesCents })), [
+    { name: 'Online', salesCents: 3_000 },
+    { name: 'Presencial', salesCents: 2_000 },
+    { name: 'Outros / sem classificação', salesCents: 1_000 },
+  ]);
+  assert.equal(result.byProduct.filter(({ productId }) => productId === 'shared').length, 1);
+  assert.equal(result.byProduct.find(({ productId }) => productId === 'shared')?.salesCents, 5_000);
+  assert.equal(result.salesShareByProduct.filter(({ name }) => name === 'Presencial · Plano X').length, 1);
+  assert.equal(result.reconcilesByProduct, true);
 });

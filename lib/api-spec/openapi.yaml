@@ -1853,6 +1853,23 @@ components:
           format: uuid
         modalityOverride:
           type: boolean
+        resolvedProductId:
+          type: ["string", "null"]
+          format: uuid
+          description: Current product resolved by stored ID or an exact normalized legacy-name match. This does not change productId in storage.
+        effectiveModalityId:
+          type: ["string", "null"]
+          format: uuid
+          description: Current effective modality. An explicit sale-level modality, including explicit null, takes precedence over the current product modality.
+        effectiveModalityName:
+          type: ["string", "null"]
+        effectiveProductName:
+          type: ["string", "null"]
+          description: Current linked product name used for read-only classification; productName remains the original sale snapshot.
+        productResolution:
+          type: string
+          enum: [linked-id, linked-name, ambiguous-name, unmatched, missing-product]
+          description: Read-only classification status for the current product link.
         saleDate:
           type: string
         productName:
@@ -2541,6 +2558,9 @@ components:
               format: uuid
             modalityName:
               type: ["string", "null"]
+            explicitlyUnclassified:
+              type: boolean
+              description: True when these totals come from a deliberate sale-level choice to remain unclassified.
           required: [productId, productName, modalityId, modalityName]
     SalesScoreboardMonth:
       allOf:

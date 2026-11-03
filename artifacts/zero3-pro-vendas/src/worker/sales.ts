@@ -91,6 +91,32 @@ function saleOut(row: Row) {
     productId: row.product_id === null ? null : String(row.product_id),
     modalityId: row.modality_id === null ? null : String(row.modality_id),
     modalityOverride: Boolean(row.modality_override),
+    resolvedProductId:
+      row.resolved_product_id === undefined
+        ? undefined
+        : row.resolved_product_id === null
+          ? null
+          : String(row.resolved_product_id),
+    effectiveModalityId:
+      row.effective_modality_id === undefined
+        ? undefined
+        : row.effective_modality_id === null
+          ? null
+          : String(row.effective_modality_id),
+    effectiveModalityName:
+      row.effective_modality_name === undefined
+        ? undefined
+        : row.effective_modality_name === null
+          ? null
+          : String(row.effective_modality_name),
+    effectiveProductName:
+      row.current_product_name === undefined
+        ? undefined
+        : row.current_product_name === null
+          ? null
+          : String(row.current_product_name),
+    productResolution:
+      row.product_resolution === undefined ? undefined : String(row.product_resolution),
     saleDate: String(row.sale_date),
     productName: String(row.product_name),
     quantity: Number(row.quantity),
@@ -104,6 +130,75 @@ function saleOut(row: Row) {
     version: Number(row.version),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
+  };
+}
+
+type ProductClassificationLookup = {
+  productsById: Map<string, Row>;
+  productsByName: Map<string, Row[]>;
+  modalitiesById: Map<string, string>;
+};
+
+async function loadProductClassificationLookup(
+  db: D1Database,
+): Promise<ProductClassificationLookup> {
+  const [products, modalities] = await Promise.all([
+    asRows(db.prepare("SELECT id, name, normalized_name, modality_id FROM products")),
+    asRows(db.prepare("SELECT id, name FROM occupancy_modalities")),
+  ]);
+  const productsById = new Map<string, Row>();
+  const productsByName = new Map<string, Row[]>();
+  for (const product of products) {
+    const id = String(product.id);
+    productsById.set(id, product);
+    const key = nameKey(String(product.normalized_name ?? product.name ?? ""));
+    if (key) productsByName.set(key, [...(productsByName.get(key) ?? []), product]);
+  }
+  return {
+    productsById,
+    productsByName,
+    modalitiesById: new Map(modalities.map((modality) => [String(modality.id), String(modality.name)])),
+  };
+}
+
+function classifySaleRow(row: Row, lookup: ProductClassificationLookup): Row {
+  const storedProductId = row.product_id === null || row.product_id === undefined
+    ? null
+    : String(row.product_id);
+  let product = storedProductId ? lookup.productsById.get(storedProductId) : undefined;
+  let productResolution = storedProductId ? "missing-product" : "unmatched";
+  if (storedProductId && product) {
+    productResolution = "linked-id";
+  } else if (!storedProductId) {
+    const key = nameKey(String(row.product_name ?? ""));
+    const matches = key ? lookup.productsByName.get(key) ?? [] : [];
+    if (matches.length === 1) {
+      product = matches[0];
+      productResolution = "linked-name";
+    } else if (matches.length > 1) {
+      productResolution = "ambiguous-name";
+    }
+  }
+
+  const modalityOverride = Number(row.modality_override ?? 0) === 1;
+  const effectiveModalityId = modalityOverride
+    ? (row.modality_id === null || row.modality_id === undefined ? null : String(row.modality_id))
+    : (product?.modality_id === null || product?.modality_id === undefined
+      ? null
+      : String(product.modality_id));
+  return {
+    ...row,
+    resolved_product_id: product ? String(product.id) : null,
+    current_product_name: product?.name ?? row.current_product_name ?? row.product_name,
+    effective_modality_id: effectiveModalityId,
+    effective_modality_name: effectiveModalityId
+      ? lookup.modalitiesById.get(effectiveModalityId) ?? null
+      : null,
+    modality_name: effectiveModalityId
+      ? lookup.modalitiesById.get(effectiveModalityId) ?? null
+      : null,
+    product_resolution: productResolution,
+    explicitly_unclassified: modalityOverride && effectiveModalityId === null,
   };
 }
 
@@ -717,37 +812,25 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
   if (months.some((month) => !dateOnly(`${month}-01`))) {
     throw new ApiFailure(400, "Selecione meses válidos.");
   }
-  const sales = await asRows(
+  const classificationLookup = await loadProductClassificationLookup(env.DB);
+  const sales = (await asRows(
+    env.DB.prepare("SELECT * FROM sales WHERE status='active'"),
+  )).map((row) => classifySaleRow(row, classificationLookup));
+  const refunds = (await asRows(
     env.DB.prepare(
-      `SELECT s.*, p.name AS current_product_name,
-         CASE WHEN s.modality_override=1 THEN s.modality_id ELSE p.modality_id END AS effective_modality_id,
-         m.name AS modality_name
-       FROM sales s LEFT JOIN products p ON p.id=s.product_id
-       LEFT JOIN occupancy_modalities m
-         ON m.id=CASE WHEN s.modality_override=1 THEN s.modality_id ELSE p.modality_id END
-       WHERE s.status='active'`,
-    ),
-  );
-  const refunds = await asRows(
-    env.DB.prepare(
-      `SELECT r.*, s.product_id, s.product_name, p.name AS current_product_name,
-         CASE WHEN s.modality_override=1 THEN s.modality_id ELSE p.modality_id END AS effective_modality_id,
-         m.name AS modality_name, s.sale_date, s.quantity,
-         s.unit_amount_cents, s.total_cents, s.status AS sale_status
+      `SELECT r.*, s.product_id, s.product_name, s.modality_id, s.modality_override,
+         s.sale_date, s.quantity, s.unit_amount_cents, s.total_cents, s.status AS sale_status
        FROM sales_refunds r JOIN sales s ON s.id=r.sale_id
-       LEFT JOIN products p ON p.id=s.product_id
-       LEFT JOIN occupancy_modalities m
-         ON m.id=CASE WHEN s.modality_override=1 THEN s.modality_id ELSE p.modality_id END
-        WHERE r.status='active' AND s.status='active'`,
+       WHERE r.status='active' AND s.status='active'`,
     ),
-  );
+  )).map((row) => classifySaleRow(row, classificationLookup));
   const dateMatches = (value: string) => {
     if (fromDate && toDate && (value < fromDate || value > toDate)) return false;
     if (months.length && !months.includes(value.slice(0, 7))) return false;
     return !weekdays.length || weekdays.includes(getIsoWeekday(value) ?? 0);
   };
   const productMatches = (row: Row) =>
-    (!params.productId || row.product_id === params.productId) &&
+    (!params.productId || (row.resolved_product_id ?? row.product_id) === params.productId) &&
     (!params.modalityId || row.effective_modality_id === params.modalityId);
 
   type Aggregate = {
@@ -755,6 +838,7 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
     productName: string;
     modalityId: string | null;
     modalityName: string | null;
+    explicitlyUnclassified: boolean;
     saleCount: bigint;
     quantity: bigint;
     salesCents: bigint;
@@ -769,12 +853,16 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
   const daily = new Map<string, CalendarAggregate & { weekday: number }>();
   const weekly = new Map<string, CalendarAggregate>();
   const getProduct = (row: Row) => {
-    const id = row.product_id === null ? null : String(row.product_id);
+    const productValue = row.resolved_product_id ?? row.product_id;
+    const id = productValue === null || productValue === undefined ? null : String(productValue);
     const modalityValue = Object.hasOwn(row, "effective_modality_id")
       ? row.effective_modality_id
       : row.modality_id;
     const modalityId = modalityValue === null || modalityValue === undefined ? null : String(modalityValue);
-    const key = `${id ?? `name:${String(row.product_name ?? "Não categorizado")}`}|${modalityId ?? "unlinked"}`;
+    const explicitlyUnclassified = Boolean(row.explicitly_unclassified);
+    const key =
+      `${id ?? `name:${String(row.product_name ?? "Não categorizado")}`}|` +
+      `${modalityId ?? "unlinked"}|${explicitlyUnclassified ? "explicit-null" : "inherited"}`;
     let aggregate = products.get(key);
     if (!aggregate) {
       aggregate = {
@@ -782,6 +870,7 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
         productName: String(row.current_product_name ?? row.product_name ?? "Não categorizado"),
         modalityId,
         modalityName: row.modality_name === null ? null : String(row.modality_name),
+        explicitlyUnclassified,
         saleCount: 0n,
         quantity: 0n,
         salesCents: 0n,
@@ -864,6 +953,7 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
         current_product_name: product.name,
         modality_id: product.modality_id,
         modality_name: product.modality_name,
+        explicitly_unclassified: false,
       });
     }
   }
@@ -879,6 +969,7 @@ async function getScoreboard(request: Request, env: WorkerEnv): Promise<Response
       productName: item.productName,
       modalityId: item.modalityId,
       modalityName: item.modalityName,
+      explicitlyUnclassified: item.explicitlyUnclassified,
       saleCount: safeNumber(item.saleCount, "vendas"),
       quantity: safeNumber(item.quantity, "quantidade"),
       salesCents: safeNumber(item.salesCents, "vendas"),
@@ -2935,18 +3026,28 @@ export async function handleSalesRequest(
       return await updateProduct(request, env, actor, productId);
     }
     if (path === "/sales" && request.method === "GET") {
+      const classificationLookup = await loadProductClassificationLookup(env.DB);
       const rows = await asRows(
         env.DB.prepare(
           "SELECT * FROM sales WHERE status='active' ORDER BY sale_date DESC, created_at DESC",
         ),
       );
-      return json(GetSalesResponse.parse(rows.map(saleOut)));
+      return json(
+        GetSalesResponse.parse(
+          rows.map((row) => saleOut(classifySaleRow(row, classificationLookup))),
+        ),
+      );
     }
     if (path === "/sales/history" && request.method === "GET") {
+      const classificationLookup = await loadProductClassificationLookup(env.DB);
       const rows = await asRows(
         env.DB.prepare("SELECT * FROM sales ORDER BY sale_date DESC, created_at DESC"),
       );
-      return json(GetSalesHistoryResponse.parse(rows.map(saleOut)));
+      return json(
+        GetSalesHistoryResponse.parse(
+          rows.map((row) => saleOut(classifySaleRow(row, classificationLookup))),
+        ),
+      );
     }
     if (path === "/sales" && request.method === "POST") {
       return await createSale(request, env, actor);

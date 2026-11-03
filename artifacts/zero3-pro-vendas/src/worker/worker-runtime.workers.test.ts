@@ -394,6 +394,124 @@ describe("Cloudflare Workers runtime with isolated local D1", () => {
       .toHaveLength(3);
   });
 
+  it("reclassifies legacy sales from the current product modality without rewriting sales or explicit overrides", async () => {
+    const suffix = crypto.randomUUID();
+    const modalityPresencial = crypto.randomUUID();
+    const modalityOnline = crypto.randomUUID();
+    const now = new Date().toISOString();
+    await workerEnv.DB.batch([
+      ["Presencial", modalityPresencial],
+      ["Online", modalityOnline],
+    ].map(([name, id]) => workerEnv.DB.prepare(
+      `INSERT INTO occupancy_modalities
+        (id, name, normalized_name, version, created_at, updated_at)
+       VALUES (?, ?, ?, 1, ?, ?)`,
+    ).bind(id, `${name} ${suffix}`, `${String(name).toLocaleLowerCase("pt-BR")}-${suffix}`, now, now)));
+
+    const productName = `WELLHUB ${suffix}`;
+    const createdProduct = await callSales("/products", "POST", {
+      name: productName,
+      suggestedPriceCents: 0,
+      isActive: true,
+      modalityId: null,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(createdProduct.response.status).toBe(201);
+    const productId = createdProduct.payload.id as string;
+    const year = String(2000 + Math.floor(Math.random() * 7000));
+    const saleDate = `${year}-06-12`;
+    const legacySaleId = crypto.randomUUID();
+    await insertSale({
+      id: legacySaleId,
+      saleDate,
+      productName: `  wellhub   ${suffix.toLowerCase()} `,
+      quantity: 2,
+      unitAmountCents: 7_500,
+      customerName: "Cliente de teste",
+    });
+
+    const historyBefore = await callSales("/sales/history");
+    const legacyBefore = historyBefore.payload.find((sale: { id: string }) => sale.id === legacySaleId);
+    expect(legacyBefore).toMatchObject({
+      productId: null,
+      resolvedProductId: productId,
+      effectiveModalityId: null,
+      productResolution: "linked-name",
+    });
+
+    const updateProductModality = async (modalityId: string, expectedVersion: number) =>
+      callSales(`/products/${productId}`, "PATCH", {
+        name: productName,
+        suggestedPriceCents: 0,
+        isActive: true,
+        modalityId,
+        expectedVersion,
+        idempotencyKey: crypto.randomUUID(),
+      });
+    const setPresencial = await updateProductModality(modalityPresencial, 1);
+    expect(setPresencial.response.status).toBe(200);
+
+    const presencialScoreboard = await callSales(
+      `/sales/scoreboard?fromDate=${saleDate}&toDate=${saleDate}&modalityId=${modalityPresencial}`,
+    );
+    expect(presencialScoreboard.payload.totals).toMatchObject({
+      saleCount: 1,
+      quantity: 2,
+      salesCents: 15_000,
+    });
+    const historyPresencial = await callSales("/sales/history");
+    expect(historyPresencial.payload.find((sale: { id: string }) => sale.id === legacySaleId)).toMatchObject({
+      productId: null,
+      resolvedProductId: productId,
+      effectiveModalityId: modalityPresencial,
+      effectiveModalityName: `Presencial ${suffix}`,
+    });
+
+    const setOnline = await updateProductModality(modalityOnline, 2);
+    expect(setOnline.response.status).toBe(200);
+    const onlineScoreboard = await callSales(
+      `/sales/scoreboard?fromDate=${saleDate}&toDate=${saleDate}&modalityId=${modalityOnline}`,
+    );
+    expect(onlineScoreboard.payload.totals).toMatchObject({
+      saleCount: 1,
+      quantity: 2,
+      salesCents: 15_000,
+    });
+
+    const explicitNull = await callSales("/sales", "POST", {
+      saleDate,
+      productName,
+      quantity: 1,
+      unitAmountCents: 1_000,
+      customerName: null,
+      notes: null,
+      modalityId: null,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(explicitNull.response.status).toBe(201);
+    const allAfter = await callSales(`/sales/scoreboard?fromDate=${saleDate}&toDate=${saleDate}`);
+    expect(allAfter.payload.totals).toMatchObject({ saleCount: 2, quantity: 3, salesCents: 16_000 });
+    expect(allAfter.payload.products).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        productId,
+        modalityId: modalityOnline,
+        salesCents: 15_000,
+        explicitlyUnclassified: false,
+      }),
+      expect.objectContaining({
+        productId,
+        modalityId: null,
+        salesCents: 1_000,
+        explicitlyUnclassified: true,
+      }),
+    ]));
+
+    const persistedLegacy = await workerEnv.DB.prepare(
+      "SELECT product_id, total_cents FROM sales WHERE id=?",
+    ).bind(legacySaleId).first<{ product_id: string | null; total_cents: number }>();
+    expect(persistedLegacy).toEqual({ product_id: null, total_cents: 15_000 });
+  });
+
   it("persists the sales, refunds, products, goals, and occupancy Worker routes in D1", async () => {
     const unique = crypto.randomUUID();
     const productName = `Worker route ${unique}`;

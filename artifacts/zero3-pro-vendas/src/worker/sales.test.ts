@@ -117,6 +117,10 @@ class MemorySalesD1 implements D1Database {
           : [];
       });
       results = [...draftOrigins, ...saleOrigins];
+    } else if (normalized === "select id, name, normalized_name, modality_id from products") {
+      results = [];
+    } else if (normalized === "select id, name from occupancy_modalities") {
+      results = [];
     } else if (normalized === "select id from occupancy_modalities") {
       results = [];
     } else if (normalized.startsWith("select * from sales_pending_drafts where status='pending'")) {
@@ -124,16 +128,9 @@ class MemorySalesD1 implements D1Database {
     } else if (normalized.startsWith("select * from sales where id in")) {
       const ids = new Set(values.map(String));
       results = [...this.sales.values()].filter((sale) => ids.has(String(sale.id)));
-    } else if (normalized.includes("from sales s left join products p on p.id=s.product_id")) {
-      assert.match(normalized, /where s\.status='active'/);
+    } else if (normalized.startsWith("select * from sales where status='active'")) {
       results = [...this.sales.values()]
-        .filter((sale) => sale.status === "active")
-        .map((sale) => ({
-          ...sale,
-          current_product_name: null,
-          modality_id: null,
-          modality_name: null,
-        }));
+        .filter((sale) => sale.status === "active");
     } else if (normalized.includes("from sales_refunds r join sales s on s.id=r.sale_id")) {
       assert.match(normalized, /where r\.status='active'/);
       results = this.refunds.filter((refund) => refund.status === "active");

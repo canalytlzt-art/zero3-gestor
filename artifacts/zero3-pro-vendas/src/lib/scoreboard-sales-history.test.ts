@@ -45,6 +45,25 @@ test("Scoreboard scope returns each sale once and respects period, product and w
   assert.deepEqual(rows.map(({ id }) => id).sort(), ["a", "b", "d"]);
 });
 
+test("legacy sales resolved by an exact product name appear in product-filtered history", () => {
+  const legacy = sale({
+    id: "legacy",
+    saleDate: "2026-10-03",
+    productName: "Plano A",
+    customerName: null,
+    totalCents: 2_500,
+    productId: null,
+    resolvedProductId: "product-a",
+    productResolution: "linked-name",
+  });
+  const rows = filterSalesForScoreboard([legacy], {
+    months: ["2026-10"],
+    productId: "product-a",
+    weekdayForDate: () => 6,
+  });
+  assert.deepEqual(rows.map(({ id }) => id), ["legacy"]);
+});
+
 test("history search, status filter and sorting preserve one row per sale", () => {
   const active = sortAndFilterSalesHistory([...fixtures, fixtures[0]!], {
     search: "ana",
@@ -138,5 +157,58 @@ test("product monthly history separates sale dates from refund dates and exclude
   assert.deepEqual(monthly, [
     { month: "2026-10", saleCount: 2, quantity: 2, salesCents: 4000, refundCents: 0, netCents: 4000 },
     { month: "2026-11", saleCount: 0, quantity: 0, salesCents: 0, refundCents: 200, netCents: -200 },
+  ]);
+});
+
+test("monthly product history attaches legacy-sale refunds through the resolved sale link", () => {
+  const legacy = sale({
+    id: "legacy-refunded",
+    saleDate: "2026-10-02",
+    productName: "Plano A",
+    customerName: null,
+    totalCents: 1_000,
+    productId: null,
+    resolvedProductId: "product-a",
+    productResolution: "linked-name",
+  });
+  const refund: SalesRefundRecord = {
+    id: "legacy-refund",
+    saleId: legacy.id,
+    refundDate: "2026-11-04",
+    amountCents: 250,
+    reason: "Parcial",
+    status: "active",
+    voidReason: null,
+    version: 1,
+    createdAt: "2026-11-04T12:00:00.000Z",
+    updatedAt: "2026-11-04T12:00:00.000Z",
+    saleDate: legacy.saleDate,
+    productId: null,
+    productName: legacy.productName,
+    quantity: 1,
+    unitAmountCents: legacy.totalCents,
+    totalCents: legacy.totalCents,
+    saleStatus: "active",
+  };
+  const monthly = buildProductMonthlySalesSummary(
+    [legacy],
+    [refund],
+    {
+      productId: "product-a",
+      productName: "Plano A",
+      modalityId: null,
+      modalityName: null,
+      saleCount: 1,
+      quantity: 1,
+      salesCents: 1_000,
+      refundCents: 250,
+      netCents: 750,
+    },
+    ["2026-10", "2026-11"],
+    () => true,
+  );
+  assert.deepEqual(monthly, [
+    { month: "2026-10", saleCount: 1, quantity: 1, salesCents: 1_000, refundCents: 0, netCents: 1_000 },
+    { month: "2026-11", saleCount: 0, quantity: 0, salesCents: 0, refundCents: 250, netCents: -250 },
   ]);
 });

@@ -1,4 +1,5 @@
 import type { SalesScoreboard, SalesScoreboardProduct } from '@workspace/api-client-react';
+import { classifySalesSector } from './sales-channel-report';
 
 export interface FinancialChartRow {
   key: string;
@@ -52,23 +53,40 @@ function productRowKey(product: SalesScoreboardProduct) {
 }
 
 export function buildFinancialChartAnalytics(report: SalesScoreboard) {
-  const byProduct: FinancialChartRow[] = report.products.map((product) => ({
-    key: productRowKey(product),
-    name: product.productName,
-    productId: product.productId,
-    modalityId: product.modalityId,
-    modalityName: product.modalityName,
-    saleCount: product.saleCount,
-    quantity: product.quantity,
-    salesCents: product.salesCents,
-    refundCents: product.refundCents,
-    netCents: product.netCents,
-  }));
+  const productRows = new Map<string, FinancialChartRow>();
+  for (const product of report.products) {
+    const key = productRowKey(product);
+    const current = productRows.get(key) ?? {
+      key,
+      name: product.productName,
+      productId: product.productId,
+      modalityId: product.modalityId,
+      modalityName: classifySalesSector(product).label,
+      saleCount: 0,
+      quantity: 0,
+      salesCents: 0,
+      refundCents: 0,
+      netCents: 0,
+    };
+    const sector = classifySalesSector(product);
+    if (current.modalityName !== sector.label) current.modalityName = 'Várias modalidades';
+    current.modalityId = current.modalityId === product.modalityId ? current.modalityId : null;
+    current.saleCount += product.saleCount;
+    current.quantity += product.quantity;
+    current.salesCents += product.salesCents;
+    current.refundCents += product.refundCents;
+    current.netCents += product.netCents;
+    productRows.set(key, current);
+  }
+  const byProduct = [...productRows.values()].sort((a, b) =>
+    a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }),
+  );
 
   const modalityRows = new Map<string, FinancialChartRow>();
-  for (const product of byProduct) {
-    const key = product.modalityId ?? '__unclassified__';
-    const name = product.modalityId ? report.products.find((item) => item.modalityId === product.modalityId)?.modalityName ?? 'Modalidade sem nome' : 'Não classificado';
+  for (const product of report.products) {
+    const sector = classifySalesSector(product);
+    const key = sector.key;
+    const name = sector.label;
     const current = modalityRows.get(key) ?? {
       key,
       name,
@@ -81,6 +99,7 @@ export function buildFinancialChartAnalytics(report: SalesScoreboard) {
       refundCents: 0,
       netCents: 0,
     };
+    current.modalityId = current.modalityId === product.modalityId ? current.modalityId : null;
     current.saleCount += product.saleCount;
     current.quantity += product.quantity;
     current.salesCents += product.salesCents;

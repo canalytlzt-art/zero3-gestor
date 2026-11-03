@@ -37,6 +37,7 @@ import { getIsoWeekday, getWeekdayNameForIsoDay } from '@/lib/occupancy-calendar
 import { buildActiveContractPeriodRows } from '@/lib/active-contracts';
 import { filterSalesForScoreboard } from '@/lib/scoreboard-sales-history';
 import { ScoreboardSalesHistory } from '@/components/scoreboard-sales-history';
+import { buildSalesSectorGroups } from '@/lib/sales-channel-report';
 
 const queryClient = new QueryClient();
 const OccupancyChartsPage = lazy(() => import('@/components/occupancy-charts-page'));
@@ -366,6 +367,7 @@ function ScoreboardContent() {
     weeks: [],
   };
   const report = invalidRange || invalidMonthSelection || invalidYearSelection ? emptyScoreboard : scoreboardData ?? emptyScoreboard;
+  const salesSectorGroups = useMemo(() => buildSalesSectorGroups(report.products), [report.products]);
   const scoreboardProductCount = new Set(report.products.map((product) => (
     product.productId ?? product.productName.trim().replace(/\s+/g, ' ').toLocaleLowerCase('pt-BR')
   ))).size;
@@ -600,6 +602,54 @@ function ScoreboardContent() {
         </section>
       )}
 
+      <section className="overflow-hidden rounded-[22px] border border-[#e7e1e9] bg-[#fffefc]" aria-labelledby="scoreboard-sectors-heading" data-testid="scoreboard-sector-breakdown">
+        <div className="border-b border-[#ece7ee] px-4 py-4 sm:px-5">
+          <p className="eyebrow text-[9px] font-bold text-[#8a8491]">classificação atual dos produtos</p>
+          <h2 id="scoreboard-sectors-heading" className="mt-1 text-base font-extrabold tracking-[-.035em] text-[#332d40]">Resultado por setor / modalidade</h2>
+          <p className="mt-1 text-[10px] leading-4 text-[#837b8b]">Cada venda aparece em uma única classificação efetiva. Abra um setor para conferir os produtos.</p>
+        </div>
+        {salesSectorGroups.length ? <div className="space-y-2 p-3 sm:p-4">
+          {salesSectorGroups.map((group) => {
+            const share = report.totals.salesCents > 0
+              ? group.totals.salesCents / report.totals.salesCents * 100
+              : 0;
+            return <details key={group.key} className="overflow-hidden rounded-xl border border-[#eeeaf0] bg-white" data-testid={`scoreboard-sector-${group.key}`}>
+              <summary className="flex cursor-pointer list-none flex-col gap-3 px-3.5 py-3 marker:hidden hover:bg-[#faf8fc] sm:flex-row sm:items-center sm:justify-between sm:px-4">
+                <div className="min-w-0">
+                  <span className="text-sm font-extrabold text-[#40374e]">{group.label}</span>
+                  <span className="ml-2 text-[10px] font-semibold text-[#8a8491]">{group.products.length} {group.products.length === 1 ? 'produto' : 'produtos'}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[10px] sm:grid-cols-5 sm:gap-x-5">
+                  <span><span className="block text-[#908997]">Vendas / unidades</span><b className="text-[#4d4557]">{group.totals.saleCount.toLocaleString('pt-BR')} / {group.totals.quantity.toLocaleString('pt-BR')}</b></span>
+                  <span><span className="block text-[#908997]">Faturamento bruto</span><b className="text-[#4d4557]">{formatCents(group.totals.salesCents)}</b></span>
+                  <span><span className="block text-[#908997]">Estornos</span><b className="text-[#4d4557]">{formatCents(group.totals.refundCents)}</b></span>
+                  <span><span className="block text-[#908997]">Faturamento líquido</span><b className="text-[#4d4557]">{formatCents(group.totals.netCents)}</b></span>
+                  <span><span className="block text-[#908997]">Participação no bruto</span><b className="text-[#63469a]">{share.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%</b></span>
+                </div>
+              </summary>
+              <div className="overflow-x-auto border-t border-[#eeeaf0]">
+                <table className="w-full min-w-[720px] border-collapse text-left text-xs">
+                  <thead><tr className="bg-[#f8f6f9] text-[9px] font-bold uppercase tracking-[.08em] text-[#817b89]">
+                    <th className="px-3 py-2.5 sm:px-4">Produto</th><th className="px-3 py-2.5 text-right">Vendas</th><th className="px-3 py-2.5 text-right">Unidades</th><th className="px-3 py-2.5 text-right">Bruto</th><th className="px-3 py-2.5 text-right">Estornos</th><th className="px-3 py-2.5 text-right sm:px-4">Líquido</th>
+                  </tr></thead>
+                  <tbody>{group.products.map((product) => <tr key={`${product.productId ?? 'unlinked'}-${product.modalityId ?? 'unlinked'}-${product.explicitlyUnclassified ? 'explicit-null' : 'inherited'}-${product.productName}`} className="border-t border-[#f0edf1]">
+                    <th scope="row" className="max-w-[300px] truncate px-3 py-2.5 font-semibold text-[#494253] sm:px-4">{product.productName}</th>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-[#5f5967]">{product.saleCount.toLocaleString('pt-BR')}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-[#5f5967]">{product.quantity.toLocaleString('pt-BR')}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-[#5f5967]">{formatCents(product.salesCents)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-[#5f5967]">{formatCents(product.refundCents)}</td>
+                    <td className="px-3 py-2.5 text-right font-bold tabular-nums text-[#463954] sm:px-4">{formatCents(product.netCents)}</td>
+                  </tr>)}</tbody>
+                  <tfoot><tr className="border-t border-[#e5dfea] bg-[#f6f3f8] font-extrabold text-[#3e354b]">
+                    <th className="px-3 py-2.5 sm:px-4">Subtotal</th><td className="px-3 py-2.5 text-right tabular-nums">{group.totals.saleCount.toLocaleString('pt-BR')}</td><td className="px-3 py-2.5 text-right tabular-nums">{group.totals.quantity.toLocaleString('pt-BR')}</td><td className="px-3 py-2.5 text-right tabular-nums">{formatCents(group.totals.salesCents)}</td><td className="px-3 py-2.5 text-right tabular-nums">{formatCents(group.totals.refundCents)}</td><td className="px-3 py-2.5 text-right tabular-nums sm:px-4">{formatCents(group.totals.netCents)}</td>
+                  </tr></tfoot>
+                </table>
+              </div>
+            </details>;
+          })}
+        </div> : <p className="px-4 py-8 text-center text-xs text-[#827b8b]" data-testid="scoreboard-sector-empty">Sem vendas por setor neste período.</p>}
+      </section>
+
       <div className="grid gap-5 xl:grid-cols-[1.15fr_.85fr]">
         <section className="overflow-hidden rounded-[22px] border border-[#e7e1e9] bg-[#fffefc]" aria-labelledby="scoreboard-products-heading" data-testid="table-scoreboard-products">
           <div className="flex items-end justify-between border-b border-[#ece7ee] px-4 py-4 sm:px-5">
@@ -610,7 +660,7 @@ function ScoreboardContent() {
               <table className="w-full min-w-[900px] border-collapse text-left text-xs">
               <thead><tr className="bg-[#f8f6f9] text-[9px] font-bold uppercase tracking-[.1em] text-[#817b89]"><th className="px-4 py-3 sm:px-5">Plano / produto</th><th className="px-4 py-3 text-right">Quantidade</th><th className="px-4 py-3 text-right">Vendas</th><th className="px-4 py-3 text-right">Estornos</th><th className="px-4 py-3 text-right sm:px-5">Após estornos</th><th className="px-4 py-3 text-right">Detalhes</th></tr></thead>
               <tbody>
-                {report.products.map((product) => <tr key={`${product.productId ?? 'unlinked'}-${product.modalityId ?? 'unlinked'}-${product.productName}`} className="border-t border-[#f0edf1]" data-testid={`row-scoreboard-product-${product.productId ?? 'unlinked'}-${product.modalityId ?? 'unlinked'}`}><th scope="row" className="max-w-[260px] truncate px-4 py-3.5 font-semibold text-[#494253] sm:px-5">{product.productName}</th><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{product.quantity.toLocaleString('pt-BR')}</td><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{formatCents(product.salesCents)}</td><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{formatCents(product.refundCents)}</td><td className="px-4 py-3.5 text-right font-bold tabular-nums text-[#463954] sm:px-5">{formatCents(product.netCents)}</td><td className="px-4 py-3.5 text-right"><button type="button" onClick={() => setDetailProduct(product)} className="inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-[#e6dfeb] px-2.5 text-[10px] font-bold text-[#65479c] transition hover:bg-[#f3eff8]" aria-label={`Ver detalhes de ${product.productName}${product.modalityName ? ` · ${product.modalityName}` : ''}`} data-testid={`button-scoreboard-product-details-${product.productId ?? 'unlinked'}-${product.modalityId ?? 'unlinked'}`}><FileText size={12} aria-hidden="true" /> Ver detalhes</button></td></tr>)}
+                 {report.products.map((product) => <tr key={`${product.productId ?? 'unlinked'}-${product.modalityId ?? 'unlinked'}-${product.explicitlyUnclassified ? 'explicit-null' : 'inherited'}-${product.productName}`} className="border-t border-[#f0edf1]" data-testid={`row-scoreboard-product-${product.productId ?? 'unlinked'}-${product.modalityId ?? 'unlinked'}-${product.explicitlyUnclassified ? 'explicit-null' : 'inherited'}`}><th scope="row" className="max-w-[260px] truncate px-4 py-3.5 font-semibold text-[#494253] sm:px-5">{product.productName}</th><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{product.quantity.toLocaleString('pt-BR')}</td><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{formatCents(product.salesCents)}</td><td className="px-4 py-3.5 text-right font-medium tabular-nums text-[#5f5967]">{formatCents(product.refundCents)}</td><td className="px-4 py-3.5 text-right font-bold tabular-nums text-[#463954] sm:px-5">{formatCents(product.netCents)}</td><td className="px-4 py-3.5 text-right"><button type="button" onClick={() => setDetailProduct(product)} className="inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-[#e6dfeb] px-2.5 text-[10px] font-bold text-[#65479c] transition hover:bg-[#f3eff8]" aria-label={`Ver detalhes de ${product.productName}${product.modalityName ? ` · ${product.modalityName}` : product.explicitlyUnclassified ? ' · sem classificação definida na venda' : ''}`} data-testid={`button-scoreboard-product-details-${product.productId ?? 'unlinked'}-${product.modalityId ?? 'unlinked'}-${product.explicitlyUnclassified ? 'explicit-null' : 'inherited'}`}><FileText size={12} aria-hidden="true" /> Ver detalhes</button></td></tr>)}
               </tbody>
               <tfoot><tr className="border-t border-[#e5dfea] bg-[#f6f3f8] font-extrabold text-[#3e354b]" data-testid="row-scoreboard-products-total"><th scope="row" className="px-4 py-3.5 sm:px-5">Total</th><td className="px-4 py-3.5 text-right tabular-nums" data-testid="text-scoreboard-product-quantity-total">{report.totals.quantity.toLocaleString('pt-BR')}</td><td className="px-4 py-3.5 text-right tabular-nums">{formatCents(report.totals.salesCents)}</td><td className="px-4 py-3.5 text-right tabular-nums">{formatCents(report.totals.refundCents)}</td><td className="px-4 py-3.5 text-right tabular-nums sm:px-5" data-testid="text-scoreboard-product-net-total">{formatCents(report.totals.netCents)}</td><td className="px-4 py-3.5 text-right">—</td></tr></tfoot>
             </table>

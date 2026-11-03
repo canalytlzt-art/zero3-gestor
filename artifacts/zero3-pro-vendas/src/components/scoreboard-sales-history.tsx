@@ -14,7 +14,7 @@ import type {
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatCents } from "@/lib/sales-utils";
 import { buildProductMonthlySalesSummary, paginateSalesHistory, sortAndFilterSalesHistory } from "@/lib/scoreboard-sales-history";
-import { buildSalesChannelGroups, classifySalesChannel, sumSalesScoreboardProducts } from "@/lib/sales-channel-report";
+import { buildSalesSectorGroups, classifySaleSector, sumSalesScoreboardProducts } from "@/lib/sales-channel-report";
 import { beginDashboardPdf, PdfPrintHeader, PdfPrintTable } from "./dashboard-pdf-tools";
 
 const PAGE_SIZE = 12;
@@ -141,6 +141,7 @@ function SalesHistoryTable({
           <thead>
             <tr className="bg-[#f8f6f9] text-[9px] font-bold uppercase tracking-[.08em] text-[#817b89]">
               <th className="px-3 py-3">Data</th>
+              <th className="px-3 py-3">Setor / modalidade</th>
               <th className="px-3 py-3">Plano / produto</th>
               <th className="px-3 py-3">Cliente</th>
               <th className="px-3 py-3 text-right">Quantidade</th>
@@ -153,6 +154,7 @@ function SalesHistoryTable({
             {pageData.rows.map((sale) => (
               <tr key={sale.id} className="border-t border-[#f0edf1]" data-testid={`${testId}-row-${sale.id}`}>
                 <td className="whitespace-nowrap px-3 py-3 font-medium text-[#5f5967]">{formatDate(sale.saleDate)}</td>
+                <td className="max-w-[180px] truncate px-3 py-3 text-[#6d6676]">{classifySaleSector(sale).label}</td>
                 <td className="max-w-[220px] truncate px-3 py-3 font-semibold text-[#40374e]" title={sale.productName}>{sale.productName}</td>
                 <td className="max-w-[180px] truncate px-3 py-3 text-[#6d6676]" title={sale.customerName ?? ""}>{sale.customerName || "Não informado"}</td>
                 <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-[#5f5967]">{sale.quantity.toLocaleString("pt-BR")}</td>
@@ -172,7 +174,7 @@ function SalesHistoryTable({
               </tr>
             ))}
             {!pageData.rows.length && (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-xs text-[#827b8b]" data-testid={`${testId}-empty`}>Nenhuma venda encontrada com estes filtros.</td></tr>
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-xs text-[#827b8b]" data-testid={`${testId}-empty`}>Nenhuma venda encontrada com estes filtros.</td></tr>
             )}
           </tbody>
         </table>
@@ -238,6 +240,7 @@ function SaleDetailsDialog({
         </DialogHeader>
         <div className="grid gap-3 rounded-2xl bg-[#f8f6fa] p-4 sm:grid-cols-2" data-testid={`scoreboard-sale-detail-${sale.id}`}>
           <div><p className="text-[9px] font-bold uppercase tracking-[.08em] text-[#81798b]">Produto</p><p className="mt-1 break-words text-sm font-extrabold text-[#40374e]">{sale.productName}</p></div>
+          <div><p className="text-[9px] font-bold uppercase tracking-[.08em] text-[#81798b]">Setor / modalidade atual</p><p className="mt-1 break-words text-sm font-semibold text-[#40374e]">{classifySaleSector(sale).label}</p></div>
           <div><p className="text-[9px] font-bold uppercase tracking-[.08em] text-[#81798b]">Cliente</p><p className="mt-1 break-words text-sm font-semibold text-[#5d4a78]">{sale.customerName || "Não informado"}</p></div>
           <div><p className="text-[9px] font-bold uppercase tracking-[.08em] text-[#81798b]">Data da venda</p><p className="mt-1 text-sm font-semibold text-[#40374e]">{formatDate(sale.saleDate)}</p></div>
           <div><p className="text-[9px] font-bold uppercase tracking-[.08em] text-[#81798b]">Situação</p><div className="mt-1"><SaleStatus sale={sale} refundCents={getActiveRefundTotal(refunds)} /></div></div>
@@ -331,27 +334,10 @@ export function ScoreboardSalesHistory({
     }
     return map;
   }, [refunds]);
-  const productRowsById = useMemo(() => {
-    const map = new Map<string, SalesScoreboardProduct[]>();
-    for (const product of productSummaries) {
-      if (!product.productId) continue;
-      map.set(product.productId, [...(map.get(product.productId) ?? []), product]);
-    }
-    return map;
-  }, [productSummaries]);
-  const unlinkedProductRowsByName = useMemo(() => {
-    const map = new Map<string, SalesScoreboardProduct[]>();
-    for (const product of productSummaries) {
-      if (product.productId !== null) continue;
-      const key = product.productName.trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR");
-      map.set(key, [...(map.get(key) ?? []), product]);
-    }
-    return map;
-  }, [productSummaries]);
   const selectedProductSales = useMemo(
     () => selectedProduct
       ? sales.filter((sale) => selectedProduct.productId
-        ? sale.productId === selectedProduct.productId
+        ? (sale.resolvedProductId ?? sale.productId) === selectedProduct.productId
         : sale.productId === null && sale.productName === selectedProduct.productName)
       : [],
     [sales, selectedProduct],
@@ -369,7 +355,7 @@ export function ScoreboardSalesHistory({
     [selectedProductRows],
   );
   const selectedProductChannelGroups = useMemo(
-    () => buildSalesChannelGroups(selectedProductRows),
+    () => buildSalesSectorGroups(selectedProductRows),
     [selectedProductRows],
   );
   const matchesSelectedPeriod = (date: string) => (
@@ -395,7 +381,7 @@ export function ScoreboardSalesHistory({
     ["Faturamento líquido", formatCents(totals.netCents)],
     ["Produtos com movimentação", distinctProductCount.toLocaleString("pt-BR")],
   ];
-  const salesChannelGroups = useMemo(() => buildSalesChannelGroups(productSummaries), [productSummaries]);
+  const salesSectorGroups = useMemo(() => buildSalesSectorGroups(productSummaries), [productSummaries]);
   const monthRows = months.map((month) => [
     month.month,
     month.saleCount.toLocaleString("pt-BR"),
@@ -404,25 +390,9 @@ export function ScoreboardSalesHistory({
     formatCents(month.refundCents),
     formatCents(month.netCents),
   ]);
-  const saleChannelForHistory = (sale: Sale) => {
-    const productRows = sale.productId
-      ? productRowsById.get(sale.productId) ?? []
-      : unlinkedProductRowsByName.get(sale.productName.trim().replace(/\s+/g, " ").toLocaleLowerCase("pt-BR")) ?? [];
-    const matchingProductRows = sale.modalityOverride
-      ? productRows.filter((row) => row.modalityId === sale.modalityId)
-      : productRows;
-    const knownModalities = new Set(matchingProductRows.map((row) => row.modalityName ?? ""));
-    const product = matchingProductRows.length && knownModalities.size === 1
-      ? matchingProductRows[0]
-      : undefined;
-    return classifySalesChannel({
-      productName: sale.productName,
-      modalityName: product?.modalityName ?? null,
-    });
-  };
   const historyRows = sales.map((sale) => [
     formatDate(sale.saleDate),
-    saleChannelForHistory(sale) === "presencial" ? "Presencial" : saleChannelForHistory(sale) === "online" ? "Online" : "Outros / Sem classificação",
+    classifySaleSector(sale).label,
     sale.productName,
     ...(includeCustomerNames ? [sale.customerName || "Não informado"] : []),
     sale.quantity.toLocaleString("pt-BR"),
@@ -431,7 +401,7 @@ export function ScoreboardSalesHistory({
   ]);
   const productHistoryRows = selectedProductSales.map((sale) => [
     formatDate(sale.saleDate),
-    saleChannelForHistory(sale) === "presencial" ? "Presencial" : saleChannelForHistory(sale) === "online" ? "Online" : "Outros / Sem classificação",
+    classifySaleSector(sale).label,
     sale.productName,
     ...(includeCustomerNames ? [sale.customerName || "Não informado"] : []),
     sale.quantity.toLocaleString("pt-BR"),
@@ -501,19 +471,13 @@ export function ScoreboardSalesHistory({
         <p className="mt-2 text-[9pt] text-[#77717f]">Gerado em {formatGeneratedAt()}</p>
         <h2 className="mt-4 text-[12pt] font-extrabold text-[#40374e]">Resumo do período</h2>
         <PdfPrintTable headers={["Indicador", "Resultado"]} rows={summaryRows} />
-        {salesChannelGroups.map((group) => (
+        {salesSectorGroups.map((group) => (
           <section key={group.key} className="dashboard-pdf-channel-section">
             <h2 className="mt-5 text-[12pt] font-extrabold text-[#40374e]">{group.label}</h2>
-            {group.key === "other" && group.products.some((product) => product.sportModalityName) && (
-              <p className="mb-2 text-[8pt] text-[#77717f]">
-                A modalidade esportiva cadastrada é mostrada separadamente; ela não determina o canal de venda.
-              </p>
-            )}
             <PdfPrintTable
-              headers={["Produto", "Modalidade cadastrada", "Vendas", "Unidades", "Bruto", "Estornos", "Líquido"]}
+              headers={["Produto", "Vendas", "Unidades", "Bruto", "Estornos", "Líquido"]}
               rows={group.products.map((product) => [
                 product.productName,
-                product.sportModalityName || "—",
                 product.saleCount.toLocaleString("pt-BR"),
                 product.quantity.toLocaleString("pt-BR"),
                 formatCents(product.salesCents),
@@ -522,7 +486,6 @@ export function ScoreboardSalesHistory({
               ])}
               summary={[
                 "Subtotal",
-                "",
                 group.totals.saleCount.toLocaleString("pt-BR"),
                 group.totals.quantity.toLocaleString("pt-BR"),
                 formatCents(group.totals.salesCents),
@@ -544,7 +507,7 @@ export function ScoreboardSalesHistory({
         <div className="dashboard-pdf-appendix" data-pdf-appendix="scoreboard">
           <h2 className="mt-5 text-[12pt] font-extrabold text-[#40374e]">Detalhamento das vendas</h2>
           <PdfPrintTable
-            headers={["Data", "Canal", "Produto", ...(includeCustomerNames ? ["Cliente"] : []), "Quantidade", "Valor bruto", "Situação"]}
+            headers={["Data", "Setor / modalidade", "Produto", ...(includeCustomerNames ? ["Cliente"] : []), "Quantidade", "Valor bruto", "Situação"]}
             rows={historyRows}
             summary={includeCustomerNames
               ? ["Vendas ativas", "", "", "", activeSaleCount.toLocaleString("pt-BR"), formatCents(activeSaleCents), ""]
@@ -571,8 +534,8 @@ export function ScoreboardSalesHistory({
               ].map(([label, value]) => <article key={label} className="min-w-0 rounded-xl bg-[#f8f6fa] px-3 py-3"><p className="text-[9px] font-bold uppercase tracking-[.08em] text-[#81798b]">{label}</p><p className="mt-1 break-words text-xs font-extrabold text-[#40374e]">{value}</p></article>)}
             </div>
             <p className="rounded-xl bg-[#f8f5fb] px-3.5 py-2.5 text-[10px] text-[#716879]" data-testid="scoreboard-product-detail-channel">
-              Canal no período: {productChannelLabels.length ? productChannelLabels.join(", ") : "Sem dados classificados"}
-              {selectedProduct.modalityName ? ` · Modalidade cadastrada: ${selectedProduct.modalityName}` : ""}
+              Setor / modalidade no período: {productChannelLabels.length ? productChannelLabels.join(", ") : "Sem dados classificados"}
+              {selectedProduct.modalityName ? ` · Classificação atual do produto: ${selectedProduct.modalityName}` : ""}
             </p>
             <section>
               <h3 className="mb-2 text-xs font-extrabold text-[#40374e]">Histórico do produto no período</h3>
@@ -597,19 +560,18 @@ export function ScoreboardSalesHistory({
           <p className="mt-2 text-[9pt] text-[#77717f]">Gerado em {formatGeneratedAt()}</p>
           <h2 className="mt-4 text-[12pt] font-extrabold text-[#40374e]">Resumo do produto</h2>
           <PdfPrintTable
-            headers={["Canal", "Modalidade cadastrada", "Vendas", "Unidades", "Faturamento bruto", "Estornos", "Faturamento líquido"]}
+            headers={["Setor / modalidade", "Vendas", "Unidades", "Faturamento bruto", "Estornos", "Faturamento líquido"]}
             rows={selectedProductChannelGroups
               .filter((group) => group.products.length > 0)
               .map((group) => [
                 group.label,
-                group.products.map((product) => product.sportModalityName).filter(Boolean).join(", ") || "—",
                 group.totals.saleCount.toLocaleString("pt-BR"),
                 group.totals.quantity.toLocaleString("pt-BR"),
                 formatCents(group.totals.salesCents),
                 formatCents(group.totals.refundCents),
                 formatCents(group.totals.netCents),
               ])}
-            summary={["Total do produto", "", selectedProductTotals.saleCount.toLocaleString("pt-BR"), selectedProductTotals.quantity.toLocaleString("pt-BR"), formatCents(selectedProductTotals.salesCents), formatCents(selectedProductTotals.refundCents), formatCents(selectedProductTotals.netCents)]}
+            summary={["Total do produto", selectedProductTotals.saleCount.toLocaleString("pt-BR"), selectedProductTotals.quantity.toLocaleString("pt-BR"), formatCents(selectedProductTotals.salesCents), formatCents(selectedProductTotals.refundCents), formatCents(selectedProductTotals.netCents)]}
           />
           {includeMonthlyHistory && <>
             <h2 className="mt-5 text-[12pt] font-extrabold text-[#40374e]">Histórico mensal do produto</h2>

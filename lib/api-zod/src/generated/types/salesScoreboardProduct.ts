@@ -15,4 +15,6 @@ export type SalesScoreboardProduct = SalesScoreboardTotals & ({
   modalityId: string | null;
   /** @nullable */
   modalityName: string | null;
+  /** True when these totals come from a deliberate sale-level choice to remain unclassified. */
+  explicitlyUnclassified?: boolean;
 });

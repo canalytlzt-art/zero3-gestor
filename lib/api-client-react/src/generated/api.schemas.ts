@@ -682,6 +682,20 @@ export interface HealthStatus {
   status: string;
 }
 
+/**
+ * Read-only classification status for the current product link.
+ */
+export type SaleProductResolution = typeof SaleProductResolution[keyof typeof SaleProductResolution];
+
+
+export const SaleProductResolution = {
+  'linked-id': 'linked-id',
+  'linked-name': 'linked-name',
+  'ambiguous-name': 'ambiguous-name',
+  unmatched: 'unmatched',
+  'missing-product': 'missing-product',
+} as const;
+
 export type SaleStatus = typeof SaleStatus[keyof typeof SaleStatus];
 
 
@@ -697,6 +711,25 @@ export interface Sale {
   /** @nullable */
   modalityId: string | null;
   modalityOverride: boolean;
+  /**
+     * Current product resolved by stored ID or an exact normalized legacy-name match. This does not change productId in storage.
+     * @nullable
+     */
+  resolvedProductId?: string | null;
+  /**
+     * Current effective modality. An explicit sale-level modality, including explicit null, takes precedence over the current product modality.
+     * @nullable
+     */
+  effectiveModalityId?: string | null;
+  /** @nullable */
+  effectiveModalityName?: string | null;
+  /**
+     * Current linked product name used for read-only classification; productName remains the original sale snapshot.
+     * @nullable
+     */
+  effectiveProductName?: string | null;
+  /** Read-only classification status for the current product link. */
+  productResolution?: SaleProductResolution;
   saleDate: string;
   productName: string;
   quantity: number;
@@ -1297,6 +1330,8 @@ export type SalesScoreboardProduct = SalesScoreboardTotals & ({
   modalityId: string | null;
   /** @nullable */
   modalityName: string | null;
+  /** True when these totals come from a deliberate sale-level choice to remain unclassified. */
+  explicitlyUnclassified?: boolean;
 });
 
 export type SalesScoreboardMonth = SalesScoreboardTotals & {
